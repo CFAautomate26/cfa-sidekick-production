@@ -270,10 +270,10 @@ INTRO_NOTE = (
     "Hey team — I’m CFA Sidekick. I’m here to help with general store guidance, encouragement, "
     "CommercePoint questions, health policy reminders, and policy guidance. To talk to me directly, "
     "use 'cow:' at the beginning of your message. I can also respond automatically to some shift "
-    "coverage-related messages, some sick-message situations, and profanity reminders, and those "
-    "autonomous features are currently in beta. Please do not abuse or overuse me. Use me for serious "
-    "or useful questions only. If you notice issues, feedback, or problems, please let the owner know. "
-    "I am up to date as of April 11th, 2026."
+    "coverage-related messages and some sick-message situations, and those autonomous features are "
+    "currently in beta. Please do not abuse or overuse me. Use me for serious or useful questions only. "
+    "If you notice issues, feedback, or problems, please let the owner know. I am up to date as of "
+    "April 11th, 2026."
 )
 
 COVERAGE_REMINDER = (
@@ -294,7 +294,7 @@ PROFANITY_RESPONSE = (
 
 PROFANITY_WORDS = [
     "fuck", "fucking", "fucked", "shit", "shitty", "bullshit", "bitch", "bitches",
-    "asshole", "ass", "dumbass", "jackass", "bastard", "damn", "hell", "wtf", "wth",
+    "asshole", "ass", "dumbass", "jackass", "bastard","goddamn", "damn", "hell", "wtf", "wth",
     "stfu", "mf", "motherfucker", "motherfucking", "pissed off", "crap", "screw you",
     "puta", "puto", "putos", "putas", "mierda", "chingar", "chingado", "chingada",
     "chingados", "chingadas", "pendejo", "pendeja", "pendejos", "pendejas",
