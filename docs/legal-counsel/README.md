@@ -9,10 +9,16 @@ the same guardrails without re-explaining the arrangement.
 
 ## What this arrangement is
 
-Claude serves in the same functional role that e2r Solutions plays for many
-Canadian franchisees: a first-call advisor for day-to-day employment and HR
-situations — discipline, terminations, accommodations, leaves, wage and hour
-questions, investigations, and the documentation that goes with all of them.
+Claude serves in the same functional role that [e2r Solutions](https://www.e2rsolutions.com/)
+plays for its employer clients. e2r's model has four pillars, and this
+framework mirrors each one:
+
+| e2r pillar | The equivalent here |
+| --- | --- |
+| Unlimited advice line (employment/labour lawyers + certified HR professionals) | Bring any situation to a session, any time — discipline, terminations, accommodations, leaves, wage & hour, investigations. Deliverable shape below. |
+| Member portal: policies, how-to guides, template documents, employment standards charts | This folder: the [standards reference](./ontario-employment-standards.md), [playbooks](./situation-playbooks.md), and [templates](./document-templates.md), growing as situations add to them. |
+| Alerts & updates on legal changes | The **legal update briefing** — see [legal-updates.md](./legal-updates.md). Run it on request or at the start of any significant matter. |
+| Written work: contracts, policies, custom documents | Drafted in-session from the templates; anything rights-waiving or high-exposure routes through the [escalation matrix](./escalation-matrix.md) to licensed counsel. |
 
 For every situation brought forward, the deliverable follows the same shape:
 
@@ -65,6 +71,7 @@ situation, include as much of the following as applies:
 | [situation-playbooks.md](./situation-playbooks.md) | Step-by-step playbooks for recurring situations: discipline, termination, accommodation, harassment investigations, medical leaves, wage complaints. |
 | [document-templates.md](./document-templates.md) | Skeleton templates for warnings, PIPs, termination letters, accommodation correspondence, and investigation reports, with the legally load-bearing language flagged. |
 | [escalation-matrix.md](./escalation-matrix.md) | The bright lines: which situations Claude handles end-to-end, which get a "verify with counsel" flag, and which stop and go to a lawyer before anything is issued. |
+| [legal-updates.md](./legal-updates.md) | The Alerts function: a change log of Ontario employment-law developments affecting the store, plus the protocol for running a fresh legal update briefing. |
 
 ## Maintenance
 
