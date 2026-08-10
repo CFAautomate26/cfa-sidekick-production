@@ -25,11 +25,15 @@ Canada.
 
 ## Leadership application form
 
-- `GET/POST /apply` — public, CFA-branded leadership application form
-  (templates in `templates/`). Submissions are emailed privately to the
-  Operator via FormSubmit (`APPLICATION_EMAIL`, default
-  joshua.huesser@cfafranchisee.ca) and always logged in full to Render logs
-  as a backup. Never post applications to the team GroupMe.
+- The live application form is a Google Form owned by
+  marketing.cfalondon@gmail.com ("Leadership Application — Chick-fil-A
+  Wharncliffe & Wonderland"); responses collect there. The committed QR
+  code and poster in `assets/leadership-qr/` point at it.
 - `scripts/generate_leadership_qr.py` regenerates the branded QR code and
-  print poster in `assets/leadership-qr/` (pass the form URL as an argument
-  if the Render URL changes).
+  print poster; it defaults to the live Google Form responder URL (pass a
+  different URL as an argument if the form ever moves).
+- `GET/POST /apply` — CFA-branded fallback form served by the Flask app.
+  Submissions are emailed privately to the Operator via FormSubmit
+  (`APPLICATION_EMAIL`, default joshua.huesser@cfafranchisee.ca) and logged
+  in full to Render logs as a backup. Never post applications to the team
+  chat.

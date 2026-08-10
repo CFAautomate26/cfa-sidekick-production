@@ -31,7 +31,8 @@ INK = (60, 44, 33)
 SOFT = (150, 130, 112)
 WHITE = (255, 255, 255)
 
-DEFAULT_URL = "https://cfa-sidekick-production.onrender.com/apply"
+DEFAULT_URL = ("https://docs.google.com/forms/d/e/"
+               "1FAIpQLSeKDuQ5MqB15tK24p_l2xr-NHsTDXXgapto5KJvNEsIHEOIfw/viewform")
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(REPO_ROOT, "assets", "leadership-qr")
 LOGO_PATH = os.environ.get(
