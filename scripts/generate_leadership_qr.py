@@ -144,9 +144,7 @@ def build_poster(qr_img: Image.Image) -> Image.Image:
         radius=40, outline=CFA_RED, width=8)
 
     y = qy + qr_card.height + 70
-    y = centred_text(d, y, "SCAN TO APPLY", f_scan, CFA_RED, W) + 30
-    centred_text(d, y, "Applications go directly and confidentially to the Operator.",
-                 f_foot, SOFT, W)
+    centred_text(d, y, "SCAN TO APPLY", f_scan, CFA_RED, W)
 
     foot_h = 170
     d.rectangle([0, H - foot_h, W, H], fill=CFA_RED)
