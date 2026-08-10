@@ -1,7 +1,7 @@
 import os
 import re
 import random
-from flask import Flask, request
+from flask import Flask, request, render_template, redirect
 from openai import OpenAI
 import requests
 from dotenv import load_dotenv
@@ -15,6 +15,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GROUPME_BOT_ID = os.getenv("GROUPME_BOT_ID")
 SCHEDULE_SECRET = os.getenv("SCHEDULE_SECRET", "cfa-sidekick-production-2026")
 ENV = os.getenv("ENV", "production")
+# Where leadership applications are delivered (privately, not to the team chat)
+APPLICATION_EMAIL = os.getenv("APPLICATION_EMAIL", "joshua.huesser@cfafranchisee.ca")
 
 print("Starting CFA Sidekick...")
 print(f"Has OPENAI_API_KEY? {'yes' if OPENAI_API_KEY else 'NO'}")
@@ -451,6 +453,76 @@ def groupme_callback():
         )
 
     return "ok", 200
+
+LEADERSHIP_QUESTIONS = {
+    "q1": "Why do you want to step into leadership at Chick-fil-A Wharncliffe & Wonderland?",
+    "q2": "Tell us about a time you took ownership of a problem during a shift without being asked. What did you do, and what was the result?",
+    "q3": "A teammate you get along with is not meeting the standard. As a leader, how would you handle it while treating them with honour, dignity and respect?",
+    "q4": "What does second-mile service mean to you, and how would you coach a brand-new team member to deliver it during a busy rush?",
+    "q5": "Where do you want to grow in the next 12 months, and what support would you need from the leadership team to get there?",
+}
+
+APPLICATION_REQUIRED_FIELDS = ["name", "email", "tenure", "q1", "q2", "q3", "q4", "q5"]
+
+
+def deliver_application(fields: dict) -> bool:
+    """Email the application to the Operator via FormSubmit. Returns True on success."""
+    payload = {
+        "_subject": f"Leadership Application: {fields['name']}",
+        "_template": "table",
+        "Name": fields["name"],
+        "Email": fields["email"],
+        "Phone": fields.get("phone", ""),
+        "Tenure and current areas": fields["tenure"],
+    }
+    for key, question in LEADERSHIP_QUESTIONS.items():
+        payload[question] = fields[key]
+
+    url = f"https://formsubmit.co/ajax/{APPLICATION_EMAIL}"
+    try:
+        resp = requests.post(url, json=payload, timeout=20,
+                             headers={"Accept": "application/json"})
+        print(f"FormSubmit response status: {resp.status_code}, body: {resp.text[:300]}")
+        return resp.ok
+    except Exception as e:
+        print(f"Error delivering application email: {e}")
+        return False
+
+
+@app.route("/apply", methods=["GET", "POST"])
+def apply():
+    if request.method == "GET":
+        return render_template("apply.html", form={}, error=None)
+
+    fields = {k: (request.form.get(k, "") or "").strip() for k in
+              APPLICATION_REQUIRED_FIELDS + ["phone"]}
+
+    missing = [k for k in APPLICATION_REQUIRED_FIELDS if not fields[k]]
+    if missing:
+        return render_template(
+            "apply.html", form=fields,
+            error="Please fill in every required field before submitting."), 400
+
+    # Always log the full application so it is recoverable from Render logs
+    # even if email delivery fails.
+    print("=== LEADERSHIP APPLICATION RECEIVED ===")
+    print(f"Name: {fields['name']} | Email: {fields['email']} | Phone: {fields.get('phone', '')}")
+    print(f"Tenure/areas: {fields['tenure']}")
+    for key, question in LEADERSHIP_QUESTIONS.items():
+        print(f"{question}\n  -> {fields[key]}")
+    print("=== END APPLICATION ===")
+
+    delivered = deliver_application(fields)
+    if not delivered:
+        print("WARNING: application email delivery failed; data is in the logs above.")
+
+    return redirect("/apply/thanks")
+
+
+@app.route("/apply/thanks", methods=["GET"])
+def apply_thanks():
+    return render_template("thanks.html")
+
 
 @app.route("/scheduled/send", methods=["GET"])
 def scheduled_send():
