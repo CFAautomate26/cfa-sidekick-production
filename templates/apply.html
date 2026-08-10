@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leadership Application — Chick-fil-A Wharncliffe &amp; Wonderland</title>
+<style>
+  :root {
+    --cfa-red: #E31937;
+    --cream: #FFFAF2;
+    --ink: #3C2C21;
+    --soft: #968270;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Apercu", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  .banner {
+    background: var(--cfa-red);
+    color: #fff;
+    text-align: center;
+    padding: 28px 16px 24px;
+  }
+  .banner .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 12px;
+    opacity: 0.9;
+  }
+  .banner h1 {
+    font-size: 26px;
+    margin-top: 6px;
+    letter-spacing: 0.02em;
+  }
+  .banner .store {
+    margin-top: 6px;
+    font-size: 14px;
+    opacity: 0.95;
+  }
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+  .intro {
+    font-size: 15px;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid #eadfd2;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+  form .field { margin-bottom: 20px; }
+  label {
+    display: block;
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 6px;
+  }
+  label .req { color: var(--cfa-red); }
+  .hint { font-size: 13px; color: var(--soft); margin-bottom: 6px; }
+  input[type="text"], input[type="email"], input[type="tel"], select, textarea {
+    width: 100%;
+    font: inherit;
+    font-size: 15px;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid #d9cbbb;
+    border-radius: 10px;
+    padding: 12px;
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  input:focus, select:focus, textarea:focus {
+    outline: 2px solid var(--cfa-red);
+    outline-offset: 1px;
+    border-color: var(--cfa-red);
+  }
+  .section-title {
+    color: var(--cfa-red);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 13px;
+    font-weight: 700;
+    margin: 28px 0 14px;
+    border-bottom: 2px solid var(--cfa-red);
+    padding-bottom: 6px;
+  }
+  button {
+    display: block;
+    width: 100%;
+    background: var(--cfa-red);
+    color: #fff;
+    font: inherit;
+    font-size: 17px;
+    font-weight: 700;
+    border: none;
+    border-radius: 999px;
+    padding: 15px;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  button:hover { background: #c8142f; }
+  .error {
+    background: #fdecee;
+    border: 1px solid var(--cfa-red);
+    color: var(--cfa-red);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 20px;
+    font-size: 14px;
+  }
+  .footer {
+    text-align: center;
+    font-size: 13px;
+    color: var(--soft);
+    margin-top: 28px;
+  }
+</style>
+</head>
+<body>
+  <div class="banner">
+    <div class="eyebrow">Grow with us</div>
+    <h1>Leadership Application</h1>
+    <div class="store">Chick-fil-A Wharncliffe &amp; Wonderland · London, ON</div>
+  </div>
+  <div class="wrap">
+    <div class="intro">
+      Thank you for your interest in joining the leadership team. Answer each
+      question honestly and in your own words. There are no perfect answers,
+      we want to understand how you think, how you serve, and how you want to
+      grow. Your application goes directly and confidentially to the Operator.
+    </div>
+
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+    <form method="post" action="/apply">
+      <div class="section-title">About you</div>
+      <div class="field">
+        <label for="name">Full name <span class="req">*</span></label>
+        <input type="text" id="name" name="name" required value="{{ form.name or '' }}">
+      </div>
+      <div class="field">
+        <label for="email">Email <span class="req">*</span></label>
+        <input type="email" id="email" name="email" required value="{{ form.email or '' }}">
+      </div>
+      <div class="field">
+        <label for="phone">Phone number</label>
+        <input type="tel" id="phone" name="phone" value="{{ form.phone or '' }}">
+      </div>
+      <div class="field">
+        <label for="tenure">How long have you been with our restaurant, and what areas do you currently work? <span class="req">*</span></label>
+        <input type="text" id="tenure" name="tenure" required value="{{ form.tenure or '' }}">
+      </div>
+
+      <div class="section-title">Leadership questions</div>
+      <div class="field">
+        <label for="q1">1. Why do you want to step into leadership at Chick-fil-A Wharncliffe &amp; Wonderland? <span class="req">*</span></label>
+        <textarea id="q1" name="q1" required>{{ form.q1 or '' }}</textarea>
+      </div>
+      <div class="field">
+        <label for="q2">2. Tell us about a time you took ownership of a problem during a shift without being asked. What did you do, and what was the result? <span class="req">*</span></label>
+        <textarea id="q2" name="q2" required>{{ form.q2 or '' }}</textarea>
+      </div>
+      <div class="field">
+        <label for="q3">3. A teammate you get along with is not meeting the standard, for example phone use on the floor or clocking in before they are ready. As a leader, how would you handle it while treating them with honour, dignity and respect? <span class="req">*</span></label>
+        <textarea id="q3" name="q3" required>{{ form.q3 or '' }}</textarea>
+      </div>
+      <div class="field">
+        <label for="q4">4. What does second-mile service mean to you, and how would you coach a brand-new team member to deliver it during a busy rush? <span class="req">*</span></label>
+        <textarea id="q4" name="q4" required>{{ form.q4 or '' }}</textarea>
+      </div>
+      <div class="field">
+        <label for="q5">5. Where do you want to grow in the next 12 months, and what support would you need from the leadership team to get there? <span class="req">*</span></label>
+        <textarea id="q5" name="q5" required>{{ form.q5 or '' }}</textarea>
+      </div>
+
+      <button type="submit">Submit my application</button>
+    </form>
+
+    <div class="footer">
+      Chick-fil-A Wharncliffe &amp; Wonderland · 3459 Wonderland Road South, London, ON
+    </div>
+  </div>
+</body>
+</html>

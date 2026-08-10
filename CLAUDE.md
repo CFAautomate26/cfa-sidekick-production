@@ -20,4 +20,16 @@ Canada.
 - `app.py` — Flask webhook for GroupMe; OpenAI-backed responses. Team members
   invoke the bot with the `cow:` keyword.
 - Deployed on Render; configuration via service environment variables
-  (`OPENAI_API_KEY`, `GROUPME_BOT_ID`, `SCHEDULE_SECRET`, `ENV`).
+  (`OPENAI_API_KEY`, `GROUPME_BOT_ID`, `SCHEDULE_SECRET`, `ENV`,
+  `APPLICATION_EMAIL`).
+
+## Leadership application form
+
+- `GET/POST /apply` — public, CFA-branded leadership application form
+  (templates in `templates/`). Submissions are emailed privately to the
+  Operator via FormSubmit (`APPLICATION_EMAIL`, default
+  joshua.huesser@cfafranchisee.ca) and always logged in full to Render logs
+  as a backup. Never post applications to the team GroupMe.
+- `scripts/generate_leadership_qr.py` regenerates the branded QR code and
+  print poster in `assets/leadership-qr/` (pass the form URL as an argument
+  if the Render URL changes).
