@@ -37,7 +37,8 @@ Canada.
 - `scripts/generate_mobile_order_qr.py` generates the customer-facing
   Chick-fil-A App QR codes and a double-sided 3.5x2" bag-stuffer card in
   `assets/mobile-order-qr/` — Apple QR on one side, Android QR on the
-  other, plus a duplex-ready 10-up letter print sheet. Defaults: App Store
+  other, plus a duplex-ready 10-up letter print sheet and a double-sided
+  4x6" portrait table card for tabletop sign holders. Defaults: App Store
   https://apps.apple.com/app/id6673919737 and Google Play
   https://play.google.com/store/apps/details?id=com.chickfila.international
   (both the Chick-fil-A Canada app). Scanning installs the app, or shows

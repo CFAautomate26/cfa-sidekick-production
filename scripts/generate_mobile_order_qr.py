@@ -19,6 +19,11 @@ card works for every guest. Outputs in assets/mobile-order-qr/:
                                      Android sides; the layout is symmetric
                                      so long-edge duplex printing lines the
                                      two sides up)
+    mobile-order-table-card-side-{p}.png - 4x6" portrait table card side
+                                     (300 DPI) per platform, for tabletop
+                                     sign holders
+    mobile-order-table-card.pdf    - 4x6" card PDF (page 1 Apple side,
+                                     page 2 Android side), print-shop ready
 
 Requires: pip install qrcode pillow
 The Apercu font files are licensed to CFA operators and are not committed to
@@ -173,6 +178,74 @@ def build_card_front(qr_img: Image.Image, platform: str) -> Image.Image:
     return card
 
 
+def build_table_card(qr_img: Image.Image, platform: str) -> Image.Image:
+    """4x6" portrait table card for tabletop sign holders."""
+    W, H = 1200, 1800  # 4x6" at 300 DPI
+    card = Image.new("RGB", (W, H), CREAM)
+    d = ImageDraw.Draw(card)
+
+    # Red banner with the headline.
+    banner_h = 300
+    d.rectangle([0, 0, W, banner_h], fill=CFA_RED)
+    f_eyebrow = load_font("Medium", 44)
+    f_h1 = load_font("Bold", 110)
+    eyebrow = "MOBILE ORDERING"
+    d.text(((W - text_w(d, eyebrow, f_eyebrow)) // 2, 52), eyebrow,
+           font=f_eyebrow, fill=CREAM)
+    h1 = "SKIP THE LINE."
+    d.text(((W - text_w(d, h1, f_h1)) // 2, 116), h1, font=f_h1, fill=WHITE)
+
+    logo = Image.open(LOGO_PATH).convert("RGBA")
+    scale = 460 / logo.width
+    logo_r = logo.resize((460, int(logo.height * scale)), Image.LANCZOS)
+    card.paste(logo_r, ((W - logo_r.width) // 2, 340), logo_r)
+
+    y = 340 + logo_r.height + 34
+    f_sub = load_font("Medium", 48)
+    sub = "Order ahead on the Chick-fil-A® App"
+    d.text(((W - text_w(d, sub, f_sub)) // 2, y), sub, font=f_sub, fill=INK)
+
+    # QR panel: white rounded rect, big QR, caption, platform tag.
+    panel_w, panel_h = 860, 850
+    px, py = (W - panel_w) // 2, y + 76
+    d.rounded_rectangle([px, py, px + panel_w, py + panel_h], radius=36,
+                        fill=WHITE, outline=CFA_RED, width=8)
+    qr_size = 660
+    qr_r = qr_img.resize((qr_size, qr_size), Image.LANCZOS)
+    card.paste(qr_r, (px + (panel_w - qr_size) // 2, py + 30), qr_r)
+    f_scan = load_font("Bold", 66)
+    scan = "SCAN TO ORDER"
+    d.text((px + (panel_w - text_w(d, scan, f_scan)) // 2,
+            py + 30 + qr_size + 14), scan, font=f_scan, fill=CFA_RED)
+    f_tag = load_font("Medium", 38)
+    tag = {"apple": "iOS Version",
+           "android": "Android Version"}[platform]
+    d.text((px + (panel_w - text_w(d, tag, f_tag)) // 2,
+            py + panel_h - 66), tag, font=f_tag, fill=SOFT)
+
+    # Service modes on one line, Drive-Thru highlighted.
+    f_mode = load_font("Regular", 38)
+    f_mode_b = load_font("Bold", 38)
+    segs = [("Mobile Drive-Thru", f_mode_b, CFA_RED),
+            ("  ·  Mobile Dine-In  ·  Mobile Carry-Out", f_mode, INK)]
+    total = sum(text_w(d, t, f) for t, f, _ in segs)
+    x = (W - total) // 2
+    my = py + panel_h + 44
+    for t, f, colour in segs:
+        d.text((x, my), t, font=f, fill=colour)
+        x += text_w(d, t, f)
+
+    foot_h = 110
+    d.rectangle([0, H - foot_h, W, H], fill=CFA_RED)
+    f_foot = load_font("Medium", 36)
+    foot = "Chick-fil-A Wharncliffe & Wonderland · London, ON"
+    box = d.textbbox((0, 0), foot, font=f_foot)
+    d.text(((W - (box[2] - box[0])) // 2,
+            H - foot_h + (foot_h - (box[3] - box[1])) // 2 - box[1]),
+           foot, font=f_foot, fill=WHITE)
+    return card
+
+
 def build_sheet(card: Image.Image) -> Image.Image:
     """Lay a card out 10-up (2 x 5) on a letter page with crop marks."""
     W, H = 2550, 3300  # 8.5x11" at 300 DPI
@@ -206,7 +279,7 @@ def main() -> None:
     android_url = sys.argv[2] if len(sys.argv) > 2 else ANDROID_URL
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    sides = {}
+    sides, table_sides = {}, {}
     for platform, url in (("apple", apple_url), ("android", android_url)):
         qr_img = build_qr(url)
         qr_path = os.path.join(OUT_DIR, f"mobile-order-qr-{platform}.png")
@@ -218,9 +291,15 @@ def main() -> None:
         side.save(side_path, dpi=(300, 300))
         sides[platform] = side
 
+        table = build_table_card(qr_img, platform)
+        table_path = os.path.join(
+            OUT_DIR, f"mobile-order-table-card-side-{platform}.png")
+        table.save(table_path, dpi=(300, 300))
+        table_sides[platform] = table
+
         print(f"{platform} QR target: {url}")
-        print(f"Wrote {qr_path}")
-        print(f"Wrote {side_path}")
+        for p in (qr_path, side_path, table_path):
+            print(f"Wrote {p}")
 
     card_pdf = os.path.join(OUT_DIR, "mobile-order-card.pdf")
     sides["apple"].save(card_pdf, resolution=300, save_all=True,
@@ -231,7 +310,11 @@ def main() -> None:
         sheet_path, resolution=300, save_all=True,
         append_images=[build_sheet(sides["android"])])
 
-    for p in (card_pdf, sheet_path):
+    table_pdf = os.path.join(OUT_DIR, "mobile-order-table-card.pdf")
+    table_sides["apple"].save(table_pdf, resolution=300, save_all=True,
+                              append_images=[table_sides["android"]])
+
+    for p in (card_pdf, sheet_path, table_pdf):
         print(f"Wrote {p}")
 
 
