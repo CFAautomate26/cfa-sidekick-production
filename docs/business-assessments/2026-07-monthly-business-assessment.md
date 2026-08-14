@@ -3,7 +3,7 @@
 **Chick-fil-A Wharncliffe & Wonderland FSU (#30029)** · London, Ontario
 Prepared August 14, 2026 for the executive team · Joshua Huesser Enterprises Ltd.
 
-> **The headline:** July was the most profitable month of the year on a percentage basis — **11.9% net profit, nearly double last July's 6.2%** — driven by record food-cost control. But it was earned on a shrinking base: **sales fell 28% year-over-year — and it is a traffic problem, not a spend problem**: transactions fell 28.4% (20,931) while the average check held nearly flat at $22.33 (−1.2%). Drive-thru (over half the business) is where the visits are disappearing. The guest-experience data suggests the profit win and the traffic loss are connected.
+> **The headline:** July was the most profitable month of the year on a percentage basis — **11.9% net profit, nearly double last July's 6.2%** — driven by record food-cost control. But it was earned on a shrinking base: **sales fell 28% year-over-year — and it is a traffic problem, not a spend problem**: transactions fell 28.4% (20,931) while the average check held nearly flat at $22.33 (−1.2%). Drive-thru (over half the business) is where the visits are disappearing. The operational data now shows the mechanism linking the two: AHA hold-time compliance at 80% vs a 95% goal, ingredient spend under spec on produce/sauce/oil, and a drive-thru averaging 4:23 when its best hours prove 2:15.
 
 ---
 
@@ -69,6 +69,15 @@ Overall labor productivity: **$121.68 sales per timekeeping hour**.
 - **By day:** Sat $133.76 · Wed $126.14 · Fri $125.67 · Mon $120.28 · Thu $116.01 · **Tue $106.78 (worst)**. Tuesday runs 19 more hours than Monday (144.2 vs 125.2) for the same sales; Tuesday afternoon ($103.31/hr) is the least productive block of the week.
 - **Friday is already the most-staffed day (169.9 hrs/day)** — Friday lunch is the biggest single block of the week ($10,558 on 89.6 hrs). Paired with Friday's 70% OSAT, **Friday's problem is deployment and leadership, not a missing headcount budget.**
 
+
+### The operational evidence (new reports)
+
+- **Drive-thru clock (8,928 timed cars):** order 0:54 + line 1:52 + fulfillment 1:16 = **4:23 average total time**, 132 sec/car departure rate. Best hours prove the ceiling: fastest lunch hour ran **2:15 total at 90 sec/car** (Jul 20); fastest dinner 2:36. The average is double the best — a consistency problem, not capacity.
+- **AHA hold-time monitoring: only 80% of timers beat the 20-minute breaded-chicken limit (goal 95%).** One in five batches served past its hold window — the direct mechanism behind spicy taste −14 / temp −17.
+- **Icon quality visit (Jul 27): 100% overall, every touchpoint.** Procedures are executed perfectly when measured and visible; AHA measures every day. The 100%-vs-80% gap is the daily-discipline gap.
+- **Target Food Cost report: actual 34.71% vs engineered target 35.33% — running 0.62% UNDER target**, driven by under-spec usage of quality-carrying items: produce −0.28% ($1.3K under), condiments −0.15%, chicken filets −0.14%, oil −0.13%, spicy −0.12%. Under-target oil in particular can mean stretched fryer oil — a direct taste risk.
+- **Payment detail:** of the $17.2K marketing line, ~$9.7K is payroll/severance routed through advertising; the $5.75K Canada Life Place invoice was voided Jul 29 — true external media/community spend ≈ $2.3K. Delivery commissions: Uber $4,562 + DoorDash $2,096 + Skip $420.
+
 ## 5 · What worked / what didn't
 
 **Worked**
@@ -90,18 +99,18 @@ Overall labor productivity: **$121.68 sales per timekeeping hour**.
 ## 6 · Blindspots
 
 1. **July's margin is flattered by one-time credits.** $13.6K marketing incentive (plus giveaway reclasses) sits in the month. Underlying margin ≈ **8.9%** — budget August on that, not 11.9%.
-2. **The food-cost win and the guest-experience slide may be the same coin.** −5.7 pts of food cost alongside portion satisfaction of 61% and spicy temps −17. If portioning/hold discipline is shaving value perception, we're trading tomorrow's traffic for today's margin. *Ask: which portion/hold changes landed in the last 90 days, and which would we reverse?*
+2. **The food-cost win and the guest-experience slide are the same coin — and now we can see it.** We ran 0.62% under the engineered target by under-spending spec on produce, condiments, filets, and oil while portion satisfaction sits at 61% and AHA hold compliance is 80%. Beating target by under-using quality-carrying ingredients isn't savings; it's borrowing from next quarter's traffic. *Ask: which under-target lines are process wins (waste) vs portion cuts (guest-visible)?*
 3. **We don't actually know what −28% means.** Last July may still carry opening-honeymoon traffic; no competitor/trade-area data in this pack. What we do know: the decline is visits (−28.4% transactions), not spend ($22.33 check, −1.2%) — value perception hasn't hit the check yet — and the intra-month trend improved. YoY alone can't separate normalization from share loss. *Ask: what weekly internal run-rate will we track to call the bottom?*
 4. **Digital demand didn't vanish — it moved.** Mobile carry-out +153% while pickup/mobile-DT/3P fell. If app menus, hours, pricing, or 3P listings drifted, we're invisible where demand went. Commissions ran ~19% of 3P sales — lower margin, but incremental. *Ask: who last audited our Uber/DoorDash/app storefronts, and when?*
-5. **Internal scores say "fine," guests say "meh."** Accuracy 96%, friendliness 81%, yet zero CEM "areas of success" and OSAT in the 70s — weakest exactly where volume is highest (Fridays, drive-thru). *Ask: does every leader know Friday is 70%? Who owns it?*
+5. **We pass the test and fail the Tuesday.** The Jul 27 Icon visit scored 100% on every touchpoint; the same month AHA compliance was 80% and the drive-thru averaged 4:23 against proven 2:15 capability. The team executes perfectly when it's measured and visible — a leadership-cadence problem, not a knowledge problem. *Ask: what makes every day feel measured?*
 6. **The morning daypart doesn't exist.** The sales curve confirms $0 in sales before 10 AM — no breakfast service, while the building carries prep labor from 7 AM and full fixed costs all day. With traffic down 28%, spreading rent, royalty, and equipment cost over a morning daypart deserves a real analysis. *Ask: what would breakfast need to do per day to be worth opening — and has anyone run that math?*
 
 ## 7 · August action plan (Aug 15–31, into September)
 
 ### Customer Experience — Owner: Director of Operations
 - **Friday battle plan:** Friday already gets the most labor of the week (169.9 hrs/day) yet scores 70% — a deployment and leadership problem, not headcount. Strongest leaders on Friday lunch/dinner, positions locked pre-shift, huddle with the 70% on the board, dining-room host at peaks. *Target: Friday OSAT 70% → 78% by the September CEM.*
-- **Drive-thru speed sprint:** time every peak window daily; face-to-face ordering when stacked; dedicated runner at peak. *Target: Fast Service 73% → 77%; DT OSAT 73% → 76%.*
-- **Spicy line rescue:** hold-time audit this week; copy the classic line's fix (+17 temp); logged taste checks twice per daypart. *Target: spicy temperature 69% → 80% by end of September.*
+- **Drive-thru speed sprint:** July averaged 4:23 total (0:54 order + 1:52 line + 1:16 fulfillment); best hours ran 2:15 at 90 sec/car — consistency, not capacity. Post the daily SOS number in the huddle; face-to-face ordering when stacked; dedicated runner at peak. *Target: avg total time ≤ 3:30 by Aug 31; Fast Service 73% → 77%.*
+- **Hold-time discipline — the taste fix:** AHA shows 80% of timers beat the 20-min limit vs 95% goal. Kanban check-in/out every batch; AHA compliance reviewed at every shift change; kitchen lead owns the number daily. *Target: AHA 80% → 90% by Aug 31, 95% by end of Sept; spicy temperature 69% → 80%.*
 - **Cleanliness cadence:** hourly zone walks with named zone owners. *Target: 73% → 77%.*
 
 ### Sales & Brand Growth — Owner: Marketing lead + Operator
@@ -111,9 +120,9 @@ Overall labor productivity: **$121.68 sales per timekeeping hour**.
 - **Run the breakfast math:** we serve nothing before 10:30 while carrying prep labor from 7 AM and full fixed costs all day. Model break-even daily sales for a morning daypart; open-or-pass recommendation at the Sept 11 exec meeting.
 
 ### Financial Return — Owner: Operator + bookkeeper
-- **Hold discipline without squeezing the guest:** food cost ≤35% and gap ≤1.0%, but every portioning/hold change requires a guest-metric check before it sticks. *Target: food cost ≤35% AND portion satisfaction 61% → 66% — both.*
+- **Hold discipline without squeezing the guest:** we're 0.62% UNDER the engineered target with produce, condiments, filets, and oil all under-spec. Audit those four lines (build cards, sauce protocol, oil filtration/change cadence) and let food cost drift up to target where the guest can taste it. *Target: food cost at target ±0.3% (≈35.3%) AND portion satisfaction 61% → 66% — both.*
 - **Budget August on ~9% underlying margin**; keep a one-time-items line on the monthly review.
-- **Clean the marketing ledger:** separate true media/community spend from reclassed payroll/severance in the 3.7% July line; restated view by Aug 29.
+- **Clean the marketing ledger:** of the $17.2K line, ~$9.7K is payroll/severance routed through advertising and the $5.75K sponsorship invoice was voided — true external spend ≈ $2.3K. Restate by Aug 29.
 - **EPR fee review** ($5.0K July): confirm fee-relief credit continues; packaging options by Sept 15.
 
 ### Talent — Owner: People lead
@@ -136,9 +145,11 @@ Overall labor productivity: **$121.68 sales per timekeeping hour**.
 | YoY sales gap | −28.2% | better than −22% | Marketing lead |
 | Friday OSAT | 70% | ≥ 78% | Director of Ops |
 | Fast service | 73% | ≥ 76% | Director of Ops |
+| Drive-thru avg total time | 4:23 | ≤ 3:30 | Director of Ops |
+| AHA hold-time compliance | 80% | ≥ 90% | Kitchen lead |
 | Portion size satisfaction | 61% | ≥ 66% | Kitchen lead |
 | Spicy sandwich temperature | 69% | ≥ 78% | Kitchen lead |
-| Food cost (less refills) | 34.4% | ≤ 35.0% | Kitchen lead |
+| Food cost vs engineered target | −0.62% | ±0.3% of target | Kitchen lead |
 | Food cost gap | 0.51% | ≤ 1.0% | Kitchen lead |
 | Wages (reallocate, then reinvest) | 18.1% | 18.5–19.5% | People lead |
 | Labor productivity | $121.68/hr | ≥ $125/hr | People lead |
@@ -150,10 +161,10 @@ Overall labor productivity: **$121.68 sales per timekeeping hour**.
 
 1. **Pick two.** Which two scoreboard metrics does the whole team commit to moving by August 31?
 2. **The trade.** Friday already gets the most hours and still scores 70% — do we agree the fix is deployment and leadership, funded first by moving hours out of Tuesday? Who redraws the Tuesday and Friday schedules by Monday?
-3. **The coin.** Do we believe the food-cost record and the portion/temp slide are connected? What evidence would settle it?
+3. **The coin.** We're under the engineered food-cost target on produce, condiments, filets, and oil while portion satisfaction sits at 61% — which lines are we willing to spend back to spec, starting this week?
 4. **Digital.** Is the 3P/pickup decline a choice we made or drift we didn't notice? Who owns the answer by Friday?
 5. **The bottom.** What weekly number, at what level, tells us the sales decline has flattened — and what do we do in September if it hasn't?
 
 ---
 
-**Sources & caveats.** July 2026 FSU P&L (PY = July 2025); Sales Analytics report (20,931 transactions −28.4%, $22.33 check average −1.2%); daily channel sales export (total −29.3% on that report vs −28.2% on the P&L due to reporting basis); International CEM Restaurant Report July 2026 (3-month rolling, n=437; small samples flagged); Food Cost Gap Trends dashboard (CM 0.51%/$2,391; P3 0.71%/$9,617); offer redemption report; Sales Curve and Productivity dashboards (hourly sales/staffing, $121.68/hr overall; timekeeping-based, so payroll adjustments and salaried non-clockers may not be reflected). One-time items in July profit: $13,647 marketing incentive credit, $1,316 Cow Appreciation Day cost credit, rent-adjustment corrections. Targets are proposals until owners accept them.
+**Sources & caveats.** July 2026 FSU P&L (PY = July 2025); Sales Analytics report (20,931 transactions −28.4%, $22.33 check average −1.2%); daily channel sales export (total −29.3% on that report vs −28.2% on the P&L due to reporting basis); International CEM Restaurant Report July 2026 (3-month rolling, n=437; small samples flagged); Food Cost Gap Trends dashboard (CM 0.51%/$2,391; P3 0.71%/$9,617); offer redemption report; Sales Curve and Productivity dashboards (hourly sales/staffing, $121.68/hr overall; timekeeping-based, so payroll adjustments and salaried non-clockers may not be reflected); Drive-Thru Speed of Service (8,928 cars); AHA hold-time report; Target Food Cost report; Icon quality visit Jul 27 (100%); REX vendor payment detail. One-time items in July profit: $13,647 marketing incentive credit, $1,316 Cow Appreciation Day cost credit, rent-adjustment corrections. Targets are proposals until owners accept them.
