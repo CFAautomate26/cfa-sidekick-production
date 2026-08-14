@@ -59,7 +59,17 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 - **Menu watch list:** Spicy Chicken Sandwich taste 73 (−14) / temperature 69 (−17) — steepest decline on the menu, reads as hold-time, not recipe. Nuggets softening (−5/−4). Classic Chicken Sandwich strong at 88/91 (temp +17) — find what that line changed and copy it to spicy. Waffle Fries recovering (+4/+5).
 - Breakfast and late night: too few surveys to score (n<30).
 
-## 4 · What worked / what didn't
+## 4 · Labor & productivity (Sales Curve + Productivity dashboards)
+
+Overall labor productivity: **$121.68 sales per timekeeping hour**.
+
+- **No morning daypart exists.** Sales are $0 before 10 AM (doors open ~10:30); prep labor runs from 7 AM (~3.7 hrs/day) and ~6 hrs/night of closing labor after 10 PM. This is why CEM shows breakfast as N/A.
+- **Two equal peaks:** noon ($2,063/hr avg) and 6 PM ($2,012/hr avg). The noon peak runs on 11.9 staffed hours at **$173/hr** — the leanest peak of the day — while 6 PM runs 14.5 hours at $139/hr.
+- **Lunch is the biggest but least productive daypart** ($8,164/day at $117.51/hr vs dinner $144.79/hr) — dragged by the 10–11 AM ramp-in.
+- **By day:** Sat $133.76 · Wed $126.14 · Fri $125.67 · Mon $120.28 · Thu $116.01 · **Tue $106.78 (worst)**. Tuesday runs 19 more hours than Monday (144.2 vs 125.2) for the same sales; Tuesday afternoon ($103.31/hr) is the least productive block of the week.
+- **Friday is already the most-staffed day (169.9 hrs/day)** — Friday lunch is the biggest single block of the week ($10,558 on 89.6 hrs). Paired with Friday's 70% OSAT, **Friday's problem is deployment and leadership, not a missing headcount budget.**
+
+## 5 · What worked / what didn't
 
 **Worked**
 - Profitability transformed: 11.9% CM, 8.0% YTD (PY 4.5%).
@@ -77,19 +87,19 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 - 3P/digital collapse: Uber −41%, DoorDash −35%, Pickup −78% (~$25K/month of digital volume gone).
 - Spicy line quality slid hard in the same month food cost hit its record.
 
-## 5 · Blindspots
+## 6 · Blindspots
 
 1. **July's margin is flattered by one-time credits.** $13.6K marketing incentive (plus giveaway reclasses) sits in the month. Underlying margin ≈ **8.9%** — budget August on that, not 11.9%.
 2. **The food-cost win and the guest-experience slide may be the same coin.** −5.7 pts of food cost alongside portion satisfaction of 61% and spicy temps −17. If portioning/hold discipline is shaving value perception, we're trading tomorrow's traffic for today's margin. *Ask: which portion/hold changes landed in the last 90 days, and which would we reverse?*
 3. **We don't actually know what −28% means.** Last July may still carry opening-honeymoon traffic; no competitor/trade-area data in this pack. What we do know: the decline is visits (−28.4% transactions), not spend ($22.33 check, −1.2%) — value perception hasn't hit the check yet — and the intra-month trend improved. YoY alone can't separate normalization from share loss. *Ask: what weekly internal run-rate will we track to call the bottom?*
 4. **Digital demand didn't vanish — it moved.** Mobile carry-out +153% while pickup/mobile-DT/3P fell. If app menus, hours, pricing, or 3P listings drifted, we're invisible where demand went. Commissions ran ~19% of 3P sales — lower margin, but incremental. *Ask: who last audited our Uber/DoorDash/app storefronts, and when?*
 5. **Internal scores say "fine," guests say "meh."** Accuracy 96%, friendliness 81%, yet zero CEM "areas of success" and OSAT in the 70s — weakest exactly where volume is highest (Fridays, drive-thru). *Ask: does every leader know Friday is 70%? Who owns it?*
-6. **Whole dayparts are invisible.** Breakfast and late night have no scoreable guest signal, and breakfast subcategories are among the few food-cost gap contributors. *Ask: is breakfast a fall growth lever, or are we conceding it?*
+6. **The morning daypart doesn't exist.** The sales curve confirms $0 in sales before 10 AM — no breakfast service, while the building carries prep labor from 7 AM and full fixed costs all day. With traffic down 28%, spreading rent, royalty, and equipment cost over a morning daypart deserves a real analysis. *Ask: what would breakfast need to do per day to be worth opening — and has anyone run that math?*
 
-## 6 · August action plan (Aug 15–31, into September)
+## 7 · August action plan (Aug 15–31, into September)
 
 ### Customer Experience — Owner: Director of Operations
-- **Friday battle plan:** strongest leaders on Friday lunch/dinner, pre-shift huddle with the 70% on the board, dining-room host at peaks. *Target: Friday OSAT 70% → 78% by the September CEM.*
+- **Friday battle plan:** Friday already gets the most labor of the week (169.9 hrs/day) yet scores 70% — a deployment and leadership problem, not headcount. Strongest leaders on Friday lunch/dinner, positions locked pre-shift, huddle with the 70% on the board, dining-room host at peaks. *Target: Friday OSAT 70% → 78% by the September CEM.*
 - **Drive-thru speed sprint:** time every peak window daily; face-to-face ordering when stacked; dedicated runner at peak. *Target: Fast Service 73% → 77%; DT OSAT 73% → 76%.*
 - **Spicy line rescue:** hold-time audit this week; copy the classic line's fix (+17 temp); logged taste checks twice per daypart. *Target: spicy temperature 69% → 80% by end of September.*
 - **Cleanliness cadence:** hourly zone walks with named zone owners. *Target: 73% → 77%.*
@@ -98,7 +108,7 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 - **Digital storefront audit (this week):** Uber/DoorDash menus, photos, pricing, hours, ratings; diagnose Pickup −78%. *Target: digital + 3P back above $50K/month by October (July: $41K).*
 - **Weekly app-offer cadence** (fries/dessert BOGs performed best); measure attach and repeats. *Target: ≥600 redemptions in September (July: 328).*
 - **Defend and grow dine-in:** book September community/Spirit Nights now; leverage the Canada Life Place sponsorship. *Target: dine-in YoY better than −5% by October.*
-- **Decide on breakfast:** invest-or-hold recommendation with a September test plan by Aug 22.
+- **Run the breakfast math:** we serve nothing before 10:30 while carrying prep labor from 7 AM and full fixed costs all day. Model break-even daily sales for a morning daypart; open-or-pass recommendation at the Sept 11 exec meeting.
 
 ### Financial Return — Owner: Operator + bookkeeper
 - **Hold discipline without squeezing the guest:** food cost ≤35% and gap ≤1.0%, but every portioning/hold change requires a guest-metric check before it sticks. *Target: food cost ≤35% AND portion satisfaction 61% → 66% — both.*
@@ -107,7 +117,8 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 - **EPR fee review** ($5.0K July): confirm fee-relief credit continues; packaging options by Sept 15.
 
 ### Talent — Owner: People lead
-- **Reinvest ~0.5–1.0 pt of labor** (≈$2.5–5K/month) into Fri/Sat peaks and drive-thru. *Target: wages 19–20% in August — up from 18.1% on purpose.*
+- **Reallocate before adding: move ~10–15 hrs/week out of Tuesday** (worst day at $106.78/hr; 19 more hours than Monday for equal sales) into the noon peak and Friday peak positions. *Target: Tuesday productivity ≥ $115/hr with no drop in Tuesday OSAT (77%).*
+- **Then reinvest ~0.5 pt of labor** (≈$2.5K/month) into drive-thru peak capacity if speed scores don't move by Labour Day. *Target: wages 18.5–19.5% in August, spent where guests feel it.*
 - **Scale the hospitality strength** (81% friendly): August refresher on second-mile language at the window. *Target: 81% → 84%.*
 - **Leadership pipeline:** review application inflow monthly; September interviews. *Target: 2 shift-lead candidates in development by October.*
 
@@ -116,7 +127,7 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 - **Guest data visible in-store** (Friday OSAT, speed, portion) by Aug 20.
 - **Define the "bottom" signal:** agree tomorrow on the internal weekly run-rate metric that tells us the decline has flattened.
 
-## 7 · August scoreboard
+## 8 · August scoreboard
 
 | Metric | July actual | August target | Owner |
 |---|---:|---:|---|
@@ -129,18 +140,20 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 | Spicy sandwich temperature | 69% | ≥ 78% | Kitchen lead |
 | Food cost (less refills) | 34.4% | ≤ 35.0% | Kitchen lead |
 | Food cost gap | 0.51% | ≤ 1.0% | Kitchen lead |
-| Wages (deliberate reinvest) | 18.1% | 19–20% | People lead |
+| Wages (reallocate, then reinvest) | 18.1% | 18.5–19.5% | People lead |
+| Labor productivity | $121.68/hr | ≥ $125/hr | People lead |
+| Tuesday productivity | $106.78/hr | ≥ $115/hr | People lead |
 | Underlying net margin | ≈ 8.9% | ≥ 9.0% | Operator |
 | App offer redemptions | 328 | ≥ 450 | Marketing lead |
 
-## 8 · Five questions for the room
+## 9 · Five questions for the room
 
 1. **Pick two.** Which two scoreboard metrics does the whole team commit to moving by August 31?
-2. **The trade.** Are we willing to give back ~0.5–1 pt of labor margin to fix Friday and the drive-thru? If not, what's the alternative plan for a 70% Friday?
+2. **The trade.** Friday already gets the most hours and still scores 70% — do we agree the fix is deployment and leadership, funded first by moving hours out of Tuesday? Who redraws the Tuesday and Friday schedules by Monday?
 3. **The coin.** Do we believe the food-cost record and the portion/temp slide are connected? What evidence would settle it?
 4. **Digital.** Is the 3P/pickup decline a choice we made or drift we didn't notice? Who owns the answer by Friday?
 5. **The bottom.** What weekly number, at what level, tells us the sales decline has flattened — and what do we do in September if it hasn't?
 
 ---
 
-**Sources & caveats.** July 2026 FSU P&L (PY = July 2025); Sales Analytics report (20,931 transactions −28.4%, $22.33 check average −1.2%); daily channel sales export (total −29.3% on that report vs −28.2% on the P&L due to reporting basis); International CEM Restaurant Report July 2026 (3-month rolling, n=437; small samples flagged); Food Cost Gap Trends dashboard (CM 0.51%/$2,391; P3 0.71%/$9,617); offer redemption report. One-time items in July profit: $13,647 marketing incentive credit, $1,316 Cow Appreciation Day cost credit, rent-adjustment corrections. Targets are proposals until owners accept them.
+**Sources & caveats.** July 2026 FSU P&L (PY = July 2025); Sales Analytics report (20,931 transactions −28.4%, $22.33 check average −1.2%); daily channel sales export (total −29.3% on that report vs −28.2% on the P&L due to reporting basis); International CEM Restaurant Report July 2026 (3-month rolling, n=437; small samples flagged); Food Cost Gap Trends dashboard (CM 0.51%/$2,391; P3 0.71%/$9,617); offer redemption report; Sales Curve and Productivity dashboards (hourly sales/staffing, $121.68/hr overall; timekeeping-based, so payroll adjustments and salaried non-clockers may not be reflected). One-time items in July profit: $13,647 marketing incentive credit, $1,316 Cow Appreciation Day cost credit, rent-adjustment corrections. Targets are proposals until owners accept them.
