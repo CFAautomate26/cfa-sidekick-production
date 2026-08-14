@@ -32,6 +32,15 @@ Canada.
 - `scripts/generate_leadership_qr.py` regenerates the branded QR code and
   print poster; it defaults to the live Google Form responder URL (pass a
   different URL as an argument if the form ever moves).
+## Mobile ordering QR cards
+
+- `scripts/generate_mobile_order_qr.py` generates the customer-facing
+  Chick-fil-A App QR code and 3.5x2" bag-stuffer cards (front, back, and a
+  10-up letter print sheet) in `assets/mobile-order-qr/`. It defaults to the
+  app's App Store URL (https://apps.apple.com/app/id6673919737); scanning
+  installs the app, or shows "Open" if it's already installed. Pass a
+  different URL as an argument if CFA provides a smart/deep link later.
+
 - `GET/POST /apply` — CFA-branded fallback form served by the Flask app.
   Submissions are emailed privately to the Operator via FormSubmit
   (`APPLICATION_EMAIL`, default joshua.huesser@cfafranchisee.ca) and logged
