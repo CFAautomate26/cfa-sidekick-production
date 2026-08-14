@@ -1,0 +1,143 @@
+# Monthly Business Assessment — July 2026
+
+**Chick-fil-A Wharncliffe & Wonderland FSU (#30029)** · London, Ontario
+Prepared August 14, 2026 for the executive team · Joshua Huesser Enterprises Ltd.
+
+> **The headline:** July was the most profitable month of the year on a percentage basis — **11.9% net profit, nearly double last July's 6.2%** — driven by record food-cost control. But it was earned on a shrinking base: **sales fell 28% year-over-year**, with drive-thru (over half the business) falling fastest. The guest-experience data suggests the two facts are connected.
+
+---
+
+## 1 · July in one look
+
+| Metric | July 2026 | vs July 2025 |
+|---|---:|---:|
+| Total sales | $467,480 | −28.2% (PY $650,800) |
+| Net profit | $55,482 · 11.9% | +5.7 pts (PY 6.2%) |
+| Net profit YTD | $239,088 · 8.0% | PY YTD 4.5% |
+| Food cost (less refills) | 34.4% | −5.7 pts (PY 40.1%) |
+| Food cost gap | 0.51% ($2,391) | best on 23-month dashboard |
+| Paper cost | 2.8% | −1.1 pts (PY 3.9%) |
+| Wages | 18.1% | −4.2 pts (PY 22.3%) |
+| Order accuracy (CEM) | 96% | −2 vs prior month |
+
+## 2 · Where the volume went
+
+27 operating days, average $17,314/day. Fridays (~$21.3K) and Saturdays (~$21.2K) carry the week; Wednesdays are lowest (~$14.3K). The YoY gap narrowed through the month: −32% in the first half, −27% in the back half; July 29 was the best comp at −15%. July 1 (Canada Day, $5,022, −74%) skews the first half.
+
+| Channel | July sales | Share | YoY |
+|---|---:|---:|---:|
+| Drive-thru | $243,854 | 52% | **−33.9%** |
+| Dine-in | $112,731 | 24% | −11.8% |
+| Carry-out | $58,212 | 12% | −26.2% |
+| Uber Eats | $26,711 | 6% | −40.9% |
+| DoorDash | $10,908 | 2% | −35.3% |
+| Mobile carry-out | $8,108 | 2% | **+152.9%** |
+| Mobile drive-thru | $3,704 | 1% | −46.5% |
+| Pickup | $2,954 | 1% | −77.5% |
+
+Dine-in is defending itself far better than every other channel and rates highest with guests (81% OSAT) — the in-store experience is the moat. Drive-thru is both the largest channel and the fastest-declining major one.
+
+## 3 · What guests told us (CEM, 3-month rolling, n=437)
+
+The report named **Taste of Food the biggest area of opportunity**, and **no aspect qualified as an "area of success."**
+
+| Aspect | Score | Δ vs prior month |
+|---|---:|---:|
+| Order accuracy | 96% | −2 |
+| Attentive/friendly team | 81% | +1 |
+| Ease receiving order | 79% | +2 |
+| Taste of food | 79% | +1 |
+| Ease of placing order | 75% | −1 |
+| Fast service | 73% | 0 |
+| Cleanliness | 73% | +3 |
+| **Portion size** | **61%** | +2 |
+
+- **By day:** Thu 86 · Sat 85 · Mon 81 · Tue 77 · Wed 76 · **Fri 70** — our biggest sales day is our worst experience day.
+- **By channel:** Dine-in 81 · Carry-out 76 · **Drive-thru 73** — our biggest channel is our worst-rated.
+- **Menu watch list:** Spicy Chicken Sandwich taste 73 (−14) / temperature 69 (−17) — steepest decline on the menu, reads as hold-time, not recipe. Nuggets softening (−5/−4). Classic Chicken Sandwich strong at 88/91 (temp +17) — find what that line changed and copy it to spicy. Waffle Fries recovering (+4/+5).
+- Breakfast and late night: too few surveys to score (n<30).
+
+## 4 · What worked / what didn't
+
+**Worked**
+- Profitability transformed: 11.9% CM, 8.0% YTD (PY 4.5%).
+- Food cost 34.4% with a 0.51% gap — tightest on record; waste/portioning systems landing.
+- Paper 2.8%; wages scaled down with sales instead of lagging.
+- Dine-in resilience (−11.8%) at the highest OSAT (81%).
+- Offers attach: 328 BOG redemptions, $9.84 avg check, 3.4 items/check.
+- $13.6K marketing incentive credit captured; Cow Appreciation Day costs credited back.
+
+**Didn't**
+- Sales −28% YoY, broad-based across channels.
+- Drive-thru −33.9% at 73% OSAT.
+- Speed 73%, cleanliness 73%, portion 61% — the three lowest aspects are all daily-execution items.
+- Friday OSAT 70%.
+- 3P/digital collapse: Uber −41%, DoorDash −35%, Pickup −78% (~$25K/month of digital volume gone).
+- Spicy line quality slid hard in the same month food cost hit its record.
+
+## 5 · Blindspots
+
+1. **July's margin is flattered by one-time credits.** $13.6K marketing incentive (plus giveaway reclasses) sits in the month. Underlying margin ≈ **8.9%** — budget August on that, not 11.9%.
+2. **The food-cost win and the guest-experience slide may be the same coin.** −5.7 pts of food cost alongside portion satisfaction of 61% and spicy temps −17. If portioning/hold discipline is shaving value perception, we're trading tomorrow's traffic for today's margin. *Ask: which portion/hold changes landed in the last 90 days, and which would we reverse?*
+3. **We don't actually know what −28% means.** Last July may still carry opening-honeymoon traffic; no competitor/trade-area data in this pack; intra-month trend improved. YoY alone can't separate normalization from share loss. *Ask: what weekly internal run-rate will we track to call the bottom?*
+4. **Digital demand didn't vanish — it moved.** Mobile carry-out +153% while pickup/mobile-DT/3P fell. If app menus, hours, pricing, or 3P listings drifted, we're invisible where demand went. Commissions ran ~19% of 3P sales — lower margin, but incremental. *Ask: who last audited our Uber/DoorDash/app storefronts, and when?*
+5. **Internal scores say "fine," guests say "meh."** Accuracy 96%, friendliness 81%, yet zero CEM "areas of success" and OSAT in the 70s — weakest exactly where volume is highest (Fridays, drive-thru). *Ask: does every leader know Friday is 70%? Who owns it?*
+6. **Whole dayparts are invisible.** Breakfast and late night have no scoreable guest signal, and breakfast subcategories are among the few food-cost gap contributors. *Ask: is breakfast a fall growth lever, or are we conceding it?*
+
+## 6 · August action plan (Aug 15–31, into September)
+
+### Customer Experience — Owner: Director of Operations
+- **Friday battle plan:** strongest leaders on Friday lunch/dinner, pre-shift huddle with the 70% on the board, dining-room host at peaks. *Target: Friday OSAT 70% → 78% by the September CEM.*
+- **Drive-thru speed sprint:** time every peak window daily; face-to-face ordering when stacked; dedicated runner at peak. *Target: Fast Service 73% → 77%; DT OSAT 73% → 76%.*
+- **Spicy line rescue:** hold-time audit this week; copy the classic line's fix (+17 temp); logged taste checks twice per daypart. *Target: spicy temperature 69% → 80% by end of September.*
+- **Cleanliness cadence:** hourly zone walks with named zone owners. *Target: 73% → 77%.*
+
+### Sales & Brand Growth — Owner: Marketing lead + Operator
+- **Digital storefront audit (this week):** Uber/DoorDash menus, photos, pricing, hours, ratings; diagnose Pickup −78%. *Target: digital + 3P back above $50K/month by October (July: $41K).*
+- **Weekly app-offer cadence** (fries/dessert BOGs performed best); measure attach and repeats. *Target: ≥600 redemptions in September (July: 328).*
+- **Defend and grow dine-in:** book September community/Spirit Nights now; leverage the Canada Life Place sponsorship. *Target: dine-in YoY better than −5% by October.*
+- **Decide on breakfast:** invest-or-hold recommendation with a September test plan by Aug 22.
+
+### Financial Return — Owner: Operator + bookkeeper
+- **Hold discipline without squeezing the guest:** food cost ≤35% and gap ≤1.0%, but every portioning/hold change requires a guest-metric check before it sticks. *Target: food cost ≤35% AND portion satisfaction 61% → 66% — both.*
+- **Budget August on ~9% underlying margin**; keep a one-time-items line on the monthly review.
+- **Clean the marketing ledger:** separate true media/community spend from reclassed payroll/severance in the 3.7% July line; restated view by Aug 29.
+- **EPR fee review** ($5.0K July): confirm fee-relief credit continues; packaging options by Sept 15.
+
+### Talent — Owner: People lead
+- **Reinvest ~0.5–1.0 pt of labor** (≈$2.5–5K/month) into Fri/Sat peaks and drive-thru. *Target: wages 19–20% in August — up from 18.1% on purpose.*
+- **Scale the hospitality strength** (81% friendly): August refresher on second-mile language at the window. *Target: 81% → 84%.*
+- **Leadership pipeline:** review application inflow monthly; September interviews. *Target: 2 shift-lead candidates in development by October.*
+
+### Leadership — Owner: Operator
+- **Weekly scoreboard** reviewed Mondays, 30 minutes, one owner per metric. *First review: Mon Aug 18.*
+- **Guest data visible in-store** (Friday OSAT, speed, portion) by Aug 20.
+- **Define the "bottom" signal:** agree tomorrow on the internal weekly run-rate metric that tells us the decline has flattened.
+
+## 7 · August scoreboard
+
+| Metric | July actual | August target | Owner |
+|---|---:|---:|---|
+| Average daily sales | $17,314 | ≥ $18,000 | Operator |
+| YoY sales gap | −28.2% | better than −22% | Marketing lead |
+| Friday OSAT | 70% | ≥ 78% | Director of Ops |
+| Fast service | 73% | ≥ 76% | Director of Ops |
+| Portion size satisfaction | 61% | ≥ 66% | Kitchen lead |
+| Spicy sandwich temperature | 69% | ≥ 78% | Kitchen lead |
+| Food cost (less refills) | 34.4% | ≤ 35.0% | Kitchen lead |
+| Food cost gap | 0.51% | ≤ 1.0% | Kitchen lead |
+| Wages (deliberate reinvest) | 18.1% | 19–20% | People lead |
+| Underlying net margin | ≈ 8.9% | ≥ 9.0% | Operator |
+| App offer redemptions | 328 | ≥ 450 | Marketing lead |
+
+## 8 · Five questions for the room
+
+1. **Pick two.** Which two scoreboard metrics does the whole team commit to moving by August 31?
+2. **The trade.** Are we willing to give back ~0.5–1 pt of labor margin to fix Friday and the drive-thru? If not, what's the alternative plan for a 70% Friday?
+3. **The coin.** Do we believe the food-cost record and the portion/temp slide are connected? What evidence would settle it?
+4. **Digital.** Is the 3P/pickup decline a choice we made or drift we didn't notice? Who owns the answer by Friday?
+5. **The bottom.** What weekly number, at what level, tells us the sales decline has flattened — and what do we do in September if it hasn't?
+
+---
+
+**Sources & caveats.** July 2026 FSU P&L (PY = July 2025); daily channel sales export (total −29.3% on that report vs −28.2% on the P&L due to reporting basis); International CEM Restaurant Report July 2026 (3-month rolling, n=437; small samples flagged); Food Cost Gap Trends dashboard (CM 0.51%/$2,391; P3 0.71%/$9,617); offer redemption report. One-time items in July profit: $13,647 marketing incentive credit, $1,316 Cow Appreciation Day cost credit, rent-adjustment corrections. Targets are proposals until owners accept them.
