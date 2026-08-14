@@ -147,8 +147,8 @@ def build_card_front(qr_img: Image.Image) -> Image.Image:
 
     f_mode = load_font("Regular", 28)
     f_mode_b = load_font("Bold", 28)
-    modes = [("Mobile Drive-Thru", True), ("Dine-In", False),
-             ("Carry-Out", False)]
+    modes = [("Mobile Drive-Thru", True), ("Mobile Dine-In", False),
+             ("Mobile Carry-Out", False)]
     for label, hot in modes:
         d.ellipse([lx, y + 9, lx + 12, y + 21], fill=CFA_RED)
         d.text((lx + 24, y), label, font=f_mode_b if hot else f_mode,
