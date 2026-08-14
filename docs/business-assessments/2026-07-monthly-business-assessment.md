@@ -3,7 +3,7 @@
 **Chick-fil-A Wharncliffe & Wonderland FSU (#30029)** · London, Ontario
 Prepared August 14, 2026 for the executive team · Joshua Huesser Enterprises Ltd.
 
-> **The headline:** July was the most profitable month of the year on a percentage basis — **11.9% net profit, nearly double last July's 6.2%** — driven by record food-cost control. But it was earned on a shrinking base: **sales fell 28% year-over-year**, with drive-thru (over half the business) falling fastest. The guest-experience data suggests the two facts are connected.
+> **The headline:** July was the most profitable month of the year on a percentage basis — **11.9% net profit, nearly double last July's 6.2%** — driven by record food-cost control. But it was earned on a shrinking base: **sales fell 28% year-over-year — and it is a traffic problem, not a spend problem**: transactions fell 28.4% (20,931) while the average check held nearly flat at $22.33 (−1.2%). Drive-thru (over half the business) is where the visits are disappearing. The guest-experience data suggests the profit win and the traffic loss are connected.
 
 ---
 
@@ -12,6 +12,8 @@ Prepared August 14, 2026 for the executive team · Joshua Huesser Enterprises Lt
 | Metric | July 2026 | vs July 2025 |
 |---|---:|---:|
 | Total sales | $467,480 | −28.2% (PY $650,800) |
+| Transactions | 20,931 (775/day) | −28.4% |
+| Check average | $22.33 | −1.2% |
 | Net profit | $55,482 · 11.9% | +5.7 pts (PY 6.2%) |
 | Net profit YTD | $239,088 · 8.0% | PY YTD 4.5% |
 | Food cost (less refills) | 34.4% | −5.7 pts (PY 40.1%) |
@@ -79,7 +81,7 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 
 1. **July's margin is flattered by one-time credits.** $13.6K marketing incentive (plus giveaway reclasses) sits in the month. Underlying margin ≈ **8.9%** — budget August on that, not 11.9%.
 2. **The food-cost win and the guest-experience slide may be the same coin.** −5.7 pts of food cost alongside portion satisfaction of 61% and spicy temps −17. If portioning/hold discipline is shaving value perception, we're trading tomorrow's traffic for today's margin. *Ask: which portion/hold changes landed in the last 90 days, and which would we reverse?*
-3. **We don't actually know what −28% means.** Last July may still carry opening-honeymoon traffic; no competitor/trade-area data in this pack; intra-month trend improved. YoY alone can't separate normalization from share loss. *Ask: what weekly internal run-rate will we track to call the bottom?*
+3. **We don't actually know what −28% means.** Last July may still carry opening-honeymoon traffic; no competitor/trade-area data in this pack. What we do know: the decline is visits (−28.4% transactions), not spend ($22.33 check, −1.2%) — value perception hasn't hit the check yet — and the intra-month trend improved. YoY alone can't separate normalization from share loss. *Ask: what weekly internal run-rate will we track to call the bottom?*
 4. **Digital demand didn't vanish — it moved.** Mobile carry-out +153% while pickup/mobile-DT/3P fell. If app menus, hours, pricing, or 3P listings drifted, we're invisible where demand went. Commissions ran ~19% of 3P sales — lower margin, but incremental. *Ask: who last audited our Uber/DoorDash/app storefronts, and when?*
 5. **Internal scores say "fine," guests say "meh."** Accuracy 96%, friendliness 81%, yet zero CEM "areas of success" and OSAT in the 70s — weakest exactly where volume is highest (Fridays, drive-thru). *Ask: does every leader know Friday is 70%? Who owns it?*
 6. **Whole dayparts are invisible.** Breakfast and late night have no scoreable guest signal, and breakfast subcategories are among the few food-cost gap contributors. *Ask: is breakfast a fall growth lever, or are we conceding it?*
@@ -119,6 +121,7 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 | Metric | July actual | August target | Owner |
 |---|---:|---:|---|
 | Average daily sales | $17,314 | ≥ $18,000 | Operator |
+| Average daily transactions | 775 | ≥ 800 | Operator |
 | YoY sales gap | −28.2% | better than −22% | Marketing lead |
 | Friday OSAT | 70% | ≥ 78% | Director of Ops |
 | Fast service | 73% | ≥ 76% | Director of Ops |
@@ -140,4 +143,4 @@ The report named **Taste of Food the biggest area of opportunity**, and **no asp
 
 ---
 
-**Sources & caveats.** July 2026 FSU P&L (PY = July 2025); daily channel sales export (total −29.3% on that report vs −28.2% on the P&L due to reporting basis); International CEM Restaurant Report July 2026 (3-month rolling, n=437; small samples flagged); Food Cost Gap Trends dashboard (CM 0.51%/$2,391; P3 0.71%/$9,617); offer redemption report. One-time items in July profit: $13,647 marketing incentive credit, $1,316 Cow Appreciation Day cost credit, rent-adjustment corrections. Targets are proposals until owners accept them.
+**Sources & caveats.** July 2026 FSU P&L (PY = July 2025); Sales Analytics report (20,931 transactions −28.4%, $22.33 check average −1.2%); daily channel sales export (total −29.3% on that report vs −28.2% on the P&L due to reporting basis); International CEM Restaurant Report July 2026 (3-month rolling, n=437; small samples flagged); Food Cost Gap Trends dashboard (CM 0.51%/$2,391; P3 0.71%/$9,617); offer redemption report. One-time items in July profit: $13,647 marketing incentive credit, $1,316 Cow Appreciation Day cost credit, rent-adjustment corrections. Targets are proposals until owners accept them.
