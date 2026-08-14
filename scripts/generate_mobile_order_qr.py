@@ -7,18 +7,18 @@ Usage:
 URLs default to the Chick-fil-A Canada app's App Store and Google Play
 pages. Scanning takes guests to the store to download the app; if the app
 is already installed the store page shows an "Open" button instead, so
-each QR serves both audiences on its platform. Outputs are written to
-assets/mobile-order-qr/ for each platform (apple, android):
-    mobile-order-qr-{p}.png         - branded QR code (logo centre, CFA red)
-    mobile-order-card-front-{p}.png - 3.5x2" bag-stuffer card front (300 DPI)
-    mobile-order-card-back.png      - shared card back, Mobile Drive-Thru
-    mobile-order-card-{p}.pdf       - card-size PDF (page 1 front, page 2
-                                      back) ready for a print shop
-    mobile-order-card-sheet-{p}.pdf - letter-size 10-up print sheet with
-                                      crop marks (page 1 fronts, page 2
-                                      backs; the layout is symmetric so
-                                      long-edge duplex printing lines the
-                                      backs up with fronts)
+each QR serves both audiences on its platform. The card is double-sided:
+the Apple QR on one side and the Android QR on the other, so a single
+card works for every guest. Outputs in assets/mobile-order-qr/:
+    mobile-order-qr-{p}.png        - branded QR code per platform
+    mobile-order-card-side-{p}.png - 3.5x2" card side (300 DPI) per platform
+    mobile-order-card.pdf          - card-size PDF (page 1 Apple side,
+                                     page 2 Android side), print-shop ready
+    mobile-order-card-sheet.pdf    - letter-size 10-up print sheet with
+                                     crop marks (page 1 Apple sides, page 2
+                                     Android sides; the layout is symmetric
+                                     so long-edge duplex printing lines the
+                                     two sides up)
 
 Requires: pip install qrcode pillow
 The Apercu font files are licensed to CFA operators and are not committed to
@@ -131,9 +131,9 @@ def build_card_front(qr_img: Image.Image, platform: str) -> Image.Image:
     scan = "SCAN TO ORDER"
     d.text((px + (panel_w - text_w(d, scan, f_scan)) // 2,
             py + 16 + qr_size + 6), scan, font=f_scan, fill=CFA_RED)
-    f_tag = load_font("Regular", 25)
-    tag = {"apple": "iPhone · App Store",
-           "android": "Android · Google Play"}[platform]
+    f_tag = load_font("Regular", 24)
+    tag = {"apple": "iPhone · On Android? Flip the card",
+           "android": "Android · On iPhone? Flip the card"}[platform]
     d.text((px + (panel_w - text_w(d, tag, f_tag)) // 2, py + panel_h - 46),
            tag, font=f_tag, fill=SOFT)
 
@@ -173,44 +173,6 @@ def build_card_front(qr_img: Image.Image, platform: str) -> Image.Image:
     return card
 
 
-def build_card_back() -> Image.Image:
-    card = Image.new("RGB", (CARD_W, CARD_H), CFA_RED)
-    d = ImageDraw.Draw(card)
-
-    f_eyebrow = load_font("Medium", 34)
-    f_h1 = load_font("Bold", 84)
-    f_step_n = load_font("Bold", 40)
-    f_step = load_font("Medium", 36)
-    f_foot = load_font("Regular", 26)
-
-    y = 52
-    eyebrow = "THE FASTEST WAY TO YOUR FOOD"
-    d.text(((CARD_W - text_w(d, eyebrow, f_eyebrow)) // 2, y), eyebrow,
-           font=f_eyebrow, fill=CREAM)
-    y += 56
-    h1 = "MOBILE DRIVE-THRU"
-    d.text(((CARD_W - text_w(d, h1, f_h1)) // 2, y), h1, font=f_h1,
-           fill=WHITE)
-    y += 130
-
-    steps = ["Download the Chick-fil-A® App",
-             "Order + pay before you arrive",
-             "Pull in — we'll have it ready"]
-    for i, step in enumerate(steps, 1):
-        n = f"{i}"
-        cx = 96
-        d.ellipse([cx, y - 4, cx + 56, y + 52], fill=WHITE)
-        d.text((cx + 28 - text_w(d, n, f_step_n) // 2, y - 2), n,
-               font=f_step_n, fill=CFA_RED)
-        d.text((cx + 80, y + 2), step, font=f_step, fill=WHITE)
-        y += 84
-
-    foot = "Chick-fil-A Wharncliffe & Wonderland · London, ON"
-    d.text(((CARD_W - text_w(d, foot, f_foot)) // 2, CARD_H - 58), foot,
-           font=f_foot, fill=CREAM)
-    return card
-
-
 def build_sheet(card: Image.Image) -> Image.Image:
     """Lay a card out 10-up (2 x 5) on a letter page with crop marks."""
     W, H = 2550, 3300  # 8.5x11" at 300 DPI
@@ -244,34 +206,33 @@ def main() -> None:
     android_url = sys.argv[2] if len(sys.argv) > 2 else ANDROID_URL
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    back = build_card_back()
-    back_path = os.path.join(OUT_DIR, "mobile-order-card-back.png")
-    back.save(back_path, dpi=(300, 300))
-    print(f"Wrote {back_path}")
-
+    sides = {}
     for platform, url in (("apple", apple_url), ("android", android_url)):
         qr_img = build_qr(url)
         qr_path = os.path.join(OUT_DIR, f"mobile-order-qr-{platform}.png")
         qr_img.save(qr_path)
 
-        front = build_card_front(qr_img, platform)
-        front_path = os.path.join(
-            OUT_DIR, f"mobile-order-card-front-{platform}.png")
-        front.save(front_path, dpi=(300, 300))
-
-        card_pdf = os.path.join(OUT_DIR, f"mobile-order-card-{platform}.pdf")
-        front.save(card_pdf, resolution=300, save_all=True,
-                   append_images=[back])
-
-        sheet_path = os.path.join(
-            OUT_DIR, f"mobile-order-card-sheet-{platform}.pdf")
-        build_sheet(front).save(
-            sheet_path, resolution=300, save_all=True,
-            append_images=[build_sheet(back)])
+        side = build_card_front(qr_img, platform)
+        side_path = os.path.join(
+            OUT_DIR, f"mobile-order-card-side-{platform}.png")
+        side.save(side_path, dpi=(300, 300))
+        sides[platform] = side
 
         print(f"{platform} QR target: {url}")
-        for p in (qr_path, front_path, card_pdf, sheet_path):
-            print(f"Wrote {p}")
+        print(f"Wrote {qr_path}")
+        print(f"Wrote {side_path}")
+
+    card_pdf = os.path.join(OUT_DIR, "mobile-order-card.pdf")
+    sides["apple"].save(card_pdf, resolution=300, save_all=True,
+                        append_images=[sides["android"]])
+
+    sheet_path = os.path.join(OUT_DIR, "mobile-order-card-sheet.pdf")
+    build_sheet(sides["apple"]).save(
+        sheet_path, resolution=300, save_all=True,
+        append_images=[build_sheet(sides["android"])])
+
+    for p in (card_pdf, sheet_path):
+        print(f"Wrote {p}")
 
 
 if __name__ == "__main__":
