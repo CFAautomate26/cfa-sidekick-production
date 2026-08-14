@@ -132,7 +132,7 @@ def build_card_front(qr_img: Image.Image, platform: str) -> Image.Image:
     d.text((px + (panel_w - text_w(d, scan, f_scan)) // 2,
             py + 16 + qr_size + 6), scan, font=f_scan, fill=CFA_RED)
     f_tag = load_font("Medium", 26)
-    tag = {"apple": "iPhone Version",
+    tag = {"apple": "iOS Version",
            "android": "Android Version"}[platform]
     d.text((px + (panel_w - text_w(d, tag, f_tag)) // 2, py + panel_h - 46),
            tag, font=f_tag, fill=SOFT)
