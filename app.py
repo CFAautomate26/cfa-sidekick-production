@@ -524,7 +524,8 @@ def apply_thanks():
     return render_template("thanks.html")
 
 
-LIFE_PLANNING_REQUIRED_FIELDS = ["name", "email", "role", "why", "availability", "commit"]
+LIFE_PLANNING_REQUIRED_FIELDS = ["name", "email", "role", "start_when",
+                                 "looking_forward", "commit"]
 
 
 def deliver_life_planning_signup(fields: dict) -> bool:
@@ -536,9 +537,9 @@ def deliver_life_planning_signup(fields: dict) -> bool:
         "Email": fields["email"],
         "Phone": fields.get("phone", ""),
         "Role": fields["role"],
-        "Why they want to do life planning": fields["why"],
-        "Weekly meeting availability": fields["availability"],
-        "Committed to the 7-week expectations": "Yes",
+        "When they would like to start": fields["start_when"],
+        "Looking forward to most": fields["looking_forward"],
+        "Committed to the 7 week expectations": "Yes",
     }
 
     url = f"https://formsubmit.co/ajax/{APPLICATION_EMAIL}"
@@ -572,9 +573,9 @@ def life_planning():
     print("=== LIFE PLANNING WORKSHOP SIGN-UP RECEIVED ===")
     print(f"Name: {fields['name']} | Email: {fields['email']} | "
           f"Phone: {fields.get('phone', '')} | Role: {fields['role']}")
-    print(f"Why: {fields['why']}")
-    print(f"Availability: {fields['availability']}")
-    print("Committed to 7-week expectations: Yes")
+    print(f"When they would like to start: {fields['start_when']}")
+    print(f"Looking forward to most: {fields['looking_forward']}")
+    print("Committed to 7 week expectations: Yes")
     print("=== END SIGN-UP ===")
 
     delivered = deliver_life_planning_signup(fields)

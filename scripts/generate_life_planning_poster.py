@@ -115,10 +115,11 @@ def wrap_text(draw, text, font, max_width):
 
 
 COMMITMENT = [
-    "7 weeks — one life planning section covered each week",
-    "Direct one-on-one mentorship from the Operator",
-    "Weekly meetings for all 7 weeks — no lates, rescheduling, or misses (excluding emergencies)",
+    "7 weeks with one life planning section covered each week",
+    "Direct one on one mentorship from the Operator",
+    "Weekly meetings for all 7 weeks. No lates, rescheduling, or misses (excluding emergencies)",
     "Complete your worksheet before each meeting to maximize your growth",
+    "7 spots per group. Once this group completes the workshop, a new 7 week group will launch",
 ]
 
 
@@ -143,19 +144,20 @@ def build_poster(qr_img: Image.Image) -> Image.Image:
     centred_text(d, y, "LIFE PLANNING WORKSHOP", f_title, WHITE, W)
 
     logo = Image.open(LOGO_PATH).convert("RGBA")
-    scale = 460 / logo.width
-    logo_r = logo.resize((460, int(logo.height * scale)), Image.LANCZOS)
+    scale = 420 / logo.width
+    logo_r = logo.resize((420, int(logo.height * scale)), Image.LANCZOS)
     poster.paste(logo_r, ((W - logo_r.width) // 2, banner_h + 55), logo_r)
 
     y = banner_h + 55 + logo_r.height + 30
     y = centred_text(d, y, "WHARNCLIFFE & WONDERLAND", f_store, CFA_RED, W) + 55
 
     for line in (
-        "A 7-week guided journey for anyone serious about their life's",
-        "journey and maximizing growth in every area. It will stretch",
-        "your mindset — and it is worth every week.",
+        "A 7 week guided journey through a vision and plan for the",
+        "whole of your life: Career, Family, Friends, Community Impact,",
+        "Faith, and Legacy. For anyone serious about their life's",
+        "journey and maximizing growth in every area.",
     ):
-        y = centred_text(d, y, line, f_body, INK, W) + 24
+        y = centred_text(d, y, line, f_body, INK, W) + 18
 
     # Commitment card: white rounded panel with the workshop expectations.
     card_x, card_w = 220, W - 440
@@ -163,41 +165,41 @@ def build_poster(qr_img: Image.Image) -> Image.Image:
     text_w = card_w - 180
     y += 45
     card_top = y
-    cy = card_top + 55
+    cy = card_top + 45
     box = d.textbbox((0, 0), "THE COMMITMENT", font=f_card_title)
     title_h = box[3] - box[1]
-    line_h = 78
-    card_h = 55 + title_h + 40
+    line_h = 72
+    card_h = 45 + title_h + 36
     for item in COMMITMENT:
-        card_h += len(wrap_text(d, item, f_bullet, text_w - 70)) * line_h + 26
-    card_h += 30
+        card_h += len(wrap_text(d, item, f_bullet, text_w - 70)) * line_h + 20
+    card_h += 22
     d.rounded_rectangle([card_x, card_top, card_x + card_w, card_top + card_h],
                         radius=40, fill=WHITE, outline=CFA_RED, width=8)
     d.text((text_x, cy), "THE COMMITMENT", font=f_card_title, fill=CFA_RED)
-    cy += title_h + 40
+    cy += title_h + 36
     for item in COMMITMENT:
         d.ellipse([text_x + 6, cy + 18, text_x + 34, cy + 46], fill=CFA_RED)
         for line in wrap_text(d, item, f_bullet, text_w - 70):
             d.text((text_x + 70, cy), line, font=f_bullet, fill=INK)
             cy += line_h
-        cy += 26
+        cy += 20
     y = card_top + card_h
 
-    y = centred_text(d, y + 55, "Only 7 spots — 5 Team Members · 2 Leaders",
+    y = centred_text(d, y + 50, "Only 7 spots per group: 5 Team Members and 2 Leaders",
                      f_spots, CFA_RED, W)
 
-    qr_size = 800
+    qr_size = 680
     qr_r = qr_img.resize((qr_size, qr_size), Image.LANCZOS)
     qr_card = Image.new("RGB", (qr_size + 70, qr_size + 70), WHITE)
     qr_card.paste(qr_r, (35, 35), qr_r)
-    qy = y + 50
+    qy = y + 40
     poster.paste(qr_card, ((W - qr_card.width) // 2, qy))
     d.rounded_rectangle(
         [(W - qr_card.width) // 2, qy,
          (W + qr_card.width) // 2, qy + qr_card.height],
         radius=40, outline=CFA_RED, width=8)
 
-    y = qy + qr_card.height + 45
+    y = qy + qr_card.height + 40
     centred_text(d, y, "SCAN TO SIGN UP", f_scan, CFA_RED, W)
 
     foot_h = 150

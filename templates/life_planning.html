@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Life Planning Workshop — Chick-fil-A Wharncliffe &amp; Wonderland</title>
+<title>Life Planning Workshop | Chick-fil-A Wharncliffe &amp; Wonderland</title>
 <style>
   :root {
     --cfa-red: #E31937;
@@ -154,17 +154,19 @@
   </div>
   <div class="wrap">
     <div class="intro">
-      A 7-week life planning workshop with direct mentorship from the Operator,
+      A 7 week life planning workshop with direct mentorship from the Operator,
       designed for anyone who is serious about their life's journey and
-      maximizing growth in every area. Before you sign up, make sure you can
-      commit to the following:
+      maximizing growth in every area. Together we build a vision and plan for
+      the whole of your life: Career, Family, Friends, Community Impact, Faith,
+      and Legacy. Before you sign up, make sure you can commit to the following:
       <ul>
-        <li><strong>7 weeks</strong> — we cover one life planning section per week.</li>
-        <li><strong>Weekly meetings</strong> for the full 7 weeks — no lates, rescheduling, or misses (excluding emergencies).</li>
+        <li><strong>7 weeks:</strong> we cover one life planning section per week.</li>
+        <li><strong>Weekly meetings</strong> for the full 7 weeks. No lates, rescheduling, or misses (excluding emergencies).</li>
         <li><strong>Worksheet completed before each meeting</strong> to maximize growth during your time.</li>
       </ul>
     </div>
-    <div class="spots">Spots are limited: 5 Team Members and 2 Leaders</div>
+    <div class="spots">7 spots per group: 5 Team Members and 2 Leaders.<br>
+      Once this group completes the workshop, a new 7 week group will launch.</div>
 
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
 
@@ -193,13 +195,13 @@
 
       <div class="section-title">Your sign-up</div>
       <div class="field">
-        <label for="why">Why do you want to do life planning, and what do you hope to grow? <span class="req">*</span></label>
-        <textarea id="why" name="why" required>{{ form.why or '' }}</textarea>
+        <label for="start_when">When would you like to start life planning? <span class="req">*</span></label>
+        <div class="hint">Example: as soon as possible, next month, or after the current group finishes.</div>
+        <input type="text" id="start_when" name="start_when" required value="{{ form.start_when or '' }}">
       </div>
       <div class="field">
-        <label for="availability">What days and times generally work best for your weekly meeting? <span class="req">*</span></label>
-        <div class="hint">Example: weekday mornings before 11, or Tuesday/Thursday evenings.</div>
-        <input type="text" id="availability" name="availability" required value="{{ form.availability or '' }}">
+        <label for="looking_forward">What are you looking forward to most about life planning? <span class="req">*</span></label>
+        <textarea id="looking_forward" name="looking_forward" required>{{ form.looking_forward or '' }}</textarea>
       </div>
 
       <div class="section-title">The commitment</div>
@@ -208,8 +210,8 @@
           <input type="checkbox" id="commit" name="commit" value="yes" required
                  {% if form.commit %}checked{% endif %}>
           <label for="commit">
-            I commit to a weekly meeting for the full 7 weeks — no lates,
-            rescheduling, or misses (excluding emergencies) — and to completing
+            I commit to a weekly meeting for the full 7 weeks with no lates,
+            rescheduling, or misses (excluding emergencies), and to completing
             my worksheet before each meeting. <span class="req">*</span>
           </label>
         </div>
