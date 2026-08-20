@@ -4,8 +4,8 @@
 Usage:
     python scripts/generate_life_planning_poster.py [SIGNUP_URL]
 
-SIGNUP_URL defaults to the production Render URL of the /life-planning
-sign-up form. Outputs are written to assets/life-planning-qr/:
+SIGNUP_URL defaults to the live Google Form responder URL (the /life-planning
+Flask form remains as a fallback; pass its URL as an argument to use it). Outputs are written to assets/life-planning-qr/:
     life-planning-qr.png      - branded QR code (logo centre, CFA red modules)
     life-planning-poster.png  - print-ready 8.5x11 poster (300 DPI) with the
                                 workshop summary, commitment, and QR
@@ -32,7 +32,8 @@ INK = (60, 44, 33)
 SOFT = (150, 130, 112)
 WHITE = (255, 255, 255)
 
-DEFAULT_URL = "https://cfa-sidekick-production.onrender.com/life-planning"
+DEFAULT_URL = ("https://docs.google.com/forms/d/"
+               "1J1D8E4vkLxNncPnsJnqMZ8xdV4ZOkOusw9-hGEdzOdo/viewform")
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(REPO_ROOT, "assets", "life-planning-qr")
 LOGO_PATH = os.environ.get(

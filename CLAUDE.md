@@ -40,12 +40,18 @@ Canada.
 
 ## Life Planning Workshop sign-up
 
-- `GET/POST /life-planning` — CFA-branded sign-up form for the Operator's
-  7-week Life Planning Workshop (5 Team Member + 2 Leader spots, weekly
-  meetings, worksheet before each meeting). Submissions are emailed
-  privately to the Operator via FormSubmit (`APPLICATION_EMAIL`) and logged
-  in full to Render logs as a backup. Never post sign-ups to the team chat.
+- The live sign-up sheet is a Google Form owned by
+  marketing.cfalondon@gmail.com ("Life Planning Workshop Sign Up |
+  Chick-fil-A Wharncliffe & Wonderland", copied from the leadership
+  application form); responses collect there. The committed QR code and
+  poster in `assets/life-planning-qr/` point at it. Each group runs 7
+  weeks with 7 spots (5 Team Members + 2 Leaders); a new group launches
+  once the current one completes the workshop.
 - `scripts/generate_life_planning_poster.py` regenerates the branded QR
-  code and 8.5x11 print poster in `assets/life-planning-qr/`; the QR
-  defaults to the production `/life-planning` URL (pass a different URL as
-  an argument if the form ever moves).
+  code and 8.5x11 print poster; it defaults to the live Google Form
+  responder URL (pass a different URL as an argument if the form ever
+  moves).
+- `GET/POST /life-planning` — CFA-branded fallback sign-up form served by
+  the Flask app. Submissions are emailed privately to the Operator via
+  FormSubmit (`APPLICATION_EMAIL`) and logged in full to Render logs as a
+  backup. Never post sign-ups to the team chat.
