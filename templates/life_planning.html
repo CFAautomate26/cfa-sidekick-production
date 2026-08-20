@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Life Planning Workshop — Chick-fil-A Wharncliffe &amp; Wonderland</title>
+<style>
+  :root {
+    --cfa-red: #E31937;
+    --cream: #FFFAF2;
+    --ink: #3C2C21;
+    --soft: #968270;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Apercu", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  .banner {
+    background: var(--cfa-red);
+    color: #fff;
+    text-align: center;
+    padding: 28px 16px 24px;
+  }
+  .banner .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 12px;
+    opacity: 0.9;
+  }
+  .banner h1 {
+    font-size: 26px;
+    margin-top: 6px;
+    letter-spacing: 0.02em;
+  }
+  .banner .store {
+    margin-top: 6px;
+    font-size: 14px;
+    opacity: 0.95;
+  }
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+  .intro {
+    font-size: 15px;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid #eadfd2;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .intro ul { margin: 10px 0 0 18px; }
+  .intro li { margin-bottom: 6px; }
+  .spots {
+    font-size: 14px;
+    background: #fdecee;
+    border: 1px solid var(--cfa-red);
+    color: var(--cfa-red);
+    font-weight: 700;
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    text-align: center;
+  }
+  form .field { margin-bottom: 20px; }
+  label {
+    display: block;
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 6px;
+  }
+  label .req { color: var(--cfa-red); }
+  .hint { font-size: 13px; color: var(--soft); margin-bottom: 6px; }
+  input[type="text"], input[type="email"], input[type="tel"], select, textarea {
+    width: 100%;
+    font: inherit;
+    font-size: 15px;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid #d9cbbb;
+    border-radius: 10px;
+    padding: 12px;
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  input:focus, select:focus, textarea:focus {
+    outline: 2px solid var(--cfa-red);
+    outline-offset: 1px;
+    border-color: var(--cfa-red);
+  }
+  .section-title {
+    color: var(--cfa-red);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 13px;
+    font-weight: 700;
+    margin: 28px 0 14px;
+    border-bottom: 2px solid var(--cfa-red);
+    padding-bottom: 6px;
+  }
+  .commit {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: #fff;
+    border: 1px solid #d9cbbb;
+    border-radius: 10px;
+    padding: 14px;
+    font-size: 14px;
+  }
+  .commit input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--cfa-red); }
+  .commit label { font-weight: 400; font-size: 14px; margin: 0; }
+  button {
+    display: block;
+    width: 100%;
+    background: var(--cfa-red);
+    color: #fff;
+    font: inherit;
+    font-size: 17px;
+    font-weight: 700;
+    border: none;
+    border-radius: 999px;
+    padding: 15px;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  button:hover { background: #c8142f; }
+  .error {
+    background: #fdecee;
+    border: 1px solid var(--cfa-red);
+    color: var(--cfa-red);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 20px;
+    font-size: 14px;
+  }
+  .footer {
+    text-align: center;
+    font-size: 13px;
+    color: var(--soft);
+    margin-top: 28px;
+  }
+</style>
+</head>
+<body>
+  <div class="banner">
+    <div class="eyebrow">Invest in your journey</div>
+    <h1>Life Planning Workshop</h1>
+    <div class="store">Chick-fil-A Wharncliffe &amp; Wonderland · London, ON</div>
+  </div>
+  <div class="wrap">
+    <div class="intro">
+      A 7-week life planning workshop with direct mentorship from the Operator,
+      designed for anyone who is serious about their life's journey and
+      maximizing growth in every area. Before you sign up, make sure you can
+      commit to the following:
+      <ul>
+        <li><strong>7 weeks</strong> — we cover one life planning section per week.</li>
+        <li><strong>Weekly meetings</strong> for the full 7 weeks — no lates, rescheduling, or misses (excluding emergencies).</li>
+        <li><strong>Worksheet completed before each meeting</strong> to maximize growth during your time.</li>
+      </ul>
+    </div>
+    <div class="spots">Spots are limited: 5 Team Members and 2 Leaders</div>
+
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+    <form method="post" action="/life-planning">
+      <div class="section-title">About you</div>
+      <div class="field">
+        <label for="name">Full name <span class="req">*</span></label>
+        <input type="text" id="name" name="name" required value="{{ form.name or '' }}">
+      </div>
+      <div class="field">
+        <label for="email">Email <span class="req">*</span></label>
+        <input type="email" id="email" name="email" required value="{{ form.email or '' }}">
+      </div>
+      <div class="field">
+        <label for="phone">Phone number</label>
+        <input type="tel" id="phone" name="phone" value="{{ form.phone or '' }}">
+      </div>
+      <div class="field">
+        <label for="role">Current role <span class="req">*</span></label>
+        <select id="role" name="role" required>
+          <option value="" {% if not form.role %}selected{% endif %} disabled>Select your role…</option>
+          <option value="Team Member" {% if form.role == 'Team Member' %}selected{% endif %}>Team Member</option>
+          <option value="Leader" {% if form.role == 'Leader' %}selected{% endif %}>Leader</option>
+        </select>
+      </div>
+
+      <div class="section-title">Your sign-up</div>
+      <div class="field">
+        <label for="why">Why do you want to do life planning, and what do you hope to grow? <span class="req">*</span></label>
+        <textarea id="why" name="why" required>{{ form.why or '' }}</textarea>
+      </div>
+      <div class="field">
+        <label for="availability">What days and times generally work best for your weekly meeting? <span class="req">*</span></label>
+        <div class="hint">Example: weekday mornings before 11, or Tuesday/Thursday evenings.</div>
+        <input type="text" id="availability" name="availability" required value="{{ form.availability or '' }}">
+      </div>
+
+      <div class="section-title">The commitment</div>
+      <div class="field">
+        <div class="commit">
+          <input type="checkbox" id="commit" name="commit" value="yes" required
+                 {% if form.commit %}checked{% endif %}>
+          <label for="commit">
+            I commit to a weekly meeting for the full 7 weeks — no lates,
+            rescheduling, or misses (excluding emergencies) — and to completing
+            my worksheet before each meeting. <span class="req">*</span>
+          </label>
+        </div>
+      </div>
+
+      <button type="submit">Sign me up</button>
+    </form>
+
+    <div class="footer">
+      Chick-fil-A Wharncliffe &amp; Wonderland · 3459 Wonderland Road South, London, ON
+    </div>
+  </div>
+</body>
+</html>

@@ -37,3 +37,15 @@ Canada.
   (`APPLICATION_EMAIL`, default joshua.huesser@cfafranchisee.ca) and logged
   in full to Render logs as a backup. Never post applications to the team
   chat.
+
+## Life Planning Workshop sign-up
+
+- `GET/POST /life-planning` — CFA-branded sign-up form for the Operator's
+  7-week Life Planning Workshop (5 Team Member + 2 Leader spots, weekly
+  meetings, worksheet before each meeting). Submissions are emailed
+  privately to the Operator via FormSubmit (`APPLICATION_EMAIL`) and logged
+  in full to Render logs as a backup. Never post sign-ups to the team chat.
+- `scripts/generate_life_planning_poster.py` regenerates the branded QR
+  code and 8.5x11 print poster in `assets/life-planning-qr/`; the QR
+  defaults to the production `/life-planning` URL (pass a different URL as
+  an argument if the form ever moves).

@@ -524,6 +524,71 @@ def apply_thanks():
     return render_template("thanks.html")
 
 
+LIFE_PLANNING_REQUIRED_FIELDS = ["name", "email", "role", "why", "availability", "commit"]
+
+
+def deliver_life_planning_signup(fields: dict) -> bool:
+    """Email the workshop sign-up to the Operator via FormSubmit. Returns True on success."""
+    payload = {
+        "_subject": f"Life Planning Workshop Sign-up: {fields['name']} ({fields['role']})",
+        "_template": "table",
+        "Name": fields["name"],
+        "Email": fields["email"],
+        "Phone": fields.get("phone", ""),
+        "Role": fields["role"],
+        "Why they want to do life planning": fields["why"],
+        "Weekly meeting availability": fields["availability"],
+        "Committed to the 7-week expectations": "Yes",
+    }
+
+    url = f"https://formsubmit.co/ajax/{APPLICATION_EMAIL}"
+    try:
+        resp = requests.post(url, json=payload, timeout=20,
+                             headers={"Accept": "application/json"})
+        print(f"FormSubmit response status: {resp.status_code}, body: {resp.text[:300]}")
+        return resp.ok
+    except Exception as e:
+        print(f"Error delivering life planning sign-up email: {e}")
+        return False
+
+
+@app.route("/life-planning", methods=["GET", "POST"])
+def life_planning():
+    if request.method == "GET":
+        return render_template("life_planning.html", form={}, error=None)
+
+    fields = {k: (request.form.get(k, "") or "").strip() for k in
+              LIFE_PLANNING_REQUIRED_FIELDS + ["phone"]}
+
+    missing = [k for k in LIFE_PLANNING_REQUIRED_FIELDS if not fields[k]]
+    if missing:
+        return render_template(
+            "life_planning.html", form=fields,
+            error="Please fill in every required field and confirm the "
+                  "commitment before signing up."), 400
+
+    # Always log the full sign-up so it is recoverable from Render logs even
+    # if email delivery fails.
+    print("=== LIFE PLANNING WORKSHOP SIGN-UP RECEIVED ===")
+    print(f"Name: {fields['name']} | Email: {fields['email']} | "
+          f"Phone: {fields.get('phone', '')} | Role: {fields['role']}")
+    print(f"Why: {fields['why']}")
+    print(f"Availability: {fields['availability']}")
+    print("Committed to 7-week expectations: Yes")
+    print("=== END SIGN-UP ===")
+
+    delivered = deliver_life_planning_signup(fields)
+    if not delivered:
+        print("WARNING: sign-up email delivery failed; data is in the logs above.")
+
+    return redirect("/life-planning/thanks")
+
+
+@app.route("/life-planning/thanks", methods=["GET"])
+def life_planning_thanks():
+    return render_template("life_planning_thanks.html")
+
+
 @app.route("/scheduled/send", methods=["GET"])
 def scheduled_send():
     token = request.args.get("token", "")
