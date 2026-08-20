@@ -524,22 +524,20 @@ def apply_thanks():
     return render_template("thanks.html")
 
 
-LIFE_PLANNING_REQUIRED_FIELDS = ["name", "email", "role", "start_when",
-                                 "looking_forward", "commit"]
+LIFE_PLANNING_REQUIRED_FIELDS = ["name", "email", "start_when",
+                                 "clarity_area", "hope_outcome"]
 
 
 def deliver_life_planning_signup(fields: dict) -> bool:
     """Email the workshop sign-up to the Operator via FormSubmit. Returns True on success."""
     payload = {
-        "_subject": f"Life Planning Workshop Sign-up: {fields['name']} ({fields['role']})",
+        "_subject": f"Life Planning Workshop Sign-up: {fields['name']}",
         "_template": "table",
         "Name": fields["name"],
         "Email": fields["email"],
-        "Phone": fields.get("phone", ""),
-        "Role": fields["role"],
         "When they would like to start": fields["start_when"],
-        "Looking forward to most": fields["looking_forward"],
-        "Committed to the 7 week expectations": "Yes",
+        "Area they most want clarity on": fields["clarity_area"],
+        "One thing they hope to get out of their time": fields["hope_outcome"],
     }
 
     url = f"https://formsubmit.co/ajax/{APPLICATION_EMAIL}"
@@ -559,23 +557,21 @@ def life_planning():
         return render_template("life_planning.html", form={}, error=None)
 
     fields = {k: (request.form.get(k, "") or "").strip() for k in
-              LIFE_PLANNING_REQUIRED_FIELDS + ["phone"]}
+              LIFE_PLANNING_REQUIRED_FIELDS}
 
     missing = [k for k in LIFE_PLANNING_REQUIRED_FIELDS if not fields[k]]
     if missing:
         return render_template(
             "life_planning.html", form=fields,
-            error="Please fill in every required field and confirm the "
-                  "commitment before signing up."), 400
+            error="Please fill in every required field before signing up."), 400
 
     # Always log the full sign-up so it is recoverable from Render logs even
     # if email delivery fails.
     print("=== LIFE PLANNING WORKSHOP SIGN-UP RECEIVED ===")
-    print(f"Name: {fields['name']} | Email: {fields['email']} | "
-          f"Phone: {fields.get('phone', '')} | Role: {fields['role']}")
+    print(f"Name: {fields['name']} | Email: {fields['email']}")
     print(f"When they would like to start: {fields['start_when']}")
-    print(f"Looking forward to most: {fields['looking_forward']}")
-    print("Committed to 7 week expectations: Yes")
+    print(f"Area they most want clarity on: {fields['clarity_area']}")
+    print(f"One thing they hope to get out of their time: {fields['hope_outcome']}")
     print("=== END SIGN-UP ===")
 
     delivered = deliver_life_planning_signup(fields)

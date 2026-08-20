@@ -180,19 +180,6 @@
         <label for="email">Email <span class="req">*</span></label>
         <input type="email" id="email" name="email" required value="{{ form.email or '' }}">
       </div>
-      <div class="field">
-        <label for="phone">Phone number</label>
-        <input type="tel" id="phone" name="phone" value="{{ form.phone or '' }}">
-      </div>
-      <div class="field">
-        <label for="role">Current role <span class="req">*</span></label>
-        <select id="role" name="role" required>
-          <option value="" {% if not form.role %}selected{% endif %} disabled>Select your role…</option>
-          <option value="Team Member" {% if form.role == 'Team Member' %}selected{% endif %}>Team Member</option>
-          <option value="Leader" {% if form.role == 'Leader' %}selected{% endif %}>Leader</option>
-        </select>
-      </div>
-
       <div class="section-title">Your sign-up</div>
       <div class="field">
         <label for="start_when">When would you like to start life planning? <span class="req">*</span></label>
@@ -200,21 +187,17 @@
         <input type="text" id="start_when" name="start_when" required value="{{ form.start_when or '' }}">
       </div>
       <div class="field">
-        <label for="looking_forward">What are you looking forward to most about life planning? <span class="req">*</span></label>
-        <textarea id="looking_forward" name="looking_forward" required>{{ form.looking_forward or '' }}</textarea>
+        <label for="clarity_area">What is one area you would like to get the most clarity on? <span class="req">*</span></label>
+        <select id="clarity_area" name="clarity_area" required>
+          <option value="" {% if not form.clarity_area %}selected{% endif %} disabled>Select an area…</option>
+          {% for area in ["Career", "Family", "Friends", "Community Impact", "Faith", "Legacy"] %}
+          <option value="{{ area }}" {% if form.clarity_area == area %}selected{% endif %}>{{ area }}</option>
+          {% endfor %}
+        </select>
       </div>
-
-      <div class="section-title">The commitment</div>
       <div class="field">
-        <div class="commit">
-          <input type="checkbox" id="commit" name="commit" value="yes" required
-                 {% if form.commit %}checked{% endif %}>
-          <label for="commit">
-            I commit to a weekly meeting for the full 7 weeks with no lates,
-            rescheduling, or misses (excluding emergencies), and to completing
-            my worksheet before each meeting. <span class="req">*</span>
-          </label>
-        </div>
+        <label for="hope_outcome">When you complete the life planning workshop, what is one thing you hope to get out of your time? <span class="req">*</span></label>
+        <textarea id="hope_outcome" name="hope_outcome" required>{{ form.hope_outcome or '' }}</textarea>
       </div>
 
       <button type="submit">Sign me up</button>
