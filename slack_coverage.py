@@ -25,9 +25,11 @@ from patterns import SICK_PATTERNS, matches_patterns
 
 slack_bp = Blueprint("slack", __name__)
 
-SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
-SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
-SLACK_COVERAGE_CHANNEL_ID = os.getenv("SLACK_COVERAGE_CHANNEL_ID", "C0C0S22PV5X")
+# .strip() guards against invisible whitespace that rides along when values
+# are pasted into the Render dashboard — it breaks HMAC verification.
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
+SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "").strip()
+SLACK_COVERAGE_CHANNEL_ID = os.getenv("SLACK_COVERAGE_CHANNEL_ID", "C0C0S22PV5X").strip()
 
 # Slack retries deliveries, so remember recent event_ids to reply only once.
 _MAX_SEEN_EVENTS = 500
@@ -99,19 +101,28 @@ REPLY_SICK = (
 
 def slack_signature_valid(req) -> bool:
     if not SLACK_SIGNING_SECRET:
-        print("ERROR: SLACK_SIGNING_SECRET is missing; rejecting Slack event.")
+        print("Slack auth FAIL: SLACK_SIGNING_SECRET env var is missing or empty.")
         return False
     timestamp = req.headers.get("X-Slack-Request-Timestamp", "")
     try:
-        if abs(time.time() - float(timestamp)) > 60 * 5:
-            return False
+        skew = abs(time.time() - float(timestamp))
     except ValueError:
+        print("Slack auth FAIL: missing/garbled X-Slack-Request-Timestamp header.")
+        return False
+    if skew > 60 * 5:
+        print(f"Slack auth FAIL: request timestamp skew {skew:.0f}s exceeds 5 min "
+              "(server clock issue or replayed request).")
         return False
     base = f"v0:{timestamp}:{req.get_data(as_text=True)}"
     expected = "v0=" + hmac.new(
         SLACK_SIGNING_SECRET.encode(), base.encode(), hashlib.sha256
     ).hexdigest()
-    return hmac.compare_digest(expected, req.headers.get("X-Slack-Signature", ""))
+    if not hmac.compare_digest(expected, req.headers.get("X-Slack-Signature", "")):
+        print("Slack auth FAIL: signature mismatch — SLACK_SIGNING_SECRET does not "
+              "match the Slack app sending events (check for the right app and a "
+              "clean paste of Basic Information -> Signing Secret).")
+        return False
+    return True
 
 
 def send_slack_reply(channel: str, thread_ts: str, text: str) -> None:
