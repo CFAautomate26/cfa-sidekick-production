@@ -5,7 +5,7 @@ that watches the **#shift-coverage** channel and auto-replies in-thread:
 
 | Someone posts…                                   | Bot replies with…                                              |
 | ------------------------------------------------ | -------------------------------------------------------------- |
-| The `🔄 COVERAGE REQUEST` template, fully filled | Confirmation + next steps (thread replies, leader approval)    |
+| The `🔄 COVERAGE REQUEST` template, fully filled | Confirmation + next steps (pickup + leader approval in HotSchedules) |
 | The template with `Released in HotSchedules? N`  | Reminder to release the shift in HotSchedules first            |
 | The template with blank fields                   | List of the missing fields                                     |
 | A sick message ("I'm sick", "I have a fever"…)   | Sick guidance (stay home, doctor's note, coverage steps)       |

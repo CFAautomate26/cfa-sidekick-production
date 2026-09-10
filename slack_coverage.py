@@ -1,10 +1,11 @@
 """Slack Events API endpoint for the #shift-coverage channel.
 
 Auto-responds in-thread to every top-level post so the coverage flow
-(release in HotSchedules -> post the template -> leader approval
-in-thread) enforces itself: template posts are validated, sick messages
-get sick guidance, and everything else gets the flow + template. Thread
-replies are never touched, so approval conversations stay clean.
+(release in HotSchedules -> post the template -> leader approves the
+pickup in HotSchedules) enforces itself: template posts are validated,
+sick messages get sick guidance, and everything else gets the flow +
+template. Thread replies are never touched, so coordination
+conversations stay clean.
 
 Setup (see docs/slack-coverage-bot-setup.md):
   SLACK_BOT_TOKEN          xoxb- bot token, needs chat:write
@@ -60,11 +61,11 @@ TEMPLATE_BLOCK = (
 
 REPLY_REQUEST_OK = (
     "✅ *Coverage request received.* Next steps:\n"
-    "• Anyone who can take this shift, reply *in this thread*. Coverage must "
-    "match the exact start time and required skill set.\n"
-    "• A leader will approve or decline here. *No approval = no coverage* — "
-    "the shift stays your responsibility until a leader confirms in this thread.\n"
-    "• Once approved, the person covering accepts the shift in HotSchedules."
+    "• Anyone who can take this shift: reply *in this thread* so everyone knows, "
+    "then pick up the released shift in HotSchedules. Coverage must match the "
+    "exact start time and required skill set.\n"
+    "• A leader approves the pickup *in HotSchedules*. *No approval = no "
+    "coverage* — the shift stays your responsibility until it's approved there."
 )
 
 REPLY_NOT_RELEASED = (
@@ -84,7 +85,9 @@ REPLY_TEMPLATE_NUDGE = (
     "1️⃣ Release the shift in HotSchedules (My Schedule → select the shift → Release)\n"
     "2️⃣ Post a new message in this channel using this template:\n"
     f"{TEMPLATE_BLOCK}\n"
-    "3️⃣ A leader approves in the thread. The shift is yours until that happens.\n"
+    "3️⃣ Whoever takes it picks up the shift in HotSchedules, and a leader "
+    "approves the pickup *in HotSchedules*. The shift is yours until that "
+    "approval happens.\n"
     "_See the pinned Shift Coverage Playbook for details._"
 )
 
@@ -95,7 +98,8 @@ REPLY_SICK = (
     "1️⃣ Release the shift in HotSchedules\n"
     "2️⃣ Post a new message here using the coverage template (see the pinned "
     "Shift Coverage Playbook)\n"
-    "3️⃣ Wait for leader approval in the thread. Feel better soon! \U0001f49b"
+    "3️⃣ A leader approves the pickup in HotSchedules once someone takes it. "
+    "Feel better soon! \U0001f49b"
 )
 
 
