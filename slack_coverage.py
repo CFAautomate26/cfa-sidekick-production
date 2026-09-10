@@ -1,9 +1,10 @@
 """Slack Events API endpoint for the #shift-coverage channel.
 
-Auto-responds in-thread to coverage requests and sick messages so the
-coverage flow (release in HotSchedules -> post the template -> leader
-approval in-thread) enforces itself. Announcements and ordinary chatter
-are left alone; the bot only replies to messages it recognizes.
+Auto-responds in-thread to every top-level post so the coverage flow
+(release in HotSchedules -> post the template -> leader approval
+in-thread) enforces itself: template posts are validated, sick messages
+get sick guidance, and everything else gets the flow + template. Thread
+replies are never touched, so approval conversations stay clean.
 
 Setup (see docs/slack-coverage-bot-setup.md):
   SLACK_BOT_TOKEN          xoxb- bot token, needs chat:write
@@ -20,7 +21,7 @@ from collections import OrderedDict
 import requests
 from flask import Blueprint, jsonify, request
 
-from patterns import COVERAGE_PATTERNS, SICK_PATTERNS, matches_patterns
+from patterns import SICK_PATTERNS, matches_patterns
 
 slack_bp = Blueprint("slack", __name__)
 
@@ -76,8 +77,8 @@ REPLY_MISSING_FIELDS = (
     "so a leader can approve it."
 )
 
-REPLY_FREEFORM_COVERAGE = (
-    "\U0001f504 *Looks like you need shift coverage.* Here's the flow:\n"
+REPLY_TEMPLATE_NUDGE = (
+    "\U0001f44b *This channel is for shift-coverage requests.* Here's the flow:\n"
     "1️⃣ Release the shift in HotSchedules (My Schedule → select the shift → Release)\n"
     "2️⃣ Post a new message in this channel using this template:\n"
     f"{TEMPLATE_BLOCK}\n"
@@ -152,7 +153,12 @@ def shift_not_released(text: str) -> bool:
 
 
 def coverage_reply_for(text: str) -> str | None:
-    """Pick the auto-reply for a top-level message, or None to stay silent."""
+    """Pick the auto-reply for a top-level message, or None to stay silent.
+
+    Every top-level post in the coverage channel gets a reply: template posts
+    are validated, sick messages get sick guidance, and anything else gets
+    the flow + template so nobody has to hunt for the playbook.
+    """
     if TEMPLATE_MARKER in text.lower():
         missing = find_missing_template_fields(text)
         if missing:
@@ -163,9 +169,9 @@ def coverage_reply_for(text: str) -> str | None:
         return REPLY_REQUEST_OK
     if matches_patterns(text, SICK_PATTERNS):
         return REPLY_SICK
-    if matches_patterns(text, COVERAGE_PATTERNS):
-        return REPLY_FREEFORM_COVERAGE
-    return None
+    if not text.strip():
+        return None
+    return REPLY_TEMPLATE_NUDGE
 
 
 @slack_bp.route("/slack/events", methods=["POST"])

@@ -8,9 +8,8 @@ that watches the **#shift-coverage** channel and auto-replies in-thread:
 | The `🔄 COVERAGE REQUEST` template, fully filled | Confirmation + next steps (thread replies, leader approval)    |
 | The template with `Released in HotSchedules? N`  | Reminder to release the shift in HotSchedules first            |
 | The template with blank fields                   | List of the missing fields                                     |
-| A freeform "can someone cover me" message        | The 3-step flow + the template to copy                         |
 | A sick message ("I'm sick", "I have a fever"…)   | Sick guidance (stay home, doctor's note, coverage steps)       |
-| Anything else (announcements, chatter)           | Nothing — the bot stays silent                                 |
+| Any other top-level post                         | The 3-step flow + the template to copy                         |
 
 Only **top-level** messages trigger replies; thread replies are ignored, so
 the approval conversation is never interrupted.
