@@ -1,5 +1,4 @@
 import os
-import re
 import random
 from flask import Flask, request, render_template, redirect
 from openai import OpenAI
@@ -9,7 +8,11 @@ from dotenv import load_dotenv
 # Load .env locally; on Render we use service env vars
 load_dotenv()
 
+from patterns import COVERAGE_PATTERNS, SICK_PATTERNS, matches_patterns
+from slack_coverage import slack_bp
+
 app = Flask(__name__)
+app.register_blueprint(slack_bp)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GROUPME_BOT_ID = os.getenv("GROUPME_BOT_ID")
@@ -22,6 +25,8 @@ print("Starting CFA Sidekick...")
 print(f"Has OPENAI_API_KEY? {'yes' if OPENAI_API_KEY else 'NO'}")
 print(f"Has GROUPME_BOT_ID? {'yes' if GROUPME_BOT_ID else 'NO'}")
 print(f"Has SCHEDULE_SECRET? {'yes' if SCHEDULE_SECRET else 'NO'}")
+print(f"Has SLACK_BOT_TOKEN? {'yes' if os.getenv('SLACK_BOT_TOKEN') else 'NO'}")
+print(f"Has SLACK_SIGNING_SECRET? {'yes' if os.getenv('SLACK_SIGNING_SECRET') else 'NO'}")
 print(f"ENV: {ENV}")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -304,67 +309,6 @@ PROFANITY_WORDS = [
     "no mms", "wey", "guey", "vale madre", "vale madres", "chingon", "chingón"
 ]
 
-COVERAGE_PATTERNS = [
-    r"\bi can[’']?t make my shift\b",
-    r"\bi cant make my shift\b",
-    r"\bi can[’']?t make my shift today\b",
-    r"\bi cant make my shift today\b",
-    r"\bi can[’']?t make my shift tomorrow\b",
-    r"\bi cant make my shift tomorrow\b",
-    r"\bi can[’']?t make it\b",
-    r"\bi cant make it\b",
-    r"\bi can[’']?t make it today\b",
-    r"\bi cant make it today\b",
-    r"\bi can[’']?t make it tomorrow\b",
-    r"\bi cant make it tomorrow\b",
-    r"\bi won[’']?t be able to make my shift\b",
-    r"\bi wont be able to make my shift\b",
-    r"\bi won[’']?t be able to make my shift today\b",
-    r"\bi wont be able to make my shift today\b",
-    r"\bi won[’']?t be able to make my shift tomorrow\b",
-    r"\bi wont be able to make my shift tomorrow\b",
-    r"\bi won[’']?t be able to make it\b",
-    r"\bi wont be able to make it\b",
-    r"\bi won[’']?t be able to make it today\b",
-    r"\bi wont be able to make it today\b",
-    r"\bi won[’']?t be able to make it tomorrow\b",
-    r"\bi wont be able to make it tomorrow\b",
-    r"\bcan someone cover me\b",
-    r"\bcan someone cover me today\b",
-    r"\bcan someone cover me tomorrow\b",
-    r"\bcan someone cover my shift\b",
-    r"\bcan someone cover my shift today\b",
-    r"\bcan someone cover my shift tomorrow\b",
-    r"\bneed coverage\b",
-    r"\bneed coverage today\b",
-    r"\bneed coverage tomorrow\b",
-]
-
-SICK_PATTERNS = [
-    r"\bi[’']?m sick\b",
-    r"\bim sick\b",
-    r"\bi am sick\b",
-    r"\bi[’']?m not feeling well\b",
-    r"\bim not feeling well\b",
-    r"\bi am not feeling well\b",
-    r"\bi don[’']?t feel well\b",
-    r"\bi dont feel well\b",
-    r"\bi have a fever\b",
-    r"\bi[’']?m throwing up\b",
-    r"\bim throwing up\b",
-    r"\bi have diarrhea\b",
-    r"\bi[’']?m vomiting\b",
-    r"\bim vomiting\b",
-    r"\bi[’']?m nauseous\b",
-    r"\bim nauseous\b",
-    r"\bi[’']?m not feeling good\b",
-    r"\bim not feeling good\b",
-    r"\bi can[’']?t make my shift because i[’']?m sick\b",
-    r"\bi cant make my shift because im sick\b",
-    r"\bi can[’']?t make it because i[’']?m sick\b",
-    r"\bi cant make it because im sick\b",
-]
-
 def send_groupme_message(text: str) -> None:
     if not GROUPME_BOT_ID:
         print("ERROR: GROUPME_BOT_ID is missing, cannot send message.")
@@ -379,10 +323,6 @@ def send_groupme_message(text: str) -> None:
         print(f"GroupMe response status: {resp.status_code}, body: {resp.text}")
     except Exception as e:
         print(f"Error sending message to GroupMe: {e}")
-
-def matches_patterns(text: str, patterns: list[str]) -> bool:
-    lower_text = text.lower().strip()
-    return any(re.search(pattern, lower_text) for pattern in patterns)
 
 def contains_profanity(text: str) -> bool:
     lower = text.lower()

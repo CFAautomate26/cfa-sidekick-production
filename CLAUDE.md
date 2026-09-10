@@ -19,9 +19,16 @@ Canada.
 
 - `app.py` — Flask webhook for GroupMe; OpenAI-backed responses. Team members
   invoke the bot with the `cow:` keyword.
+- `slack_coverage.py` — Slack Events API blueprint (`POST /slack/events`)
+  that auto-responds in-thread in the #shift-coverage Slack channel:
+  validates `🔄 COVERAGE REQUEST` template posts, nags un-released shifts
+  and missing fields, and answers freeform coverage/sick messages with the
+  3-step flow. Setup guide: [docs/slack-coverage-bot-setup.md](docs/slack-coverage-bot-setup.md).
+- `patterns.py` — coverage/sick message patterns shared by both bots.
 - Deployed on Render; configuration via service environment variables
   (`OPENAI_API_KEY`, `GROUPME_BOT_ID`, `SCHEDULE_SECRET`, `ENV`,
-  `APPLICATION_EMAIL`).
+  `APPLICATION_EMAIL`, and for Slack: `SLACK_BOT_TOKEN`,
+  `SLACK_SIGNING_SECRET`, `SLACK_COVERAGE_CHANNEL_ID`).
 
 ## Leadership application form
 
