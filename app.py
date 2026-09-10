@@ -29,7 +29,9 @@ print(f"Has SLACK_BOT_TOKEN? {'yes' if os.getenv('SLACK_BOT_TOKEN') else 'NO'}")
 print(f"Has SLACK_SIGNING_SECRET? {'yes' if os.getenv('SLACK_SIGNING_SECRET') else 'NO'}")
 print(f"ENV: {ENV}")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# The OpenAI-backed `cow:` responses need a key, but the rest of the app
+# (Slack coverage bot, /apply form, scheduled sends) must boot without one.
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 SYSTEM_PROMPT = """
 You are “CFA Sidekick,” a team member support bot for Chick-fil-A in a GroupMe chat.
