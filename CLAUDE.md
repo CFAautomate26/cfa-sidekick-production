@@ -31,7 +31,10 @@ Canada.
   `FLASK_SECRET_KEY` (optional; falls back to a key derived from the
   `SCHEDULE_SECRET`/`SHIFT_ADMIN_PIN` env vars, or a random per-boot key if
   neither is set), `SHIFT_TZ` (default America/Toronto). Never store
-  HR/discipline/wage/medical content in it.
+  HR/discipline/wage/medical content in it. The office QR poster in
+  `assets/shift-qr/` points at the live `/shift` URL;
+  `scripts/generate_shift_qr.py` regenerates it (pass a different URL as
+  an argument if the service ever moves).
 - `slack_coverage.py` — Slack Events API blueprint (`POST /slack/events`)
   that auto-responds in-thread in the #shift-coverage Slack channel:
   validates `🔄 COVERAGE REQUEST` template posts, nags un-released shifts
