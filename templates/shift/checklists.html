@@ -1,0 +1,37 @@
+{% extends "shift/base.html" %}
+{% block title %}Checklists{% endblock %}
+{% block content %}
+<h1 class="page">Checklists</h1>
+<div class="sub">{{ 'Today, ' + day if day == shift_today else day }}</div>
+
+<form method="get" action="{{ url_for('shift.checklists') }}" class="inline-form" style="margin-bottom:14px;">
+  <input type="date" name="date" value="{{ day }}" max="{{ shift_today }}">
+  <button class="pill" type="submit">Go</button>
+</form>
+
+{% for daypart in DAYPARTS %}
+  {% set day_runs = runs | selectattr('daypart', 'equalto', daypart) | list %}
+  {% if day_runs %}
+  <div class="section-label">{{ DAYPART_LABELS[daypart] }}</div>
+  {% for r in day_runs %}
+  <a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
+    <h2>{{ r.name }} {% if r.critical_remaining %}<span class="critical-flag">● {{ r.critical_remaining }} critical left</span>{% endif %}</h2>
+    <div class="bar {{ 'full' if r.done == r.total and r.total }}"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
+    <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.area }}</div>
+  </a>
+  {% endfor %}
+  {% endif %}
+{% endfor %}
+
+{% if not runs %}
+<div class="empty">
+  {% if day == shift_today %}No active checklist templates — add some under
+  Admin → Checklists.{% else %}Nobody opened the app on {{ day }}, so no
+  checklists were run that day.{% endif %}
+</div>
+{% endif %}
+
+{% if shift_is_admin %}
+<a class="pill small ghost" href="{{ url_for('shift.admin_templates') }}">Edit checklist templates →</a>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,92 @@
+{% extends "shift/base.html" %}
+{% block title %}Admin{% endblock %}
+{% block content %}
+<h1 class="page">Admin</h1>
+<div class="sub">Leader logins, templates, and backups.</div>
+
+{% if data_at_risk %}
+<div class="card" style="border-color:#7a1220; background:#fdecee;">
+  <h2 style="color:#7a1220;">⚠ Data will not survive the next deploy</h2>
+  <div style="font-size:14px;">The <code>SHIFT_DB_PATH</code> env var isn't set,
+  so the database lives on Render's ephemeral disk. Attach a persistent disk
+  (mounted at <code>/var/data</code>) and set
+  <code>SHIFT_DB_PATH=/var/data/shift_data.db</code>. Until then, download a
+  backup below after big changes. Full steps: docs/shift-leading-app.md.</div>
+</div>
+{% endif %}
+
+<div class="section-label">Leader logins</div>
+<div class="card">
+  {% for l in leaders %}
+  <div style="display:flex; align-items:center; gap:8px; padding:8px 0; flex-wrap:wrap; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
+    <span style="flex:1; font-weight:700; font-size:14px; {% if not l.active %}color:var(--soft); text-decoration:line-through;{% endif %}">
+      {{ l.name }} <span style="font-weight:400; color:var(--soft);">· {{ l.role }}</span>
+    </span>
+    <form method="post" action="{{ url_for('shift.admin_leader_reset_pin', leader_id=l.id) }}" class="inline-form">
+      <input type="text" name="pin" inputmode="numeric" placeholder="New PIN" style="width:90px; padding:7px;">
+      <button class="pill small" type="submit">Reset</button>
+    </form>
+    <form method="post" action="{{ url_for('shift.admin_leader_toggle', leader_id=l.id) }}">
+      <input type="hidden" name="active" value="{{ '0' if l.active else '1' }}">
+      <button class="pill small ghost" type="submit">{{ 'Deactivate' if l.active else 'Reactivate' }}</button>
+    </form>
+  </div>
+  {% else %}
+  <div class="empty" style="border:none; margin:0;">No leader logins yet — add
+  your shift leads and directors below so check-offs carry their name.</div>
+  {% endfor %}
+</div>
+
+<form method="post" action="{{ url_for('shift.admin_leader_add') }}" class="card">
+  <h2>Add a leader</h2>
+  <label class="field" for="l-name">Name</label>
+  <input type="text" id="l-name" name="name" required placeholder="e.g. Maya">
+  <div style="display:flex; gap:8px;">
+    <div style="flex:1;">
+      <label class="field" for="l-pin">PIN (4+ digits)</label>
+      <input type="text" id="l-pin" name="pin" inputmode="numeric" required placeholder="e.g. 4721">
+    </div>
+    <div style="width:130px;">
+      <label class="field" for="l-role">Role</label>
+      <select id="l-role" name="role">
+        <option value="lead">lead</option>
+        <option value="admin">admin</option>
+      </select>
+    </div>
+  </div>
+  <div style="margin-top:12px;">
+    <button class="pill primary" type="submit">Add leader</button>
+  </div>
+</form>
+{% if not admin_pin_set %}
+<div class="flash">SHIFT_ADMIN_PIN isn't set, so the “Operator” master login is
+disabled. Make sure at least one active leader has the admin role, or set the
+env var.</div>
+{% endif %}
+
+<div class="section-label">Checklists</div>
+<a class="card tap" href="{{ url_for('shift.admin_templates') }}">
+  <h2>Edit checklist templates →</h2>
+  <div class="progress-note">Change items, add new lists, retire old ones. Past days keep their history.</div>
+</a>
+
+<div class="section-label">Backup &amp; restore</div>
+<div class="card">
+  <a class="pill primary" href="{{ url_for('shift.admin_export') }}">⬇ Download backup (JSON)</a>
+  <div class="progress-note" style="margin-top:8px;">Everything except PINs.
+  Automate it by pointing a free cron pinger at
+  <code>/scheduled/shift-backup?token=…</code> — see the setup doc.</div>
+  <hr style="border:none; border-top:1px solid var(--line); margin:12px 0;">
+  <form method="post" action="{{ url_for('shift.admin_import') }}" enctype="multipart/form-data">
+    <label class="field" for="backup">Restore from a backup file</label>
+    <input type="file" id="backup" name="backup" accept="application/json,.json">
+    <label class="pill" style="cursor:pointer; margin-top:8px; display:inline-block;">
+      <input type="checkbox" name="confirm" value="1" style="accent-color:var(--cfa-red);">
+      I understand this replaces the current data
+    </label>
+    <div style="margin-top:10px;">
+      <button class="pill" type="submit">Restore</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

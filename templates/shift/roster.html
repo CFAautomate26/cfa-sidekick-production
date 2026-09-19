@@ -1,0 +1,45 @@
+{% extends "shift/base.html" %}
+{% block title %}Roster{% endblock %}
+{% block content %}
+<h1 class="page">Team roster</h1>
+<div class="sub">Names that show up when building lineups. Not logins — leaders
+get those under Admin.</div>
+
+<form method="post" action="{{ url_for('shift.roster_add') }}" class="inline-form" style="margin-bottom:14px;">
+  <input type="text" name="name" placeholder="Add a team member…" required>
+  <button class="pill primary" type="submit">Add</button>
+</form>
+
+<div class="card">
+  {% for m in members %}
+  <div style="display:flex; align-items:center; gap:8px; padding:8px 0; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
+    <span style="flex:1; font-weight:700; font-size:14px;">{{ m.name }}</span>
+    <form method="post" action="{{ url_for('shift.roster_toggle', member_id=m.id) }}">
+      <input type="hidden" name="active" value="0">
+      <button class="pill small ghost" type="submit">Remove</button>
+    </form>
+  </div>
+  {% else %}
+  <div class="empty" style="border:none; margin:0;">No team members yet — add
+  names above, or just type them straight into a lineup (they land here
+  automatically).</div>
+  {% endfor %}
+</div>
+
+{% if inactive %}
+<details style="margin-top:8px;">
+  <summary style="font-size:13px; color:var(--soft); cursor:pointer;">Removed ({{ inactive | length }})</summary>
+  <div class="card" style="margin-top:8px;">
+    {% for m in inactive %}
+    <div style="display:flex; align-items:center; gap:8px; padding:8px 0;">
+      <span style="flex:1; font-size:14px; color:var(--soft);">{{ m.name }}</span>
+      <form method="post" action="{{ url_for('shift.roster_toggle', member_id=m.id) }}">
+        <input type="hidden" name="active" value="1">
+        <button class="pill small" type="submit">Restore</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+{% endblock %}

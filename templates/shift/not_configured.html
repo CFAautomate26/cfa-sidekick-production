@@ -1,0 +1,17 @@
+{% extends "shift/base.html" %}
+{% block title %}Not configured{% endblock %}
+{% block content %}
+<div style="text-align:center; margin: 30px 0;">
+  <div style="font-size:44px;">🐮</div>
+  <h1 class="page">Almost ready</h1>
+  <div class="sub">Chick-fil-A Wharncliffe &amp; Wonderland — Shift Lead</div>
+</div>
+<div class="card">
+  <p style="font-size:15px;">The shift leading app isn't configured yet. Set the
+  <strong>SHIFT_ADMIN_PIN</strong> environment variable on the Render service,
+  redeploy, then sign in as <strong>Operator</strong> with that PIN to add your
+  leadership team.</p>
+  <p style="font-size:13px; color:var(--soft); margin-top:10px;">
+  Full setup guide: docs/shift-leading-app.md in the repo.</p>
+</div>
+{% endblock %}

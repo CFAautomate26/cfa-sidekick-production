@@ -1,5 +1,9 @@
+import hashlib
 import os
 import random
+import secrets
+from datetime import timedelta
+
 from flask import Flask, request, render_template, redirect
 from openai import OpenAI
 import requests
@@ -13,6 +17,38 @@ from slack_coverage import slack_bp
 
 app = Flask(__name__)
 app.register_blueprint(slack_bp)
+
+# Signed session cookies for the shift leading app. Prefer a dedicated
+# FLASK_SECRET_KEY; otherwise derive a stable key from the secrets actually
+# configured in the environment (so sessions survive deploys). If neither
+# env var is set there is nothing secret to derive from — a random per-boot
+# key (sessions reset each deploy) beats a key derivable from this repo.
+_secret_seed = ":".join([(os.getenv("SCHEDULE_SECRET") or "").strip(),
+                         (os.getenv("SHIFT_ADMIN_PIN") or "").strip()])
+if (os.getenv("FLASK_SECRET_KEY") or "").strip():
+    app.secret_key = os.getenv("FLASK_SECRET_KEY").strip()
+elif _secret_seed != ":":
+    app.secret_key = hashlib.sha256(
+        ("cfa-sidekick-session:" + _secret_seed).encode()).hexdigest()
+else:
+    app.secret_key = secrets.token_hex(32)
+    print("WARNING: no FLASK_SECRET_KEY/SCHEDULE_SECRET/SHIFT_ADMIN_PIN set — "
+          "using a random session key; shift-app logins reset every deploy.")
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+# The shift leading app must never be able to take down the GroupMe/Slack
+# webhooks: register it fault-isolated.
+try:
+    import shift_db
+    from shift_app import shift_bp
+
+    shift_db.init_db()
+    app.register_blueprint(shift_bp)
+    print("Shift leading app registered at /shift")
+except Exception as e:  # pragma: no cover - defensive boot guard
+    shift_db = None
+    print(f"WARNING: shift leading app failed to load, bots unaffected: {e!r}")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GROUPME_BOT_ID = os.getenv("GROUPME_BOT_ID")
@@ -490,6 +526,25 @@ def scheduled_intro():
 
     send_groupme_message(INTRO_NOTE)
     return "OK", 200
+
+
+@app.route("/scheduled/shift-backup", methods=["GET"])
+def scheduled_shift_backup():
+    """Shift-app JSON backup, for a cron pinger (e.g. cron-job.org saves the
+    response body daily). Same token convention as the other /scheduled routes."""
+    token = request.args.get("token", "")
+    if not SCHEDULE_SECRET or token != SCHEDULE_SECRET:
+        return "Unauthorized", 401
+    if shift_db is None:
+        return "Shift app not loaded", 503
+
+    payload = shift_db.export_json()
+    print(f"Shift backup exported ({len(payload)} bytes)")
+    return payload, 200, {
+        "Content-Type": "application/json",
+        "Content-Disposition":
+            f"attachment; filename=shift-backup-{shift_db.today_local()}.json",
+    }
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

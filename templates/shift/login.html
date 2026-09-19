@@ -1,0 +1,43 @@
+{% extends "shift/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<div style="text-align:center; margin: 26px 0 18px;">
+  <div style="font-size:44px;">🐮</div>
+  <h1 class="page">Shift Lead</h1>
+  <div class="sub">Chick-fil-A Wharncliffe &amp; Wonderland</div>
+</div>
+
+{% if error %}<div class="flash">{{ error }}</div>{% endif %}
+
+<form method="post" action="{{ url_for('shift.login') }}" class="card">
+  {# request.values keeps the deep link alive when the form re-renders after
+     a wrong PIN (the POST body carries it once the query string is gone) #}
+  {% set nxt = request.values.get('next') %}
+  {% if nxt %}<input type="hidden" name="next" value="{{ nxt }}">{% endif %}
+  <label class="field">Who are you?</label>
+  {% if names %}
+  <div class="pillrow" style="margin-bottom:4px;">
+    {% for n in names %}
+    <label class="pill" style="cursor:pointer;">
+      <input type="radio" name="name" value="{{ n }}" style="accent-color:var(--cfa-red);"
+             {{ 'checked' if picked == n }}> {{ n }}
+    </label>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">No leader logins exist yet — sign in as Operator with the
+    SHIFT_ADMIN_PIN, then add your leaders under Admin.</div>
+  {% endif %}
+
+  <label class="field" for="pin">PIN</label>
+  <input type="password" id="pin" name="pin" inputmode="numeric" autocomplete="current-password"
+         placeholder="Your PIN" required>
+
+  <div style="margin-top:14px;">
+    <button type="submit" class="pill primary" style="width:100%; padding:13px;">Sign in</button>
+  </div>
+</form>
+
+<div class="sub" style="text-align:center;">Sessions last 30 days on this phone.
+  Ask the Operator if you need a PIN or a reset.</div>
+{% endblock %}

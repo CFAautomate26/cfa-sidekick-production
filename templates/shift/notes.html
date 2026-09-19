@@ -1,0 +1,61 @@
+{% extends "shift/base.html" %}
+{% block title %}Notes{% endblock %}
+{% block content %}
+<h1 class="page">Shift notes</h1>
+<div class="sub">The store logbook — wins, issues, and handoffs for the next shift.</div>
+
+<details class="compose" open>
+  <summary>+ New note</summary>
+  <form method="post" action="{{ url_for('shift.note_create') }}" class="card">
+    <label class="field" for="n-body">What should the next shift know?</label>
+    <textarea id="n-body" name="body" data-draft required
+      placeholder="e.g. Fryer 2 recovery is slow — maintenance called, ticket #4412. Watch it at dinner."></textarea>
+    <div style="display:flex; gap:8px;">
+      <div style="flex:1;">
+        <label class="field" for="n-cat">Category</label>
+        <select id="n-cat" name="category">
+          {% for c in NOTE_CATEGORIES %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:1;">
+        <label class="field" for="n-dp">Daypart</label>
+        <select id="n-dp" name="daypart">
+          <option value="">—</option>
+          {% for dp in DAYPARTS %}<option value="{{ dp }}" {{ 'selected' if dp == shift_daypart }}>{{ dp }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="pill primary" type="submit">Post note</button>
+    </div>
+  </form>
+</details>
+
+<div class="chiprow">
+  <a class="pill small {{ 'on' if not category }}" href="{{ url_for('shift.notes') }}">All</a>
+  {% for c in NOTE_CATEGORIES %}
+  <a class="pill small {{ 'on' if category == c }}" href="{{ url_for('shift.notes', category=c) }}">{{ c }}</a>
+  {% endfor %}
+</div>
+
+{% for n in feed %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+    <span class="note-cat cat-{{ n.category }}">{{ n.category }}</span>
+    <span class="progress-note" style="margin:0;">{{ n.note_date }}{% if n.daypart %} · {{ n.daypart }}{% endif %}</span>
+  </div>
+  <div style="font-size:14px; margin-top:8px; white-space:pre-line;">{{ n.body }}</div>
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+    <div class="progress-note" style="margin:0;">{{ n.author }} · {{ n.created_at[11:] }}</div>
+    {% if shift_is_admin or n.author == shift_name %}
+    <form method="post" action="{{ url_for('shift.note_delete', note_id=n.id) }}"
+          onsubmit="return confirm('Delete this note?');">
+      <button class="pill small ghost" type="submit">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="empty">No notes {% if category %}in “{{ category }}” {% endif %}yet.</div>
+{% endfor %}
+{% endblock %}

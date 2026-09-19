@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#E31937">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="{{ url_for('shift.manifest') }}">
+<link rel="icon" href="{{ url_for('shift.icon') }}" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{{ url_for('shift.icon') }}">
+<title>{% block title %}Shift Lead{% endblock %} — CFA Wharncliffe &amp; Wonderland</title>
+<style>
+  :root {
+    --cfa-red: #E31937;
+    --cfa-red-dark: #c8142f;
+    --cream: #FFFAF2;
+    --ink: #3C2C21;
+    --soft: #968270;
+    --line: #eadfd2;
+    --good: #1e7b34;
+    --card: #fff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: "Apercu", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.45;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  a { color: inherit; }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--cfa-red); color: #fff;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+  .topbar .brand { font-weight: 700; font-size: 17px; letter-spacing: 0.02em; text-decoration: none; }
+  .topbar .brand small { display: block; font-weight: 400; font-size: 11px; opacity: 0.9; letter-spacing: 0.08em; text-transform: uppercase; }
+  .whoami {
+    position: relative;
+    background: rgba(255,255,255,0.16); color: #fff; text-decoration: none;
+    border-radius: 999px; padding: 7px 14px; font-size: 14px; font-weight: 700;
+  }
+  .whoami .dot {
+    position: absolute; top: -2px; right: -2px; width: 12px; height: 12px;
+    background: #ffb300; border: 2px solid var(--cfa-red); border-radius: 50%;
+  }
+
+  .wrap { max-width: 640px; margin: 0 auto; padding: 16px; }
+
+  .banner-risk {
+    background: #7a1220; color: #fff; font-size: 13px; font-weight: 700;
+    text-align: center; padding: 8px 16px;
+  }
+  .flash {
+    background: #fff6e6; border: 1px solid #e8c98a; color: #6b4b12;
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; font-size: 14px;
+  }
+
+  h1.page { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--soft); font-size: 13px; margin-bottom: 14px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 14px; margin-bottom: 12px;
+  }
+  .card h2 { font-size: 15px; margin-bottom: 8px; }
+  .card h2 a { text-decoration: none; }
+  .card.tap { display: block; text-decoration: none; }
+
+  .section-label {
+    color: var(--cfa-red); text-transform: uppercase; letter-spacing: 0.14em;
+    font-size: 12px; font-weight: 700; margin: 18px 0 8px;
+  }
+
+  .pill, button.pill {
+    display: inline-block; border: 1px solid var(--line); background: #fff;
+    color: var(--ink); border-radius: 999px; padding: 8px 14px; font: inherit;
+    font-size: 14px; font-weight: 700; text-decoration: none; cursor: pointer;
+  }
+  .pill.primary { background: var(--cfa-red); border-color: var(--cfa-red); color: #fff; }
+  .pill.primary:active { background: var(--cfa-red-dark); }
+  .pill.small { padding: 5px 11px; font-size: 13px; }
+  .pill.ghost { background: transparent; }
+  .pillrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chiprow {
+    display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 10px;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .chiprow::-webkit-scrollbar { display: none; }
+  .chiprow .pill { white-space: nowrap; flex: 0 0 auto; }
+  .pill.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+  .bar { background: var(--cream); border: 1px solid var(--line); border-radius: 999px; height: 12px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--cfa-red); border-radius: 999px; transition: width 0.25s; }
+  .bar.full span { background: var(--good); }
+  .progress-note { font-size: 13px; color: var(--soft); margin-top: 6px; }
+  .critical-flag { color: var(--cfa-red); font-weight: 700; font-size: 13px; }
+
+  /* Checklist rows: the whole row is the submit button */
+  form.item { margin: 0; }
+  button.itemrow {
+    display: flex; align-items: flex-start; gap: 12px; width: 100%;
+    background: none; border: none; border-bottom: 1px solid var(--line);
+    padding: 13px 2px; font: inherit; color: inherit; text-align: left;
+    min-height: 56px; cursor: pointer;
+  }
+  form.item:last-child button.itemrow { border-bottom: none; }
+  .checkmark {
+    flex: 0 0 26px; height: 26px; margin-top: 1px;
+    border: 2px solid var(--soft); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: transparent; font-size: 15px; font-weight: 700;
+  }
+  .itemrow.done .checkmark { background: var(--good); border-color: var(--good); color: #fff; }
+  .itemrow .label { flex: 1; font-size: 15px; }
+  .itemrow.done .label { text-decoration: line-through; color: var(--soft); }
+  .itemrow .meta { display: block; font-size: 12px; color: var(--soft); font-weight: 400; }
+  .itemrow .crit { color: var(--cfa-red); font-weight: 700; }
+  .itemrow.done .crit { color: var(--soft); }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+  .itemrow.shake { animation: shake 0.3s; }
+
+  label.field { display: block; font-weight: 700; font-size: 14px; margin: 10px 0 4px; }
+  input[type=text], input[type=number], input[type=date], input[type=password],
+  select, textarea {
+    width: 100%; font: inherit; font-size: 15px; color: var(--ink);
+    background: #fff; border: 1px solid #d9cbbb; border-radius: 10px; padding: 11px;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  input:focus, select:focus, textarea:focus {
+    outline: 2px solid var(--cfa-red); outline-offset: 1px; border-color: var(--cfa-red);
+  }
+  .inline-form { display: flex; gap: 8px; align-items: center; }
+  .inline-form input, .inline-form select { flex: 1; }
+  details.compose { margin-bottom: 14px; }
+  details.compose > summary {
+    list-style: none; cursor: pointer; display: inline-block;
+    background: var(--cfa-red); color: #fff; border-radius: 999px;
+    padding: 10px 18px; font-weight: 700; font-size: 15px;
+  }
+  details.compose > summary::-webkit-details-marker { display: none; }
+  details.compose[open] > summary { margin-bottom: 10px; }
+
+  .empty {
+    text-align: center; color: var(--soft); font-size: 14px;
+    padding: 22px 12px; border: 1px dashed var(--line); border-radius: 14px;
+    margin-bottom: 12px;
+  }
+
+  .assignee {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--cream); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 14px; font-weight: 700;
+  }
+  .assignee form { margin: 0; display: flex; }
+  .assignee button {
+    border: none; background: var(--line); color: var(--soft);
+    border-radius: 50%; width: 22px; height: 22px; font-size: 13px; cursor: pointer;
+  }
+
+  .note-cat { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 3px 9px; border-radius: 999px; background: var(--cream); border: 1px solid var(--line); color: var(--soft); }
+  .cat-win { color: var(--good); border-color: var(--good); }
+  .cat-issue, .cat-equipment, .cat-food-safety { color: var(--cfa-red); border-color: var(--cfa-red); }
+
+  table.plain { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.plain td, table.plain th { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    background: #fff; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-around;
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+  .tabbar a {
+    flex: 1; text-align: center; text-decoration: none; color: var(--soft);
+    font-size: 11px; font-weight: 700; padding: 4px 0; border-radius: 10px;
+  }
+  .tabbar a .ico { display: block; font-size: 21px; line-height: 1.2; }
+  .tabbar a.on { color: var(--cfa-red); }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+{% if session.get('shift_name') %}
+<div class="topbar">
+  <a class="brand" href="{{ url_for('shift.today') }}">Shift Lead
+    <small>CFA Wharncliffe &amp; Wonderland</small></a>
+  <a class="whoami" href="{{ url_for('shift.more') }}">{{ shift_name }}
+    {% if unread_announcements %}<span class="dot" title="New announcements"></span>{% endif %}</a>
+</div>
+{% endif %}
+{% if data_at_risk and shift_is_admin %}
+<div class="banner-risk">⚠ SHIFT_DB_PATH is not set — data will NOT survive a deploy. See the admin page.</div>
+{% endif %}
+
+<div class="wrap">
+  {% with messages = get_flashed_messages() %}
+    {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</div>
+
+{% if session.get('shift_name') %}
+<nav class="tabbar">
+  {% set ep = request.endpoint or '' %}
+  <a href="{{ url_for('shift.today') }}" class="{{ 'on' if ep == 'shift.today' }}"><span class="ico">🏠</span>Today</a>
+  <a href="{{ url_for('shift.checklists') }}" class="{{ 'on' if ep.startswith('shift.checklists') or ep == 'shift.run_detail' }}"><span class="ico">✅</span>Checklists</a>
+  <a href="{{ url_for('shift.lineup') }}" class="{{ 'on' if ep.startswith('shift.lineup') }}"><span class="ico">🧢</span>Lineup</a>
+  <a href="{{ url_for('shift.goals') }}" class="{{ 'on' if ep.startswith('shift.goal') }}"><span class="ico">🎯</span>Goals</a>
+  <a href="{{ url_for('shift.notes') }}" class="{{ 'on' if ep.startswith('shift.note') }}"><span class="ico">📝</span>Notes</a>
+</nav>
+{% endif %}
+
+<script>
+// Progressive enhancement: checklist toggles post in the background and the
+// row flips instantly; on failure the row shakes and reverts. Without JS the
+// forms still work as normal page posts.
+document.addEventListener('submit', function (e) {
+  var form = e.target;
+  if (!form.classList.contains('item')) return;
+  e.preventDefault();
+  if (form.dataset.busy) return;  // ignore taps while a write is in flight
+  form.dataset.busy = '1';
+  var row = form.querySelector('.itemrow');
+  var doneInput = form.querySelector('input[name=done]');
+  var submitted = doneInput.value;              // the state we're writing
+  var data = new FormData(form);                // snapshot BEFORE flipping
+  data.set('ajax', '1');
+  row.classList.toggle('done', submitted === '1');
+  doneInput.value = submitted === '1' ? '0' : '1';  // next tap = undo
+  fetch(form.action, { method: 'POST', body: data })
+    .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+    .then(function (out) {
+      if (!out.ok) throw 0;
+      doneInput.value = out.done ? '0' : '1';   // reconcile with the server
+      row.classList.toggle('done', !!out.done);
+      var meta = row.querySelector('.meta');
+      meta.textContent = out.done ? ('done by ' + (out.done_by || '') + ' · ' + (out.done_at || '').slice(11)) : '';
+      var page = document.querySelector('[data-progress]');
+      if (page) {
+        var bar = page.querySelector('.bar span');
+        bar.style.width = Math.round(out.done_count / out.total * 100) + '%';
+        page.querySelector('.bar').classList.toggle('full', out.done_count === out.total);
+        page.querySelector('[data-progress-text]').textContent = out.done_count + ' of ' + out.total + ' done';
+        var crit = page.querySelector('[data-critical]');
+        if (crit) crit.style.display = out.critical_remaining ? '' : 'none';
+      }
+    })
+    .catch(function () {
+      row.classList.toggle('done', submitted !== '1');
+      doneInput.value = submitted;
+      row.classList.add('shake');
+      setTimeout(function () { row.classList.remove('shake'); }, 400);
+    })
+    .finally(function () { delete form.dataset.busy; });
+});
+
+// Shift-note drafts survive a rush interruption (per-phone convenience only).
+(function () {
+  var box = document.querySelector('textarea[data-draft]');
+  if (!box) return;
+  var key = 'shift-note-draft';
+  try { if (!box.value) box.value = localStorage.getItem(key) || ''; } catch (e) {}
+  box.addEventListener('input', function () {
+    try { localStorage.setItem(key, box.value); } catch (e) {}
+  });
+  box.form && box.form.addEventListener('submit', function () {
+    try { localStorage.removeItem(key); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+{% extends "shift/base.html" %}
+{% block title %}{{ goal.title }}{% endblock %}
+{% block content %}
+<h1 class="page">{{ goal.title }}</h1>
+<div class="sub">{{ goal.period }}{% if goal.due_date %} · due {{ goal.due_date }}{% endif %} · set by {{ goal.created_by }} · {{ goal.status }}</div>
+
+{% if goal.why %}
+<div class="card" style="font-size:14px; white-space:pre-line;">{{ goal.why }}</div>
+{% endif %}
+
+{% if goal.target_value is not none %}
+<div class="card">
+  <h2>{{ goal.metric or 'Progress' }}</h2>
+  {% if goal.progress_pct is not none %}
+  <div class="bar {{ 'full' if goal.progress_pct >= 100 }}"><span style="width: {{ goal.progress_pct }}%"></span></div>
+  <div class="progress-note">Latest: {{ goal.latest_value | num }} {{ goal.unit }} · target {{ goal.target_value | num }} {{ goal.unit }} ({{ '↓ lower' if goal.direction == 'down' else '↑ higher' }} is better) · {{ goal.progress_pct }}%</div>
+  {% else %}
+  <div class="progress-note">No numbers logged yet — target {{ goal.target_value | num }} {{ goal.unit }} ({{ '↓ lower' if goal.direction == 'down' else '↑ higher' }} is better).</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Log progress</h2>
+  <form method="post" action="{{ url_for('shift.goal_update', goal_id=goal.id) }}">
+    {% if goal.target_value is not none %}
+    <label class="field" for="u-value">Today's number{% if goal.unit %} ({{ goal.unit }}){% endif %}</label>
+    <input type="number" step="any" inputmode="decimal" id="u-value" name="value" placeholder="e.g. 227">
+    {% endif %}
+    <label class="field" for="u-note">Note</label>
+    <input type="text" id="u-note" name="note" placeholder="What moved it? (optional)">
+    <div style="margin-top:12px;">
+      <button class="pill primary" type="submit">Save update</button>
+    </div>
+  </form>
+</div>
+
+{% if updates %}
+<div class="section-label">History</div>
+<div class="card">
+  <table class="plain">
+    {% for u in updates %}
+    <tr>
+      <td style="white-space:nowrap; color:var(--soft);">{{ u.recorded_at }}</td>
+      <td>{% if u.value is not none %}<strong>{{ u.value | num }} {{ goal.unit }}</strong>{% endif %}
+          {% if u.note %}<div style="color:var(--soft);">{{ u.note }}</div>{% endif %}</td>
+      <td style="color:var(--soft); white-space:nowrap;">{{ u.recorded_by }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<div class="pillrow" style="margin-top:14px;">
+  {% if goal.status != 'achieved' %}
+  <form method="post" action="{{ url_for('shift.goal_status', goal_id=goal.id) }}">
+    <input type="hidden" name="status" value="achieved">
+    <button class="pill small" type="submit">🏆 Mark achieved</button>
+  </form>
+  {% endif %}
+  {% if goal.status != 'archived' %}
+  <form method="post" action="{{ url_for('shift.goal_status', goal_id=goal.id) }}">
+    <input type="hidden" name="status" value="archived">
+    <button class="pill small ghost" type="submit">Archive</button>
+  </form>
+  {% endif %}
+  {% if goal.status != 'active' %}
+  <form method="post" action="{{ url_for('shift.goal_status', goal_id=goal.id) }}">
+    <input type="hidden" name="status" value="active">
+    <button class="pill small" type="submit">Reactivate</button>
+  </form>
+  {% endif %}
+  <a class="pill small ghost" href="{{ url_for('shift.goals') }}">← All goals</a>
+</div>
+{% endblock %}

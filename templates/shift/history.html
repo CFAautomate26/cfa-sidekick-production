@@ -1,0 +1,60 @@
+{% extends "shift/base.html" %}
+{% block title %}History{% endblock %}
+{% block content %}
+<h1 class="page">History</h1>
+<div class="sub">What happened on {{ day }}{{ ' (today)' if day == shift_today }}</div>
+
+<div class="chiprow">
+  {% for d in recent %}
+  <a class="pill small {{ 'on' if d == day }}" href="{{ url_for('shift.history', date=d) }}">{{ 'Today' if d == shift_today else d[5:] }}</a>
+  {% endfor %}
+</div>
+<form method="get" action="{{ url_for('shift.history') }}" class="inline-form" style="margin-bottom:14px;">
+  <input type="date" name="date" value="{{ day }}" max="{{ shift_today }}">
+  <button class="pill" type="submit">Go</button>
+</form>
+
+<div class="section-label">Checklists</div>
+{% for run, items in runs %}
+<div class="card">
+  <h2>{{ run.name }} <span class="progress-note" style="display:inline; margin:0;">{{ run.done }}/{{ run.total }}</span></h2>
+  <table class="plain">
+    {% for i in items %}
+    <tr>
+      <td style="width:24px;">{{ '✅' if i.done else '▢' }}</td>
+      <td>{% if i.critical %}<span class="critical-flag">●</span> {% endif %}{{ i.label }}</td>
+      <td style="color:var(--soft); white-space:nowrap;">{% if i.done %}{{ i.done_by }} · {{ i.done_at[11:] }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% else %}
+<div class="empty">No checklist runs on {{ day }} — nobody opened the app that day.</div>
+{% endfor %}
+
+{% if lineups %}
+<div class="section-label">Lineups</div>
+{% for dp, lineup in lineups.items() %}
+<div class="card">
+  <h2>{{ DAYPART_LABELS[dp] }}</h2>
+  {% for pid, assignments in lineup.items() %}
+  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px;">
+    <span style="color:var(--soft); flex:0 0 46%;">{{ positions[pid].name if pid in positions else 'Position #' ~ pid }}</span>
+    <strong>{{ assignments | map(attribute='member_name') | join(', ') }}</strong>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+{% endif %}
+
+<div class="section-label">Notes</div>
+{% for n in notes %}
+<div class="card">
+  <span class="note-cat cat-{{ n.category }}">{{ n.category }}</span>
+  <div style="font-size:14px; margin-top:6px; white-space:pre-line;">{{ n.body }}</div>
+  <div class="progress-note">{{ n.author }} · {{ n.created_at }}</div>
+</div>
+{% else %}
+<div class="empty">No notes on {{ day }}.</div>
+{% endfor %}
+{% endblock %}

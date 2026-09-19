@@ -19,6 +19,19 @@ Canada.
 
 - `app.py` — Flask webhook for GroupMe; OpenAI-backed responses. Team members
   invoke the bot with the `cow:` keyword.
+- `shift_app.py` + `shift_db.py` — the shift leading app at `/shift`
+  (Huddle-style: daily checklists with who-did-what stamps, position
+  lineups, goals, shift notes, announcements with read receipts). Blueprint
+  registers fault-isolated so it can never take down the bots. Storage is
+  stdlib SQLite at `SHIFT_DB_PATH` (a Render persistent disk in
+  production). Templates in `templates/shift/`; tests in `tests/` (run
+  `python -m pytest tests/`). Setup guide:
+  [docs/shift-leading-app.md](docs/shift-leading-app.md). Env vars:
+  `SHIFT_ADMIN_PIN` (Operator master login), `SHIFT_DB_PATH`,
+  `FLASK_SECRET_KEY` (optional; falls back to a key derived from the
+  `SCHEDULE_SECRET`/`SHIFT_ADMIN_PIN` env vars, or a random per-boot key if
+  neither is set), `SHIFT_TZ` (default America/Toronto). Never store
+  HR/discipline/wage/medical content in it.
 - `slack_coverage.py` — Slack Events API blueprint (`POST /slack/events`)
   that auto-responds in-thread in the #shift-coverage Slack channel:
   validates `🔄 COVERAGE REQUEST` template posts, nags un-released shifts
