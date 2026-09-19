@@ -1,0 +1,38 @@
+{% extends "shift/base.html" %}
+{% block title %}{{ template.name if template else 'New checklist' }}{% endblock %}
+{% block content %}
+<h1 class="page">{{ template.name if template else 'New checklist' }}</h1>
+<div class="sub">{% if template %}Editing the template — past days keep what
+they had.{% else %}A new daily checklist.{% endif %}</div>
+
+<form method="post" class="card"
+      action="{{ url_for('shift.admin_template_edit', template_id=template.id) if template else url_for('shift.admin_template_new') }}">
+  <label class="field" for="t-name">Name</label>
+  <input type="text" id="t-name" name="name" required value="{{ template.name if template else '' }}"
+         placeholder="e.g. Saturday Deep Clean">
+  <div style="display:flex; gap:8px;">
+    <div style="flex:1;">
+      <label class="field" for="t-daypart">Daypart</label>
+      <select id="t-daypart" name="daypart">
+        {% for dp in DAYPARTS %}
+        <option value="{{ dp }}" {{ 'selected' if template and template.daypart == dp }}>{{ DAYPART_LABELS[dp] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="flex:1;">
+      <label class="field" for="t-area">Area</label>
+      <input type="text" id="t-area" name="area" value="{{ template.area if template else 'All' }}"
+             placeholder="Front Counter / Kitchen / All">
+    </div>
+  </div>
+  <label class="field" for="t-items">Items — one per line</label>
+  <div class="progress-note" style="margin:0 0 6px;">Start a line with
+  <strong>!</strong> to mark it critical (food safety / cash — flagged red).</div>
+  <textarea id="t-items" name="items" required style="min-height:220px;"
+    placeholder="Registers on and tested&#10;! Sanitizer buckets at 200 ppm&#10;Stock sauces">{{ items_text }}</textarea>
+  <div style="margin-top:12px;">
+    <button class="pill primary" type="submit" style="width:100%; padding:12px;">Save</button>
+  </div>
+</form>
+<a class="pill small ghost" href="{{ url_for('shift.admin_templates') }}">← All templates</a>
+{% endblock %}

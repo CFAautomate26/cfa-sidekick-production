@@ -1,0 +1,66 @@
+{% extends "shift/base.html" %}
+{% block title %}Announcements{% endblock %}
+{% block content %}
+<h1 class="page">Announcements</h1>
+<div class="sub">From the Operator — tap “Got it” so we know you've seen it.</div>
+
+{% if shift_is_admin %}
+<details class="compose">
+  <summary>+ New announcement</summary>
+  <form method="post" action="{{ url_for('shift.announcement_create') }}" class="card">
+    <label class="field" for="a-body">Announcement</label>
+    <textarea id="a-body" name="body" required placeholder="e.g. New sauce portioning SOP starts Monday — see the poster in BOH."></textarea>
+    <div style="display:flex; gap:8px; align-items:end;">
+      <div style="flex:1;">
+        <label class="field" for="a-exp">Expires (optional)</label>
+        <input type="date" id="a-exp" name="expires_on">
+      </div>
+      <label class="pill" style="cursor:pointer;">
+        <input type="checkbox" name="pinned" value="1" style="accent-color:var(--cfa-red);"> Pin on top
+      </label>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="pill primary" type="submit">Post</button>
+    </div>
+  </form>
+</details>
+{% endif %}
+
+{% for a in items %}
+<div class="card" {% if not a.acked %}style="border-color: var(--cfa-red);"{% endif %}>
+  <div style="display:flex; gap:8px; align-items:flex-start;">
+    {% if a.pinned %}<span title="Pinned">📌</span>{% endif %}
+    <div style="flex:1; font-size:15px; white-space:pre-line;">{{ a.body }}</div>
+  </div>
+  <div class="progress-note">{{ a.author }} · {{ a.created_at }}{% if a.expires_on %} · until {{ a.expires_on }}{% endif %}</div>
+  <div style="display:flex; gap:8px; margin-top:10px; align-items:center; flex-wrap:wrap;">
+    {% if a.acked %}
+    <span class="pill small" style="border-color:var(--good); color:var(--good);">✓ Got it</span>
+    {% else %}
+    <form method="post" action="{{ url_for('shift.announcement_ack', announcement_id=a.id) }}">
+      <button class="pill primary small" type="submit">Got it ✓</button>
+    </form>
+    {% endif %}
+    <span class="progress-note" style="margin:0;">{{ a.ack_count }} acknowledged</span>
+    {% if shift_is_admin %}
+    <form method="post" action="{{ url_for('shift.announcement_delete', announcement_id=a.id) }}"
+          onsubmit="return confirm('Delete this announcement?');" style="margin-left:auto;">
+      <button class="pill small ghost" type="submit">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if shift_is_admin and readers.get(a.id) %}
+  <details style="margin-top:8px;">
+    <summary style="font-size:13px; color:var(--soft); cursor:pointer;">Who's seen it</summary>
+    <table class="plain" style="margin-top:6px;">
+      {% for r in readers[a.id] %}
+      <tr><td>{{ r.reader }}</td><td style="color:var(--soft);">{{ r.read_at }}</td></tr>
+      {% endfor %}
+    </table>
+  </details>
+  {% endif %}
+</div>
+{% else %}
+<div class="empty">No announcements right now.</div>
+{% endfor %}
+{% endblock %}

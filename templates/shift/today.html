@@ -1,0 +1,90 @@
+{% extends "shift/base.html" %}
+{% block title %}Today{% endblock %}
+{% block content %}
+<h1 class="page">Today</h1>
+<div class="sub">{{ shift_today }} · currently <strong>{{ DAYPART_LABELS[shift_daypart] }}</strong></div>
+
+{% for a in announcements %}
+<div class="card" style="border-color: var(--cfa-red);">
+  <div style="display:flex; gap:10px; align-items:flex-start;">
+    <div style="font-size:20px;">📣</div>
+    <div style="flex:1;">
+      <div style="font-size:15px; white-space:pre-line;">{{ a.body }}</div>
+      <div class="progress-note">{{ a.author }} · {{ a.created_at }}</div>
+    </div>
+  </div>
+  <form method="post" action="{{ url_for('shift.announcement_ack', announcement_id=a.id) }}" style="margin-top:10px;">
+    <input type="hidden" name="next" value="{{ url_for('shift.today') }}">
+    <button class="pill primary small" type="submit">Got it ✓</button>
+  </form>
+</div>
+{% endfor %}
+
+<div class="section-label">This daypart's checklists</div>
+{% for r in current_runs %}
+<a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
+  <h2>{{ r.name }} {% if r.critical_remaining %}<span class="critical-flag">● {{ r.critical_remaining }} critical left</span>{% endif %}</h2>
+  <div class="bar {{ 'full' if r.done == r.total and r.total }}"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
+  <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.area }}</div>
+</a>
+{% else %}
+<div class="empty">No checklists for this daypart. See all of today's under the ✅ tab.</div>
+{% endfor %}
+
+{% set other = runs | rejectattr('daypart', 'equalto', shift_daypart) | list %}
+{% if other %}
+<div class="section-label">Rest of today</div>
+<div class="card">
+  {% for r in other %}
+  <div style="display:flex; align-items:center; gap:10px; padding:6px 0;">
+    <a href="{{ url_for('shift.run_detail', run_id=r.id) }}" style="flex:1; text-decoration:none; font-weight:700; font-size:14px;">{{ r.name }}</a>
+    <span class="progress-note" style="margin:0;">{{ r.done }}/{{ r.total }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="section-label">{{ DAYPART_LABELS[shift_daypart] }} lineup</div>
+<a class="card tap" href="{{ url_for('shift.lineup') }}">
+  {% if lineup %}
+    {% for p in positions if p.id in lineup %}
+      <div style="display:flex; gap:8px; padding:3px 0; font-size:14px;">
+        <span style="color:var(--soft); flex:0 0 46%;">{{ p.name }}</span>
+        <strong>{{ lineup[p.id] | map(attribute='member_name') | join(', ') }}</strong>
+      </div>
+    {% endfor %}
+    <div class="progress-note">Tap to edit</div>
+  {% else %}
+    <div style="color:var(--soft); font-size:14px;">No lineup for {{ DAYPART_LABELS[shift_daypart] }} yet — tap to set it up or copy from yesterday.</div>
+  {% endif %}
+</a>
+
+<div class="section-label">Goals</div>
+{% for g in goals[:3] %}
+<a class="card tap" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}">
+  <h2>{{ g.title }}</h2>
+  {% if g.progress_pct is not none %}
+  <div class="bar {{ 'full' if g.progress_pct >= 100 }}"><span style="width: {{ g.progress_pct }}%"></span></div>
+  <div class="progress-note">{{ g.latest_value | num }} {{ g.unit }} · target {{ g.target_value | num }} {{ g.unit }} · {{ g.progress_pct }}%</div>
+  {% else %}
+  <div class="progress-note">{{ g.period }}{% if g.due_date %} · due {{ g.due_date }}{% endif %} · tap to log progress</div>
+  {% endif %}
+</a>
+{% else %}
+<div class="empty">No active goals — set one under the 🎯 tab.</div>
+{% endfor %}
+{% if goals | length > 3 %}
+<a class="pill small ghost" href="{{ url_for('shift.goals') }}">All {{ goals | length }} goals →</a>
+{% endif %}
+
+<div class="section-label">Today's notes</div>
+{% for n in notes %}
+<div class="card">
+  <span class="note-cat cat-{{ n.category }}">{{ n.category }}</span>
+  <div style="font-size:14px; margin-top:6px; white-space:pre-line;">{{ n.body }}</div>
+  <div class="progress-note">{{ n.author }} · {{ n.created_at }}{% if n.daypart %} · {{ n.daypart }}{% endif %}</div>
+</div>
+{% else %}
+<div class="empty">No notes yet today — leave the next shift a handoff under 📝.</div>
+{% endfor %}
+{% endblock %}

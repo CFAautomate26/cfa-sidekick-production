@@ -1,0 +1,33 @@
+{% extends "shift/base.html" %}
+{% block title %}{{ run.name }}{% endblock %}
+{% block content %}
+{% set done_count = items | selectattr('done') | list | length %}
+{% set crit_left = items | selectattr('critical') | rejectattr('done') | list | length %}
+<div data-progress>
+  <h1 class="page">{{ run.name }}</h1>
+  <div class="sub">{{ run.run_date }} · {{ DAYPART_LABELS[run.daypart] }} · {{ run.area }}</div>
+  <div class="bar {{ 'full' if done_count == items|length and items }}">
+    <span style="width: {{ (done_count / items|length * 100) | round if items else 0 }}%"></span>
+  </div>
+  <div class="progress-note" style="margin-bottom:4px;"><span data-progress-text>{{ done_count }} of {{ items | length }} done</span></div>
+  <div class="critical-flag" data-critical {% if not crit_left %}style="display:none"{% endif %}>
+    ● Red-dot items are food-safety / cash critical — don't skip them.
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px; padding: 2px 14px;">
+  {% for i in items %}
+  <form class="item" method="post" action="{{ url_for('shift.toggle_item', item_id=i.id) }}" id="item-{{ i.id }}">
+    <input type="hidden" name="done" value="{{ '0' if i.done else '1' }}">
+    <button type="submit" class="itemrow {{ 'done' if i.done }}">
+      <span class="checkmark">✓</span>
+      <span class="label">{% if i.critical %}<span class="crit">● </span>{% endif %}{{ i.label }}
+        <span class="meta">{% if i.done %}done by {{ i.done_by }} · {{ i.done_at[11:] }}{% endif %}</span>
+      </span>
+    </button>
+  </form>
+  {% endfor %}
+</div>
+<div class="sub">Tap a row to check it off — tap again to undo. Every check is
+stamped with your name.</div>
+{% endblock %}

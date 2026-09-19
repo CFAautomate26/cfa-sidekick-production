@@ -1,0 +1,2 @@
+# Test/dev-only dependencies (production pins live in requirements.txt)
+pytest==9.1.1

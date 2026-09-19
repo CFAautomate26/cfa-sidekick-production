@@ -1,0 +1,76 @@
+{% extends "shift/base.html" %}
+{% block title %}Goals{% endblock %}
+{% block content %}
+<h1 class="page">Goals</h1>
+<div class="sub">Set a target, log progress on it every shift, celebrate when it's hit.</div>
+
+<details class="compose" {{ 'open' if request.args.get('new') }}>
+  <summary>+ New goal</summary>
+  <form method="post" action="{{ url_for('shift.goal_create') }}" class="card">
+    <label class="field" for="g-title">Goal</label>
+    <input type="text" id="g-title" name="title" required placeholder="e.g. Drive-thru under 4 minutes at lunch">
+    <label class="field" for="g-why">Why it matters / what winning looks like</label>
+    <textarea id="g-why" name="why" placeholder="Optional"></textarea>
+    <div style="display:flex; gap:8px;">
+      <div style="flex:1;">
+        <label class="field" for="g-metric">Metric</label>
+        <input type="text" id="g-metric" name="metric" placeholder="e.g. Avg DT time">
+      </div>
+      <div style="width:90px;">
+        <label class="field" for="g-unit">Unit</label>
+        <input type="text" id="g-unit" name="unit" placeholder="sec">
+      </div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <div style="flex:1;">
+        <label class="field" for="g-target">Target number</label>
+        <input type="number" step="any" id="g-target" name="target_value" inputmode="decimal" placeholder="Leave blank for a yes/no goal">
+      </div>
+      <div style="width:140px;">
+        <label class="field" for="g-dir">Better is</label>
+        <select id="g-dir" name="direction">
+          <option value="up">Higher ↑</option>
+          <option value="down">Lower ↓</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <div style="flex:1;">
+        <label class="field" for="g-period">Rhythm</label>
+        <select id="g-period" name="period">
+          {% for p in periods %}<option value="{{ p }}" {{ 'selected' if p == 'weekly' }}>{{ p }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:1;">
+        <label class="field" for="g-due">Target date</label>
+        <input type="date" id="g-due" name="due_date">
+      </div>
+    </div>
+    <div style="margin-top:14px;">
+      <button class="pill primary" type="submit" style="width:100%; padding:12px;">Create goal</button>
+    </div>
+  </form>
+</details>
+
+<div class="chiprow">
+  <a class="pill small {{ 'on' if status == 'active' }}" href="{{ url_for('shift.goals', status='active') }}">Active</a>
+  <a class="pill small {{ 'on' if status == 'achieved' }}" href="{{ url_for('shift.goals', status='achieved') }}">Achieved 🏆</a>
+  <a class="pill small {{ 'on' if status == 'archived' }}" href="{{ url_for('shift.goals', status='archived') }}">Archived</a>
+</div>
+
+{% for g in goals %}
+<a class="card tap" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}">
+  <h2>{{ g.title }}</h2>
+  {% if g.progress_pct is not none %}
+  <div class="bar {{ 'full' if g.progress_pct >= 100 }}"><span style="width: {{ g.progress_pct }}%"></span></div>
+  <div class="progress-note">{{ g.latest_value | num }} {{ g.unit }} → target {{ g.target_value | num }} {{ g.unit }} ({{ '↓ lower' if g.direction == 'down' else '↑ higher' }} is better) · {{ g.progress_pct }}%</div>
+  {% else %}
+  <div class="progress-note">{{ g.metric or g.period }}{% if g.due_date %} · due {{ g.due_date }}{% endif %}{% if g.latest_value is not none %} · latest {{ g.latest_value | num }} {{ g.unit }}{% endif %}</div>
+  {% endif %}
+</a>
+{% else %}
+<div class="empty">No {{ status }} goals.
+  {% if status == 'active' %}Tap “+ New goal” — a good first one: a drive-thru time or CEM score target for the month.{% endif %}
+</div>
+{% endfor %}
+{% endblock %}

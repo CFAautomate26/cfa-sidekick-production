@@ -1,0 +1,25 @@
+{% extends "shift/base.html" %}
+{% block title %}Checklist templates{% endblock %}
+{% block content %}
+<h1 class="page">Checklist templates</h1>
+<div class="sub">These generate each day's checklists. Edits apply from the
+next fresh day — history is never rewritten.</div>
+
+<a class="pill primary" href="{{ url_for('shift.admin_template_new') }}">+ New checklist</a>
+
+<div style="margin-top:14px;">
+{% for t in templates %}
+<div class="card" {% if not t.active %}style="opacity:0.6;"{% endif %}>
+  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+    <a href="{{ url_for('shift.admin_template_edit', template_id=t.id) }}" style="flex:1; font-weight:700; text-decoration:none;">{{ t.name }}</a>
+    <span class="progress-note" style="margin:0;">{{ t.daypart }} · {{ t.area }} · {{ t.item_count }} items</span>
+    <form method="post" action="{{ url_for('shift.admin_template_toggle', template_id=t.id) }}">
+      <input type="hidden" name="active" value="{{ '0' if t.active else '1' }}">
+      <button class="pill small ghost" type="submit">{{ 'Retire' if t.active else 'Restore' }}</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+</div>
+<a class="pill small ghost" href="{{ url_for('shift.admin') }}">← Admin</a>
+{% endblock %}
