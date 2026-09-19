@@ -1,6 +1,7 @@
 import hashlib
 import os
 import random
+import secrets
 from datetime import timedelta
 
 from flask import Flask, request, render_template, redirect
@@ -18,11 +19,21 @@ app = Flask(__name__)
 app.register_blueprint(slack_bp)
 
 # Signed session cookies for the shift leading app. Prefer a dedicated
-# FLASK_SECRET_KEY; otherwise derive a key from SCHEDULE_SECRET so sessions
-# stay valid across deploys instead of logging everyone out.
-app.secret_key = os.getenv("FLASK_SECRET_KEY") or hashlib.sha256(
-    ("cfa-sidekick-session:" + os.getenv("SCHEDULE_SECRET", "cfa-sidekick-production-2026")).encode()
-).hexdigest()
+# FLASK_SECRET_KEY; otherwise derive a stable key from the secrets actually
+# configured in the environment (so sessions survive deploys). If neither
+# env var is set there is nothing secret to derive from — a random per-boot
+# key (sessions reset each deploy) beats a key derivable from this repo.
+_secret_seed = ":".join([(os.getenv("SCHEDULE_SECRET") or "").strip(),
+                         (os.getenv("SHIFT_ADMIN_PIN") or "").strip()])
+if (os.getenv("FLASK_SECRET_KEY") or "").strip():
+    app.secret_key = os.getenv("FLASK_SECRET_KEY").strip()
+elif _secret_seed != ":":
+    app.secret_key = hashlib.sha256(
+        ("cfa-sidekick-session:" + _secret_seed).encode()).hexdigest()
+else:
+    app.secret_key = secrets.token_hex(32)
+    print("WARNING: no FLASK_SECRET_KEY/SCHEDULE_SECRET/SHIFT_ADMIN_PIN set — "
+          "using a random session key; shift-app logins reset every deploy.")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 

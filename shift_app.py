@@ -51,7 +51,14 @@ def _locked_out(name: str) -> bool:
 
 
 def _record_fail(name: str) -> None:
-    _pin_fails.setdefault(name.lower(), []).append(time.time())
+    now = time.time()
+    # Bound the dict: drop names whose failures have all aged out, so a
+    # stream of unauthenticated POSTs with unique names can't grow it forever.
+    if len(_pin_fails) > 200:
+        for stale in [k for k, v in _pin_fails.items()
+                      if not v or now - v[-1] > _LOCK_SECONDS]:
+            _pin_fails.pop(stale, None)
+    _pin_fails.setdefault(name.lower(), []).append(now)
 
 
 def _clear_fails(name: str) -> None:
@@ -87,15 +94,21 @@ def require_login():
         return render_template("shift/not_configured.html"), 200
     if not session.get("shift_name"):
         return redirect(url_for("shift.login", next=request.path))
-    # Deactivated leaders lose access on their next request.
+    # Deactivated leaders lose access — and role changes (a demoted admin)
+    # take effect — on their next request, not when the cookie expires.
     leader_id = session.get("shift_leader_id")
-    if leader_id and not shift_db.leader_is_active(leader_id):
-        session.clear()
-        return redirect(url_for("shift.login"))
+    if leader_id:
+        leader = shift_db.get_leader(leader_id)
+        if not leader or not leader["active"]:
+            session.clear()
+            return redirect(url_for("shift.login"))
+        session["shift_role"] = leader["role"]
     return None
 
 
-@shift_bp.app_context_processor
+# Blueprint-scoped (not app-wide): the bot's own pages must never touch the
+# shift database, so a shift-DB failure can't break them.
+@shift_bp.context_processor
 def inject_shift_globals():
     signed_in = bool(session.get("shift_name"))
     return {
@@ -148,6 +161,18 @@ def _valid_date(value: str | None) -> str:
 def _valid_daypart(value: str | None) -> str:
     value = (value or "").strip().lower()
     return value if value in shift_db.DAYPARTS else shift_db.current_daypart()
+
+
+def _optional_date(value: str | None) -> str:
+    """A normalized YYYY-MM-DD, or '' for blank/invalid input — for optional
+    dates, where silently substituting today would store a wrong date."""
+    value = (value or "").strip()
+    if not value:
+        return ""
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        return ""
 
 
 def _safe_next(default_endpoint: str = "shift.today"):
@@ -326,9 +351,11 @@ def lineup_assign():
     except ValueError:
         position_id = 0
     if name and position_id:
-        shift_db.assign_position(day, daypart, position_id, name)
-        # Names typed here quietly join the roster so autosuggest learns.
-        shift_db.add_member(name)
+        if shift_db.assign_position(day, daypart, position_id, name):
+            # Names typed here quietly join the roster so autosuggest learns.
+            shift_db.add_member(name)
+        else:
+            flash("That position no longer exists — reload the lineup.")
     return redirect(url_for("shift.lineup", date=day, daypart=daypart))
 
 
@@ -389,7 +416,7 @@ def goal_create():
         target_value=target,
         direction=direction,
         period=period,
-        due_date=_valid_date(request.form.get("due_date")) if request.form.get("due_date") else "",
+        due_date=_optional_date(request.form.get("due_date")),
         created_by=current_name(),
     )
     return redirect(url_for("shift.goal_detail", goal_id=goal_id))
@@ -463,10 +490,10 @@ def note_create():
 
 @shift_bp.route("/notes/<int:note_id>/delete", methods=["POST"])
 def note_delete(note_id):
-    note = next((n for n in shift_db.notes_feed(limit=1000) if n["id"] == note_id), None)
+    note = shift_db.get_note(note_id)
     if note and (is_admin() or note["author"] == current_name()):
         shift_db.delete_note(note_id)
-    else:
+    elif note:
         flash("Only the author or an admin can delete a note.")
     return redirect(url_for("shift.notes"))
 
@@ -490,17 +517,17 @@ def announcement_create():
     if not body:
         flash("Write the announcement first.")
         return redirect(url_for("shift.announcements"))
-    expires = request.form.get("expires_on", "").strip()
     shift_db.add_announcement(
         body, current_name(), pinned=request.form.get("pinned") == "1",
-        expires_on=_valid_date(expires) if expires else "",
+        expires_on=_optional_date(request.form.get("expires_on")),
     )
     return redirect(url_for("shift.announcements"))
 
 
 @shift_bp.route("/announcements/<int:announcement_id>/ack", methods=["POST"])
 def announcement_ack(announcement_id):
-    shift_db.ack_announcement(announcement_id, current_name())
+    if not shift_db.ack_announcement(announcement_id, current_name()):
+        flash("That announcement was removed.")
     return _safe_next("shift.announcements")
 
 

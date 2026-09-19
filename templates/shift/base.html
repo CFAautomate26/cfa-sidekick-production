@@ -226,17 +226,21 @@ document.addEventListener('submit', function (e) {
   var form = e.target;
   if (!form.classList.contains('item')) return;
   e.preventDefault();
+  if (form.dataset.busy) return;  // ignore taps while a write is in flight
+  form.dataset.busy = '1';
   var row = form.querySelector('.itemrow');
   var doneInput = form.querySelector('input[name=done]');
-  var wasDone = doneInput.value !== '1';
-  var data = new FormData(form);
+  var submitted = doneInput.value;              // the state we're writing
+  var data = new FormData(form);                // snapshot BEFORE flipping
   data.set('ajax', '1');
-  row.classList.toggle('done', !wasDone);
+  row.classList.toggle('done', submitted === '1');
+  doneInput.value = submitted === '1' ? '0' : '1';  // next tap = undo
   fetch(form.action, { method: 'POST', body: data })
     .then(function (r) { if (!r.ok) throw 0; return r.json(); })
     .then(function (out) {
       if (!out.ok) throw 0;
-      doneInput.value = out.done ? '0' : '1';
+      doneInput.value = out.done ? '0' : '1';   // reconcile with the server
+      row.classList.toggle('done', !!out.done);
       var meta = row.querySelector('.meta');
       meta.textContent = out.done ? ('done by ' + (out.done_by || '') + ' · ' + (out.done_at || '').slice(11)) : '';
       var page = document.querySelector('[data-progress]');
@@ -250,10 +254,12 @@ document.addEventListener('submit', function (e) {
       }
     })
     .catch(function () {
-      row.classList.toggle('done', wasDone);
+      row.classList.toggle('done', submitted !== '1');
+      doneInput.value = submitted;
       row.classList.add('shake');
       setTimeout(function () { row.classList.remove('shake'); }, 400);
-    });
+    })
+    .finally(function () { delete form.dataset.busy; });
 });
 
 // Shift-note drafts survive a rush interruption (per-phone convenience only).

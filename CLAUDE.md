@@ -28,8 +28,9 @@ Canada.
   `python -m pytest tests/`). Setup guide:
   [docs/shift-leading-app.md](docs/shift-leading-app.md). Env vars:
   `SHIFT_ADMIN_PIN` (Operator master login), `SHIFT_DB_PATH`,
-  `FLASK_SECRET_KEY` (optional; falls back to a key derived from
-  `SCHEDULE_SECRET`), `SHIFT_TZ` (default America/Toronto). Never store
+  `FLASK_SECRET_KEY` (optional; falls back to a key derived from the
+  `SCHEDULE_SECRET`/`SHIFT_ADMIN_PIN` env vars, or a random per-boot key if
+  neither is set), `SHIFT_TZ` (default America/Toronto). Never store
   HR/discipline/wage/medical content in it.
 - `slack_coverage.py` — Slack Events API blueprint (`POST /slack/events`)
   that auto-responds in-thread in the #shift-coverage Slack channel:

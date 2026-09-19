@@ -233,6 +233,37 @@ def test_announcements_expiry_and_pinning(isolated_db):
     assert [a["body"] for a in shift_db.active_announcements(today="2026-09-19")] == ["Evergreen"]
 
 
+def test_minimal_valid_import_does_not_wipe_silently(isolated_db):
+    """A '{"format": 1}' payload is a legal (empty) backup — restoring it
+    should empty the tables, which is why the UI demands a confirmation."""
+    assert shift_db.import_json('{"format": 1}') is None
+    assert not shift_db.all_templates(include_inactive=True)
+
+
+def test_ack_missing_announcement_is_graceful(isolated_db):
+    assert shift_db.ack_announcement(999, "Maya") is False
+    shift_db.add_announcement("Real", "J", False, "")
+    a = shift_db.active_announcements(today="2026-09-19")[0]
+    assert shift_db.ack_announcement(a["id"], "Maya") is True
+
+
+def test_assign_unknown_position_is_graceful(isolated_db):
+    assert shift_db.assign_position("2026-09-19", "lunch", 999999, "Maya") is False
+    assert not shift_db.lineup_for("2026-09-19", "lunch")
+
+
+def test_get_note_and_get_leader(isolated_db):
+    shift_db.add_note("2026-09-19", "", "general", "Hello", "Maya")
+    note = shift_db.notes_feed()[0]
+    assert shift_db.get_note(note["id"])["body"] == "Hello"
+    assert shift_db.get_note(12345) is None
+
+    shift_db.add_leader("Maya", "1234", role="admin")
+    leader = shift_db.leaders()[0]
+    assert shift_db.get_leader(leader["id"])["role"] == "admin"
+    assert shift_db.get_leader(12345) is None
+
+
 def test_announcement_acks(isolated_db):
     shift_db.add_announcement("New sauce SOP", "Joshua", False, "")
     a = shift_db.active_announcements(today="2026-09-19", reader="Maya")[0]
@@ -299,12 +330,32 @@ def test_export_import_roundtrip(isolated_db):
     assert shift_db.verify_leader("Maya", "1234")
 
 
-def test_import_rejects_garbage(isolated_db):
-    assert shift_db.import_json("not json") is not None
-    assert shift_db.import_json("{}") is not None
-    assert shift_db.import_json('{"format": 1, "shift_notes": "nope"}') is not None
-    bad_row = '{"format": 1, "shift_notes": [{"evil_column": 1}]}'
-    assert shift_db.import_json(bad_row) is not None
+def _table_counts():
+    return {
+        "templates": len(shift_db.all_templates(include_inactive=True)),
+        "positions": len(shift_db.active_positions()),
+        "notes": len(shift_db.notes_feed()),
+    }
+
+
+def test_import_rejects_garbage_without_touching_data(isolated_db):
+    shift_db.add_note("2026-09-19", "lunch", "win", "Survivor", "Maya")
+    before = _table_counts()
+    assert before["templates"] and before["positions"] and before["notes"]
+
+    bad_payloads = [
+        "not json",
+        "{}",
+        '{"format": 1, "shift_notes": "nope"}',            # malformed section
+        '{"format": 1, "shift_notes": [{"evil_column": 1}]}',  # no valid columns
+        '{"format": 1, "shift_notes": [{"body": ["nested"]}]}',  # non-scalar value
+        # FK-inconsistent: run item pointing at a run that doesn't exist
+        '{"format": 1, "checklist_run_items": [{"id": 1, "run_id": 999, '
+        '"label": "x", "critical": 0, "sort": 0, "done": 0}]}',
+    ]
+    for raw in bad_payloads:
+        assert shift_db.import_json(raw) is not None, raw
+        assert _table_counts() == before, f"data changed after rejected import: {raw}"
 
 
 def test_recent_dates_shape(isolated_db):

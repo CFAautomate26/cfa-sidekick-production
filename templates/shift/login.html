@@ -10,9 +10,10 @@
 {% if error %}<div class="flash">{{ error }}</div>{% endif %}
 
 <form method="post" action="{{ url_for('shift.login') }}" class="card">
-  {% if request.args.get('next') %}
-  <input type="hidden" name="next" value="{{ request.args.get('next') }}">
-  {% endif %}
+  {# request.values keeps the deep link alive when the form re-renders after
+     a wrong PIN (the POST body carries it once the query string is gone) #}
+  {% set nxt = request.values.get('next') %}
+  {% if nxt %}<input type="hidden" name="next" value="{{ nxt }}">{% endif %}
   <label class="field">Who are you?</label>
   {% if names %}
   <div class="pillrow" style="margin-bottom:4px;">

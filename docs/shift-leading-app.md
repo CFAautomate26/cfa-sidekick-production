@@ -32,7 +32,7 @@ GroupMe and Slack bots keep running untouched.
 | --- | --- | --- |
 | `SHIFT_ADMIN_PIN` | **Yes** | Master PIN for the **Operator** login. Until it's set, `/shift` shows a "not configured" page. |
 | `SHIFT_DB_PATH` | **Strongly recommended** | Where the SQLite database lives. Point it at a persistent disk (see below) or data is wiped on every deploy. |
-| `FLASK_SECRET_KEY` | Recommended | Signs session cookies. If unset, a stable key is derived from `SCHEDULE_SECRET` (sessions still survive deploys). Generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`. |
+| `FLASK_SECRET_KEY` | Recommended | Signs session cookies. If unset, a stable key is derived from the `SCHEDULE_SECRET` + `SHIFT_ADMIN_PIN` env vars (sessions survive deploys); if none of the three is set, a random per-boot key is used and logins reset each deploy. Generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`. |
 | `SHIFT_TZ` | No | Store timezone; defaults to `America/Toronto`. |
 
 ## The persistent disk (do this before rollout)

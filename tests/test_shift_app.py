@@ -100,6 +100,65 @@ def test_leader_login_and_deactivation(client):
     assert resp.status_code == 302
 
 
+def test_demoted_admin_loses_admin_on_next_request(client):
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    login_leader(client, name="Dana", pin="5555")
+    assert client.get("/shift/admin").status_code == 200
+
+    # Re-adding with role=lead demotes; the live session must follow suit.
+    leader_id = shift_db.leaders()[0]["id"]
+    shift_db.add_leader("Dana", "5555", role="lead")
+    resp = client.get("/shift/admin")
+    assert resp.status_code == 302
+    assert shift_db.get_leader(leader_id)["role"] == "lead"
+
+
+def test_ack_deleted_announcement_route_is_graceful(client):
+    make_leader(client)
+    login_leader(client)
+    resp = client.post("/shift/announcements/999/ack")
+    assert resp.status_code == 302  # flash + redirect, not a 500
+
+
+def test_assign_stale_position_route_is_graceful(client):
+    login_operator(client)
+    resp = client.post("/shift/lineup/assign", data={
+        "date": shift_db.today_local(), "daypart": "lunch",
+        "position_id": "999999", "member_name": "Maya",
+    })
+    assert resp.status_code == 302  # flash + redirect, not a 500
+    assert not shift_db.lineup_for(shift_db.today_local(), "lunch")
+
+
+def test_invalid_optional_dates_are_blanked(client):
+    login_operator(client)
+    client.post("/shift/goals", data={"title": "G", "due_date": "garbage"})
+    assert shift_db.goals_by_status("active")[0]["due_date"] is None
+    client.post("/shift/announcements", data={"body": "A", "expires_on": "nonsense"})
+    assert shift_db.active_announcements()[0]["expires_on"] is None
+
+
+def test_login_keeps_next_after_wrong_pin(client):
+    resp = client.post("/shift/login?next=/shift/goals",
+                       data={"name": "Operator", "pin": "0000"})
+    assert b'name="next" value="/shift/goals"' in resp.data
+    resp = client.post("/shift/login",
+                       data={"name": "Operator", "pin": "9999",
+                             "next": "/shift/goals"})
+    assert resp.headers["Location"] == "/shift/goals"
+
+
+def test_import_route_survives_fk_inconsistent_backup(client):
+    login_operator(client)
+    bad = (b'{"format": 1, "checklist_run_items": [{"id": 1, "run_id": 999, '
+           b'"label": "x", "critical": 0, "sort": 0, "done": 0}]}')
+    resp = client.post("/shift/admin/import", data={
+        "confirm": "1", "backup": (io.BytesIO(bad), "backup.json"),
+    }, content_type="multipart/form-data")
+    assert resp.status_code == 302  # flashed error, not a 500
+    assert shift_db.all_templates()  # nothing was wiped
+
+
 def test_admin_pages_blocked_for_leads(client):
     make_leader(client)
     login_leader(client)

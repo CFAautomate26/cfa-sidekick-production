@@ -20,11 +20,14 @@ from zoneinfo import ZoneInfo
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
-DB_PATH = os.getenv("SHIFT_DB_PATH", os.path.join(os.path.dirname(__file__), "shift_data.db"))
+# .strip() guards against invisible whitespace pasted into the Render
+# dashboard (same hardening as the Slack env vars).
+DB_PATH = os.getenv("SHIFT_DB_PATH", "").strip() or os.path.join(
+    os.path.dirname(__file__), "shift_data.db")
 
 # Store-local clock. "Today" must roll over at midnight in London, Ontario,
 # not UTC, or the 9pm close would write into tomorrow's checklists.
-STORE_TZ = ZoneInfo(os.getenv("SHIFT_TZ", "America/Toronto"))
+STORE_TZ = ZoneInfo(os.getenv("SHIFT_TZ", "").strip() or "America/Toronto")
 
 DAYPARTS = ["breakfast", "lunch", "afternoon", "dinner"]
 DAYPART_LABELS = {
@@ -89,6 +92,10 @@ CREATE TABLE IF NOT EXISTS team_members (
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
+
+-- NOTE: COLLATE NOCASE case-folds ASCII only, so "José" and "josé" count as
+-- different names. Accepted limitation — worst case is a duplicate roster
+-- entry, and lineups keep working.
 
 -- People who can log in to the shift app. Separate from team_members: the
 -- roster is who gets positioned on the floor; leaders are who run the app.
@@ -207,6 +214,8 @@ CREATE TABLE IF NOT EXISTS announcement_reads (
 
 CREATE INDEX IF NOT EXISTS idx_run_items_run ON checklist_run_items(run_id);
 CREATE INDEX IF NOT EXISTS idx_lineup_date ON lineup_assignments(lineup_date, daypart);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lineup_slot
+    ON lineup_assignments(lineup_date, daypart, position_id, member_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_notes_date ON shift_notes(note_date);
 CREATE INDEX IF NOT EXISTS idx_goal_updates_goal ON goal_updates(goal_id);
 """
@@ -609,19 +618,22 @@ def lineup_for(lineup_date: str, daypart: str) -> dict[int, list[dict]]:
     return out
 
 
-def assign_position(lineup_date: str, daypart: str, position_id: int, member_name: str) -> None:
+def assign_position(lineup_date: str, daypart: str, position_id: int,
+                    member_name: str) -> bool:
+    """Assign a name to a position. Returns False for an unknown position
+    (stale form, tampered id) instead of raising. Duplicate (position, name)
+    pairs are absorbed by the uq_lineup_slot unique index."""
     with closing(connect()) as conn, conn:
-        dup = conn.execute(
-            "SELECT id FROM lineup_assignments WHERE lineup_date=? AND daypart=? "
-            "AND position_id=? AND member_name=? COLLATE NOCASE",
+        if not conn.execute(
+            "SELECT 1 FROM positions WHERE id=?", (position_id,)
+        ).fetchone():
+            return False
+        conn.execute(
+            "INSERT OR IGNORE INTO lineup_assignments "
+            "(lineup_date, daypart, position_id, member_name) VALUES (?,?,?,?)",
             (lineup_date, daypart, position_id, member_name),
-        ).fetchone()
-        if not dup:
-            conn.execute(
-                "INSERT INTO lineup_assignments (lineup_date, daypart, position_id, member_name) "
-                "VALUES (?,?,?,?)",
-                (lineup_date, daypart, position_id, member_name),
-            )
+        )
+    return True
 
 
 def unassign(assignment_id: int) -> None:
@@ -631,8 +643,8 @@ def unassign(assignment_id: int) -> None:
 
 def copy_lineup(from_date: str, from_daypart: str, to_date: str, to_daypart: str) -> int:
     """Copy a lineup between (date, daypart) slots — 'copy from yesterday' and
-    'copy from the previous daypart' both come through here. Skips duplicate
-    (position, name) pairs already in the target. Returns copied count."""
+    'copy from the previous daypart' both come through here. Duplicates are
+    absorbed by the uq_lineup_slot unique index. Returns copied count."""
     copied = 0
     with closing(connect()) as conn, conn:
         src = conn.execute(
@@ -641,18 +653,12 @@ def copy_lineup(from_date: str, from_daypart: str, to_date: str, to_daypart: str
             (from_date, from_daypart),
         ).fetchall()
         for row in src:
-            dup = conn.execute(
-                "SELECT id FROM lineup_assignments WHERE lineup_date=? AND daypart=? "
-                "AND position_id=? AND member_name=? COLLATE NOCASE",
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO lineup_assignments "
+                "(lineup_date, daypart, position_id, member_name) VALUES (?,?,?,?)",
                 (to_date, to_daypart, row["position_id"], row["member_name"]),
-            ).fetchone()
-            if not dup:
-                conn.execute(
-                    "INSERT INTO lineup_assignments "
-                    "(lineup_date, daypart, position_id, member_name) VALUES (?,?,?,?)",
-                    (to_date, to_daypart, row["position_id"], row["member_name"]),
-                )
-                copied += 1
+            )
+            copied += cur.rowcount
     return copied
 
 
@@ -737,6 +743,14 @@ def leader_is_active(leader_id: int) -> bool:
             "SELECT active FROM leaders WHERE id=?", (leader_id,)
         ).fetchone()
     return bool(row and row["active"])
+
+
+def get_leader(leader_id: int) -> dict | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT id, name, role, active FROM leaders WHERE id=?", (leader_id,)
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def set_leader_active(leader_id: int, active: bool) -> None:
@@ -831,6 +845,14 @@ def notes_for_date(note_date: str) -> list[dict]:
         ).fetchall()]
 
 
+def get_note(note_id: int) -> dict | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT * FROM shift_notes WHERE id=?", (note_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def delete_note(note_id: int) -> None:
     with closing(connect()) as conn, conn:
         conn.execute("DELETE FROM shift_notes WHERE id=?", (note_id,))
@@ -862,13 +884,20 @@ def active_announcements(today: str | None = None, reader: str | None = None) ->
     return rows
 
 
-def ack_announcement(announcement_id: int, reader: str) -> None:
+def ack_announcement(announcement_id: int, reader: str) -> bool:
+    """Record a 'Got it'. Returns False if the announcement no longer exists
+    (OR IGNORE does not suppress foreign-key violations, so check first)."""
     with closing(connect()) as conn, conn:
+        if not conn.execute(
+            "SELECT 1 FROM announcements WHERE id=?", (announcement_id,)
+        ).fetchone():
+            return False
         conn.execute(
             "INSERT OR IGNORE INTO announcement_reads (announcement_id, reader, read_at) "
             "VALUES (?,?,?)",
             (announcement_id, reader, now_stamp()),
         )
+    return True
 
 
 def announcement_readers(announcement_id: int) -> list[dict]:
@@ -933,40 +962,71 @@ EXPORT_TABLES = [
 def export_json() -> str:
     payload: dict = {"exported_at": now_stamp(), "format": 1}
     with closing(connect()) as conn:
+        # SELECTs run in autocommit by default; an explicit transaction makes
+        # the whole export one consistent snapshot (WAL gives repeatable
+        # reads), so a write landing mid-export can't orphan child rows.
+        conn.execute("BEGIN")
         for table in EXPORT_TABLES:
             payload[table] = [dict(r) for r in conn.execute(f"SELECT * FROM {table}")]
         payload["leaders"] = [dict(r) for r in conn.execute(
             "SELECT id, name, role, active, created_at FROM leaders"
         )]
+        conn.commit()
     return json.dumps(payload, ensure_ascii=False, indent=1)
+
+
+class _RestoreError(Exception):
+    """Raised inside the restore transaction so `with conn:` rolls back."""
 
 
 def import_json(raw: str) -> str | None:
     """Restore an export_json() payload, REPLACING current content of the
     exported tables. Leaders are not restored (no PIN hashes in exports —
-    recreate logins in the admin page). Returns an error message or None."""
+    recreate logins in the admin page). Returns an error message or None.
+
+    All-or-nothing: the payload is fully validated before anything is
+    deleted, and the whole restore runs in one transaction that rolls back
+    on any failure — a rejected backup never touches existing data.
+    """
     try:
         payload = json.loads(raw)
     except ValueError:
         return "That file is not valid JSON."
     if not isinstance(payload, dict) or payload.get("format") != 1:
         return "That file is not a CFA Sidekick shift-app backup."
-    with closing(connect()) as conn, conn:
-        for table in EXPORT_TABLES:
-            rows = payload.get(table, [])
-            if not isinstance(rows, list):
-                return f"Backup section '{table}' is malformed."
-            valid_cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
-            conn.execute(f"DELETE FROM {table}")
-            for row in rows:
-                if not isinstance(row, dict) or not row:
-                    return f"Backup section '{table}' has a malformed row."
-                cols = [c for c in row if c in valid_cols]
-                if not cols:
-                    return f"Backup section '{table}' has a malformed row."
-                conn.execute(
-                    f"INSERT INTO {table} ({','.join(cols)}) "
-                    f"VALUES ({','.join('?' * len(cols))})",
-                    [row[c] for c in cols],
-                )
+
+    # Validate shape completely before any destructive statement runs.
+    for table in EXPORT_TABLES:
+        rows = payload.get(table, [])
+        if not isinstance(rows, list):
+            return f"Backup section '{table}' is malformed."
+        for row in rows:
+            if not isinstance(row, dict) or not row:
+                return f"Backup section '{table}' has a malformed row."
+            if not all(isinstance(v, (str, int, float, type(None)))
+                       for v in row.values()):
+                return f"Backup section '{table}' has a malformed row."
+
+    try:
+        with closing(connect()) as conn:
+            try:
+                with conn:  # one transaction; any exception rolls it back
+                    for table in EXPORT_TABLES:
+                        valid_cols = {r["name"] for r in
+                                      conn.execute(f"PRAGMA table_info({table})")}
+                        conn.execute(f"DELETE FROM {table}")
+                        for row in payload.get(table, []):
+                            cols = [c for c in row if c in valid_cols]
+                            if not cols:
+                                raise _RestoreError(
+                                    f"Backup section '{table}' has a malformed row.")
+                            conn.execute(
+                                f"INSERT INTO {table} ({','.join(cols)}) "
+                                f"VALUES ({','.join('?' * len(cols))})",
+                                [row[c] for c in cols],
+                            )
+            except _RestoreError as e:
+                return str(e)
+    except sqlite3.Error as e:
+        return f"Backup could not be restored (nothing was changed): {e}"
     return None
