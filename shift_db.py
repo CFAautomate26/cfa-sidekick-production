@@ -348,10 +348,19 @@ def init_db() -> None:
     """Create tables and seed defaults on first run. Safe to call at every
     boot; each seed block has its own guard so upgrades of an existing
     database still seed newly added features."""
-    with closing(connect()) as conn, conn:
+    with closing(connect()) as conn:
         conn.executescript(SCHEMA)
-        _seed_base(conn)
-        _seed_course(conn)
+        # Take the write lock before checking the seed guards: concurrent
+        # gunicorn workers' first boots then serialize instead of both
+        # passing a guard and one crashing on the meta PRIMARY KEY.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            _seed_base(conn)
+            _seed_course(conn)
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
 
 
 def _seed_base(conn) -> None:
@@ -384,6 +393,14 @@ def _seed_course(conn) -> None:
     if seeded:
         return
     stamp = now_stamp()
+    if conn.execute("SELECT 1 FROM course_lessons LIMIT 1").fetchone():
+        # Lessons already exist (e.g. restored from a backup) with the flag
+        # missing — record the flag rather than seeding duplicates.
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('course_seeded', ?)",
+            (stamp,),
+        )
+        return
     sort = 0
     for module, lessons in shift_course.COURSE:
         for title, doc_id, slides_id, video_id in lessons:
@@ -869,8 +886,9 @@ def leader_course_summary() -> list[dict]:
         return [dict(r) for r in conn.execute(
             """
             SELECT ld.id, ld.name, ld.role,
-                   COUNT(p.lesson_id) AS done,
-                   MAX(p.completed_at) AS last_completed
+                   COUNT(cl.id) AS done,
+                   MAX(CASE WHEN cl.id IS NOT NULL THEN p.completed_at END)
+                       AS last_completed
             FROM leaders ld
             LEFT JOIN lesson_progress p ON p.leader_id = ld.id
             LEFT JOIN course_lessons cl ON cl.id = p.lesson_id AND cl.active = 1
@@ -887,7 +905,7 @@ def set_lesson_done(lesson_id: int, leader_id: int, note: str, by: str) -> bool:
     unknown lesson/leader ids instead of raising."""
     with closing(connect()) as conn, conn:
         if not conn.execute(
-            "SELECT 1 FROM course_lessons WHERE id=?", (lesson_id,)
+            "SELECT 1 FROM course_lessons WHERE id=? AND active=1", (lesson_id,)
         ).fetchone() or not conn.execute(
             "SELECT 1 FROM leaders WHERE id=?", (leader_id,)
         ).fetchone():
@@ -1179,11 +1197,18 @@ def import_json(raw: str) -> str | None:
                                 f"VALUES ({','.join('?' * len(cols))})",
                                 [row[c] for c in cols],
                             )
-                    # A pre-course backup carries no lessons: clear the seed
-                    # flag so the next boot re-seeds the course from code.
-                    if not conn.execute(
+                    # Keep the course-seed flag in sync with what the backup
+                    # actually restored: a pre-course backup (no lessons)
+                    # clears it so the next boot re-seeds from code, and a
+                    # backup WITH lessons sets it so a later boot never
+                    # seeds duplicates on top of the restored course.
+                    if conn.execute(
                         "SELECT 1 FROM course_lessons LIMIT 1"
                     ).fetchone():
+                        conn.execute(
+                            "INSERT OR REPLACE INTO meta (key, value) "
+                            "VALUES ('course_seeded', ?)", (now_stamp(),))
+                    else:
                         conn.execute("DELETE FROM meta WHERE key='course_seeded'")
             except _RestoreError as e:
                 return str(e)
