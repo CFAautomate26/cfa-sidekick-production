@@ -9,6 +9,10 @@
     {% if unread_announcements %}<span class="critical-flag">● {{ unread_announcements }} new</span>{% endif %}</h2>
   <div class="progress-note">Store-wide messages with “Got it” tracking</div>
 </a>
+<a class="card tap" href="{{ url_for('shift.development') }}">
+  <h2>🎓 Leadership development</h2>
+  <div class="progress-note">{{ 'Every leader’s course progress' if shift_is_admin else 'Your progress through the leadership course' }}</div>
+</a>
 <a class="card tap" href="{{ url_for('shift.roster') }}">
   <h2>🧑‍🤝‍🧑 Team roster</h2>
   <div class="progress-note">Names available in the lineup builder</div>

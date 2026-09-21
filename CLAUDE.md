@@ -21,7 +21,9 @@ Canada.
   invoke the bot with the `cow:` keyword.
 - `shift_app.py` + `shift_db.py` — the shift leading app at `/shift`
   (Huddle-style: daily checklists with who-did-what stamps, position
-  lineups, goals, shift notes, announcements with read receipts). Blueprint
+  lineups, goals, shift notes, announcements with read receipts, and
+  per-leader leadership-course tracking under `/shift/development` —
+  course structure pinned from Drive in `shift_course.py`). Blueprint
   registers fault-isolated so it can never take down the bots. Storage is
   stdlib SQLite at `SHIFT_DB_PATH` (a Render persistent disk in
   production). Templates in `templates/shift/`; tests in `tests/` (run

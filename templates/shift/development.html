@@ -1,0 +1,23 @@
+{% extends "shift/base.html" %}
+{% block title %}Development{% endblock %}
+{% block content %}
+<h1 class="page">Leadership development</h1>
+<div class="sub">Each leader's progress through the course — open a leader
+when you sit down to go over a lesson together.</div>
+
+{% for l in leaders %}
+<a class="card tap" href="{{ url_for('shift.development_leader', leader_id=l.id) }}">
+  <h2>{{ l.name }} <span style="font-weight:400; color:var(--soft);">· {{ l.role }}</span></h2>
+  <div class="bar {{ 'full' if total and l.done == total }}">
+    <span style="width: {{ (l.done / total * 100) | round if total else 0 }}%"></span>
+  </div>
+  <div class="progress-note">{{ l.done }} of {{ total }} lessons
+    {% if l.last_completed %} · last: {{ l.last_completed }}{% endif %}</div>
+</a>
+{% else %}
+<div class="empty">No leader logins yet — add your leaders under Admin, then
+track their course progress here.</div>
+{% endfor %}
+
+<a class="pill small ghost" href="{{ course_url }}" target="_blank" rel="noopener">📁 Open the course folder on Drive</a>
+{% endblock %}

@@ -13,12 +13,15 @@ should attach a persistent disk and point SHIFT_DB_PATH at it, e.g.
 
 import json
 import os
+import secrets
 import sqlite3
 from contextlib import closing
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
 from werkzeug.security import check_password_hash, generate_password_hash
+
+import shift_course
 
 # .strip() guards against invisible whitespace pasted into the Render
 # dashboard (same hardening as the Slack env vars).
@@ -212,6 +215,28 @@ CREATE TABLE IF NOT EXISTS announcement_reads (
     PRIMARY KEY (announcement_id, reader)
 );
 
+-- The Operator's leadership development course (seeded from shift_course.py)
+-- and each leader's progress through it, reviewed in 1-on-1s.
+CREATE TABLE IF NOT EXISTS course_lessons (
+    id INTEGER PRIMARY KEY,
+    module TEXT NOT NULL,
+    title TEXT NOT NULL,
+    doc_url TEXT,
+    slides_url TEXT,
+    video_url TEXT,
+    sort INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lesson_progress (
+    lesson_id INTEGER NOT NULL REFERENCES course_lessons(id) ON DELETE CASCADE,
+    leader_id INTEGER NOT NULL REFERENCES leaders(id) ON DELETE CASCADE,
+    completed_at TEXT NOT NULL,
+    note TEXT,
+    recorded_by TEXT,
+    PRIMARY KEY (lesson_id, leader_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_run_items_run ON checklist_run_items(run_id);
 CREATE INDEX IF NOT EXISTS idx_lineup_date ON lineup_assignments(lineup_date, daypart);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lineup_slot
@@ -320,29 +345,58 @@ SEED_POSITIONS = [
 
 
 def init_db() -> None:
-    """Create tables and seed defaults on first run. Safe to call at every boot."""
+    """Create tables and seed defaults on first run. Safe to call at every
+    boot; each seed block has its own guard so upgrades of an existing
+    database still seed newly added features."""
     with closing(connect()) as conn, conn:
         conn.executescript(SCHEMA)
-        seeded = conn.execute("SELECT value FROM meta WHERE key='seeded'").fetchone()
-        if seeded:
-            return
-        stamp = now_stamp()
-        for sort, (name, daypart, area, items) in enumerate(SEED_TEMPLATES):
-            cur = conn.execute(
-                "INSERT INTO checklist_templates (name, daypart, area, sort) VALUES (?,?,?,?)",
-                (name, daypart, area, sort),
-            )
-            conn.executemany(
-                "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
-                "VALUES (?,?,?,?)",
-                [(cur.lastrowid, label, 1 if critical else 0, i)
-                 for i, (label, critical) in enumerate(items)],
-            )
-        conn.executemany(
-            "INSERT INTO positions (name, area, sort) VALUES (?,?,?)", SEED_POSITIONS
+        _seed_base(conn)
+        _seed_course(conn)
+
+
+def _seed_base(conn) -> None:
+    seeded = conn.execute("SELECT value FROM meta WHERE key='seeded'").fetchone()
+    if seeded:
+        return
+    stamp = now_stamp()
+    for sort, (name, daypart, area, items) in enumerate(SEED_TEMPLATES):
+        cur = conn.execute(
+            "INSERT INTO checklist_templates (name, daypart, area, sort) VALUES (?,?,?,?)",
+            (name, daypart, area, sort),
         )
-        conn.execute("INSERT INTO meta (key, value) VALUES ('seeded', ?)", (stamp,))
-        print(f"shift_db: seeded default checklists and positions at {stamp}")
+        conn.executemany(
+            "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
+            "VALUES (?,?,?,?)",
+            [(cur.lastrowid, label, 1 if critical else 0, i)
+             for i, (label, critical) in enumerate(items)],
+        )
+    conn.executemany(
+        "INSERT INTO positions (name, area, sort) VALUES (?,?,?)", SEED_POSITIONS
+    )
+    conn.execute("INSERT INTO meta (key, value) VALUES ('seeded', ?)", (stamp,))
+    print(f"shift_db: seeded default checklists and positions at {stamp}")
+
+
+def _seed_course(conn) -> None:
+    seeded = conn.execute(
+        "SELECT value FROM meta WHERE key='course_seeded'"
+    ).fetchone()
+    if seeded:
+        return
+    stamp = now_stamp()
+    sort = 0
+    for module, lessons in shift_course.COURSE:
+        for title, doc_id, slides_id, video_id in lessons:
+            conn.execute(
+                "INSERT INTO course_lessons (module, title, doc_url, slides_url, "
+                "video_url, sort) VALUES (?,?,?,?,?,?)",
+                (module, title, shift_course.drive_url(doc_id),
+                 shift_course.drive_url(slides_id), shift_course.drive_url(video_id),
+                 sort),
+            )
+            sort += 1
+    conn.execute("INSERT INTO meta (key, value) VALUES ('course_seeded', ?)", (stamp,))
+    print(f"shift_db: seeded leadership course ({sort} lessons) at {stamp}")
 
 
 # ---------------------------------------------------------------------------
@@ -772,6 +826,91 @@ def reset_leader_pin(leader_id: int, pin: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Leadership development course
+# ---------------------------------------------------------------------------
+
+def course_overview(leader_id: int) -> list[dict]:
+    """[{module, lessons: [{lesson fields + done/completed_at/note/recorded_by}],
+    done, total}] in course order, for one leader."""
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            """
+            SELECT l.*, p.completed_at, p.note, p.recorded_by,
+                   p.leader_id IS NOT NULL AS done
+            FROM course_lessons l
+            LEFT JOIN lesson_progress p
+                ON p.lesson_id = l.id AND p.leader_id = ?
+            WHERE l.active = 1
+            ORDER BY l.sort, l.id
+            """,
+            (leader_id,),
+        ).fetchall()
+    modules: list[dict] = []
+    for r in rows:
+        r = dict(r)
+        if not modules or modules[-1]["module"] != r["module"]:
+            modules.append({"module": r["module"], "lessons": [], "done": 0, "total": 0})
+        modules[-1]["lessons"].append(r)
+        modules[-1]["total"] += 1
+        modules[-1]["done"] += 1 if r["done"] else 0
+    return modules
+
+
+def course_lesson_count() -> int:
+    with closing(connect()) as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS c FROM course_lessons WHERE active=1"
+        ).fetchone()["c"]
+
+
+def leader_course_summary() -> list[dict]:
+    """Active leaders with their completed-lesson counts, for the admin index."""
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            """
+            SELECT ld.id, ld.name, ld.role,
+                   COUNT(p.lesson_id) AS done,
+                   MAX(p.completed_at) AS last_completed
+            FROM leaders ld
+            LEFT JOIN lesson_progress p ON p.leader_id = ld.id
+            LEFT JOIN course_lessons cl ON cl.id = p.lesson_id AND cl.active = 1
+            WHERE ld.active = 1
+            GROUP BY ld.id
+            ORDER BY ld.name COLLATE NOCASE
+            """
+        ).fetchall()]
+
+
+def set_lesson_done(lesson_id: int, leader_id: int, note: str, by: str) -> bool:
+    """Mark a lesson complete for a leader (or update its note if already
+    complete — the original completion date is kept). Returns False for
+    unknown lesson/leader ids instead of raising."""
+    with closing(connect()) as conn, conn:
+        if not conn.execute(
+            "SELECT 1 FROM course_lessons WHERE id=?", (lesson_id,)
+        ).fetchone() or not conn.execute(
+            "SELECT 1 FROM leaders WHERE id=?", (leader_id,)
+        ).fetchone():
+            return False
+        conn.execute(
+            "INSERT INTO lesson_progress (lesson_id, leader_id, completed_at, note, "
+            "recorded_by) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(lesson_id, leader_id) DO UPDATE SET "
+            "note=excluded.note, recorded_by=excluded.recorded_by",
+            (lesson_id, leader_id, now_stamp(), note or None, by),
+        )
+    return True
+
+
+def clear_lesson_done(lesson_id: int, leader_id: int) -> None:
+    with closing(connect()) as conn, conn:
+        conn.execute(
+            "DELETE FROM lesson_progress WHERE lesson_id=? AND leader_id=?",
+            (lesson_id, leader_id),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Roster
 # ---------------------------------------------------------------------------
 
@@ -955,7 +1094,7 @@ EXPORT_TABLES = [
     "team_members", "checklist_templates", "checklist_template_items",
     "checklist_runs", "checklist_run_items", "goals", "goal_updates",
     "positions", "lineup_assignments", "shift_notes", "announcements",
-    "announcement_reads",
+    "announcement_reads", "course_lessons", "lesson_progress",
 ]
 
 
@@ -981,8 +1120,9 @@ class _RestoreError(Exception):
 
 def import_json(raw: str) -> str | None:
     """Restore an export_json() payload, REPLACING current content of the
-    exported tables. Leaders are not restored (no PIN hashes in exports —
-    recreate logins in the admin page). Returns an error message or None.
+    exported tables. Leader accounts are restored with LOCKED PINs (hashes
+    never leave the database) — the Operator resets each PIN afterwards.
+    Returns an error message or None.
 
     All-or-nothing: the payload is fully validated before anything is
     deleted, and the whole restore runs in one transaction that rolls back
@@ -996,7 +1136,7 @@ def import_json(raw: str) -> str | None:
         return "That file is not a CFA Sidekick shift-app backup."
 
     # Validate shape completely before any destructive statement runs.
-    for table in EXPORT_TABLES:
+    for table in EXPORT_TABLES + ["leaders"]:
         rows = payload.get(table, [])
         if not isinstance(rows, list):
             return f"Backup section '{table}' is malformed."
@@ -1007,10 +1147,24 @@ def import_json(raw: str) -> str | None:
                        for v in row.values()):
                 return f"Backup section '{table}' has a malformed row."
 
+    # Restored leader accounts get an unmatchable PIN hash: the Operator
+    # resets PINs after a restore. Keeping the leaders' original ids is what
+    # lets lesson_progress rows re-attach on a fresh database.
+    locked_hash = generate_password_hash("locked-" + secrets.token_hex(16))
+
     try:
         with closing(connect()) as conn:
             try:
                 with conn:  # one transaction; any exception rolls it back
+                    conn.execute("DELETE FROM leaders")
+                    for row in payload.get("leaders", []):
+                        conn.execute(
+                            "INSERT INTO leaders (id, name, pin_hash, role, active, "
+                            "created_at) VALUES (?,?,?,?,?,?)",
+                            (row.get("id"), row.get("name", ""), locked_hash,
+                             row.get("role", "lead"), row.get("active", 1),
+                             row.get("created_at", now_stamp())),
+                        )
                     for table in EXPORT_TABLES:
                         valid_cols = {r["name"] for r in
                                       conn.execute(f"PRAGMA table_info({table})")}
@@ -1025,6 +1179,12 @@ def import_json(raw: str) -> str | None:
                                 f"VALUES ({','.join('?' * len(cols))})",
                                 [row[c] for c in cols],
                             )
+                    # A pre-course backup carries no lessons: clear the seed
+                    # flag so the next boot re-seeds the course from code.
+                    if not conn.execute(
+                        "SELECT 1 FROM course_lessons LIMIT 1"
+                    ).fetchone():
+                        conn.execute("DELETE FROM meta WHERE key='course_seeded'")
             except _RestoreError as e:
                 return str(e)
     except sqlite3.Error as e:

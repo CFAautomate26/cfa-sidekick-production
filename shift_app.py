@@ -22,6 +22,7 @@ from functools import wraps
 from flask import (Blueprint, Response, flash, redirect, render_template,
                    request, session, url_for)
 
+import shift_course
 import shift_db
 
 shift_bp = Blueprint("shift", __name__, url_prefix="/shift")
@@ -570,6 +571,64 @@ def roster_toggle(member_id):
 @shift_bp.route("/more")
 def more():
     return render_template("shift/more.html")
+
+
+# ---------------------------------------------------------------------------
+# Leadership development course
+# ---------------------------------------------------------------------------
+
+def _can_view_development(leader_id: int) -> bool:
+    return is_admin() or session.get("shift_leader_id") == leader_id
+
+
+@shift_bp.route("/development")
+def development():
+    if is_admin():
+        return render_template(
+            "shift/development.html",
+            leaders=shift_db.leader_course_summary(),
+            total=shift_db.course_lesson_count(),
+            course_url=shift_course.COURSE_FOLDER_URL,
+        )
+    leader_id = session.get("shift_leader_id")
+    if not leader_id:
+        flash("Your login isn't linked to a leader profile — ask the Operator.")
+        return redirect(url_for("shift.today"))
+    return redirect(url_for("shift.development_leader", leader_id=leader_id))
+
+
+@shift_bp.route("/development/<int:leader_id>")
+def development_leader(leader_id):
+    if not _can_view_development(leader_id):
+        flash("You can only see your own development page.")
+        return redirect(url_for("shift.today"))
+    leader = shift_db.get_leader(leader_id)
+    if not leader:
+        flash("That leader doesn't exist.")
+        return redirect(url_for("shift.development"))
+    modules = shift_db.course_overview(leader_id)
+    done = sum(m["done"] for m in modules)
+    total = sum(m["total"] for m in modules)
+    return render_template(
+        "shift/development_leader.html", leader=leader, modules=modules,
+        done=done, total=total, course_url=shift_course.COURSE_FOLDER_URL,
+    )
+
+
+@shift_bp.route("/development/<int:leader_id>/lesson/<int:lesson_id>", methods=["POST"])
+def development_update(leader_id, lesson_id):
+    if not _can_view_development(leader_id):
+        flash("You can only update your own development page.")
+        return redirect(url_for("shift.today"))
+    action = request.form.get("action", "")
+    note = " ".join((request.form.get("note") or "").split())
+    if action in ("complete", "save"):
+        if not shift_db.set_lesson_done(lesson_id, leader_id, note, current_name()):
+            flash("That lesson doesn't exist any more — reload the page.")
+    elif action == "uncomplete":
+        shift_db.clear_lesson_done(lesson_id, leader_id)
+    return redirect(url_for("shift.development_leader", leader_id=leader_id)
+                    + f"#lesson-{lesson_id}")
 
 
 # ---------------------------------------------------------------------------
