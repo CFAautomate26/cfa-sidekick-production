@@ -366,9 +366,15 @@ def contains_profanity(text: str) -> bool:
     lower = text.lower()
     return any(word in lower for word in PROFANITY_WORDS)
 
+# Render sets RENDER_GIT_COMMIT on every deploy; surfacing it here makes it
+# possible to confirm from outside which revision is actually live.
+APP_REVISION = os.getenv("RENDER_GIT_COMMIT", "")[:7]
+
+
 @app.route("/", methods=["GET", "HEAD"])
 def health_check():
-    return "CFA Sidekick is running", 200
+    suffix = f" (rev {APP_REVISION})" if APP_REVISION else ""
+    return f"CFA Sidekick is running{suffix}", 200
 
 @app.route("/groupme_callback", methods=["GET", "POST"])
 def groupme_callback():
