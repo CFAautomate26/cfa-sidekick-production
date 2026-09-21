@@ -408,6 +408,66 @@ def test_admin_template_editor(client):
                     if x["id"] == t["id"])["active"]
 
 
+# --- leadership development ------------------------------------------------
+
+def test_development_admin_sees_all_leaders(client):
+    make_leader(client)
+    login_operator(client)
+    resp = client.get("/shift/development")
+    assert resp.status_code == 200
+    assert b"Maya" in resp.data
+
+    leader = shift_db.leaders()[0]
+    resp = client.get(f"/shift/development/{leader['id']}")
+    assert resp.status_code == 200
+    assert b"Mindset 101" in resp.data
+
+
+def test_development_lead_sees_only_self(client):
+    make_leader(client)
+    make_leader(client, name="Devon", pin="8888")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    devon = next(l for l in shift_db.leaders() if l["name"] == "Devon")
+
+    login_leader(client)  # Maya
+    resp = client.get("/shift/development", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/development/{maya['id']}")
+    assert client.get(f"/shift/development/{maya['id']}").status_code == 200
+
+    resp = client.get(f"/shift/development/{devon['id']}", follow_redirects=False)
+    assert resp.status_code == 302  # bounced, not shown
+
+    lesson = shift_db.course_overview(devon["id"])[0]["lessons"][0]
+    client.post(f"/shift/development/{devon['id']}/lesson/{lesson['id']}",
+                data={"action": "complete", "note": "sneaky"})
+    assert shift_db.leader_course_summary()[0]["done"] == 0
+    assert shift_db.leader_course_summary()[1]["done"] == 0
+
+
+def test_development_mark_complete_flow(client):
+    make_leader(client)
+    login_operator(client)
+    leader = shift_db.leaders()[0]
+    lesson = shift_db.course_overview(leader["id"])[0]["lessons"][0]
+
+    client.post(f"/shift/development/{leader['id']}/lesson/{lesson['id']}",
+                data={"action": "complete", "note": "Solid grasp of the pyramid"})
+    row = shift_db.course_overview(leader["id"])[0]["lessons"][0]
+    assert row["done"] and row["recorded_by"] == "Operator"
+
+    resp = client.get(f"/shift/development/{leader['id']}")
+    assert b"Solid grasp of the pyramid" in resp.data
+
+    client.post(f"/shift/development/{leader['id']}/lesson/{lesson['id']}",
+                data={"action": "uncomplete"})
+    assert not shift_db.course_overview(leader["id"])[0]["lessons"][0]["done"]
+
+    # Bogus lesson id → flash + redirect, never a 500
+    resp = client.post(f"/shift/development/{leader['id']}/lesson/999999",
+                       data={"action": "complete"})
+    assert resp.status_code == 302
+
+
 # --- backup ----------------------------------------------------------------
 
 def test_admin_export_import_routes(client):

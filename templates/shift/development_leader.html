@@ -1,0 +1,53 @@
+{% extends "shift/base.html" %}
+{% block title %}{{ leader.name }} — Development{% endblock %}
+{% block content %}
+<h1 class="page">{{ leader.name }}</h1>
+<div class="sub">Leadership development · {{ done }} of {{ total }} lessons complete</div>
+<div class="bar {{ 'full' if total and done == total }}" style="margin-bottom:16px;">
+  <span style="width: {{ (done / total * 100) | round if total else 0 }}%"></span>
+</div>
+
+{% for m in modules %}
+<div class="section-label">{{ m.module }} · {{ m.done }}/{{ m.total }}</div>
+<div class="card" style="padding: 4px 14px;">
+  {% for l in m.lessons %}
+  <details id="lesson-{{ l.id }}" style="padding: 10px 0; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
+    <summary style="list-style:none; cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
+      <span class="checkmark" style="{% if l.done %}background:var(--good); border-color:var(--good); color:#fff;{% endif %}">✓</span>
+      <span style="flex:1; font-size:15px; {% if l.done %}color:var(--soft);{% endif %}">{{ l.title }}
+        <span class="meta" style="display:block; font-size:12px; color:var(--soft);">
+          {% if l.done %}completed {{ l.completed_at }}{% if l.note %} · 📝{% endif %}{% else %}not started{% endif %}
+        </span>
+      </span>
+    </summary>
+    <div style="padding: 10px 0 4px 36px;">
+      <div class="pillrow" style="margin-bottom:8px;">
+        {% if l.doc_url %}<a class="pill small" href="{{ l.doc_url }}" target="_blank" rel="noopener">📄 Doc</a>{% endif %}
+        {% if l.slides_url %}<a class="pill small" href="{{ l.slides_url }}" target="_blank" rel="noopener">📊 Slides</a>{% endif %}
+        {% if l.video_url %}<a class="pill small" href="{{ l.video_url }}" target="_blank" rel="noopener">🎬 Video</a>{% endif %}
+      </div>
+      <form method="post" action="{{ url_for('shift.development_update', leader_id=leader.id, lesson_id=l.id) }}">
+        <input type="text" name="note" value="{{ l.note or '' }}"
+               placeholder="Session note — what clicked, what to revisit…">
+        <div class="pillrow" style="margin-top:8px;">
+          {% if l.done %}
+          <button class="pill small primary" type="submit" name="action" value="save">Save note</button>
+          <button class="pill small ghost" type="submit" name="action" value="uncomplete">Mark not done</button>
+          {% else %}
+          <button class="pill small primary" type="submit" name="action" value="complete">✓ Mark complete</button>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endfor %}
+
+<div class="pillrow" style="margin-top:14px;">
+  <a class="pill small ghost" href="{{ course_url }}" target="_blank" rel="noopener">📁 Course folder on Drive</a>
+  {% if shift_is_admin %}<a class="pill small ghost" href="{{ url_for('shift.development') }}">← All leaders</a>{% endif %}
+</div>
+<div class="sub">Notes are visible to {{ leader.name }} and the admins — keep
+them developmental. Anything HR-related stays out of this app.</div>
+{% endblock %}

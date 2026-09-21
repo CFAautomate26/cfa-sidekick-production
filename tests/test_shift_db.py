@@ -326,7 +326,11 @@ def test_export_import_roundtrip(isolated_db):
     assert len(shift_db.notes_feed()) == 1
     _, items = shift_db.run_with_items(run_id)
     assert items[0]["done"] == 1 and items[0]["done_by"] == "Maya"
-    # Leaders are intentionally NOT restored (no hashes in export)
+    # Leader accounts come back with LOCKED PINs (hashes never leave the DB)
+    leader = shift_db.leaders()[0]
+    assert leader["name"] == "Maya"
+    assert shift_db.verify_leader("Maya", "1234") is None
+    assert shift_db.reset_leader_pin(leader["id"], "1234") is None
     assert shift_db.verify_leader("Maya", "1234")
 
 
@@ -356,6 +360,123 @@ def test_import_rejects_garbage_without_touching_data(isolated_db):
     for raw in bad_payloads:
         assert shift_db.import_json(raw) is not None, raw
         assert _table_counts() == before, f"data changed after rejected import: {raw}"
+
+
+def test_course_seeded(isolated_db):
+    import shift_course
+    expected = sum(len(lessons) for _, lessons in shift_course.COURSE)
+    assert shift_db.course_lesson_count() == expected
+    shift_db.init_db()  # idempotent
+    assert shift_db.course_lesson_count() == expected
+
+
+def test_course_seeds_into_existing_database(isolated_db):
+    # Simulate a pre-course production DB: drop the course tables + flag,
+    # keep the base seed flag, then boot again.
+    from contextlib import closing
+    with closing(shift_db.connect()) as conn, conn:
+        conn.execute("DELETE FROM lesson_progress")
+        conn.execute("DELETE FROM course_lessons")
+        conn.execute("DELETE FROM meta WHERE key='course_seeded'")
+    shift_db.init_db()
+    assert shift_db.course_lesson_count() > 0
+    assert len(shift_db.all_templates()) == len(shift_db.SEED_TEMPLATES)  # not re-seeded
+
+
+def test_lesson_progress_lifecycle(isolated_db):
+    shift_db.add_leader("Maya", "1234")
+    leader = shift_db.leaders()[0]
+    modules = shift_db.course_overview(leader["id"])
+    assert modules[0]["module"] == "Mindset 101"
+    lesson = modules[0]["lessons"][0]
+    assert not lesson["done"]
+
+    assert shift_db.set_lesson_done(lesson["id"], leader["id"], "Great session", "Operator")
+    modules = shift_db.course_overview(leader["id"])
+    row = modules[0]["lessons"][0]
+    assert row["done"] and row["note"] == "Great session"
+    assert row["recorded_by"] == "Operator"
+    first_completed = row["completed_at"]
+
+    # Updating the note keeps the original completion date
+    assert shift_db.set_lesson_done(lesson["id"], leader["id"], "Revisit ch. 2", "Operator")
+    row = shift_db.course_overview(leader["id"])[0]["lessons"][0]
+    assert row["note"] == "Revisit ch. 2" and row["completed_at"] == first_completed
+
+    summary = shift_db.leader_course_summary()
+    assert summary[0]["done"] == 1
+
+    shift_db.clear_lesson_done(lesson["id"], leader["id"])
+    assert shift_db.leader_course_summary()[0]["done"] == 0
+
+    # Unknown ids are graceful
+    assert shift_db.set_lesson_done(999999, leader["id"], "", "Op") is False
+    assert shift_db.set_lesson_done(lesson["id"], 999999, "", "Op") is False
+
+
+def test_summary_ignores_deactivated_lessons(isolated_db):
+    from contextlib import closing
+    shift_db.add_leader("Maya", "1234")
+    leader = shift_db.leaders()[0]
+    lessons = shift_db.course_overview(leader["id"])[0]["lessons"]
+    shift_db.set_lesson_done(lessons[0]["id"], leader["id"], "", "Op")
+    shift_db.set_lesson_done(lessons[1]["id"], leader["id"], "", "Op")
+
+    with closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE course_lessons SET active=0 WHERE id=?",
+                     (lessons[1]["id"],))
+
+    # Admin summary, the leader page, and the total all agree
+    summary = shift_db.leader_course_summary()[0]
+    assert summary["done"] == 1
+    modules = shift_db.course_overview(leader["id"])
+    assert sum(m["done"] for m in modules) == 1
+    assert shift_db.course_lesson_count() == sum(m["total"] for m in modules)
+
+    # A stale form can't add progress on a retired lesson
+    assert shift_db.set_lesson_done(lessons[1]["id"], leader["id"], "", "Op") is False
+
+
+def test_restore_then_reboot_never_duplicates_course(isolated_db):
+    # Two-step restore: an old (pre-course) backup first, then a current one,
+    # then a boot — the course must not double-seed.
+    current = shift_db.export_json()
+    import json as _json
+    old = _json.loads(current)
+    for key in ("course_lessons", "lesson_progress"):
+        old.pop(key, None)
+    assert shift_db.import_json(_json.dumps(old)) is None       # clears flag
+    assert shift_db.import_json(current) is None                # restores lessons
+    shift_db.init_db()                                          # boot
+    import shift_course
+    assert shift_db.course_lesson_count() == \
+        sum(len(lessons) for _, lessons in shift_course.COURSE)
+
+
+def test_seed_flag_recovers_without_duplicating(isolated_db):
+    # Lessons present but flag missing (e.g. interrupted maintenance):
+    # boot records the flag instead of seeding duplicates.
+    from contextlib import closing
+    with closing(shift_db.connect()) as conn, conn:
+        conn.execute("DELETE FROM meta WHERE key='course_seeded'")
+    before = shift_db.course_lesson_count()
+    shift_db.init_db()
+    assert shift_db.course_lesson_count() == before
+    with closing(shift_db.connect()) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM meta WHERE key='course_seeded'").fetchone()
+
+
+def test_course_progress_survives_export_import(isolated_db):
+    shift_db.add_leader("Maya", "1234")
+    leader = shift_db.leaders()[0]
+    lesson = shift_db.course_overview(leader["id"])[0]["lessons"][0]
+    shift_db.set_lesson_done(lesson["id"], leader["id"], "note", "Operator")
+
+    raw = shift_db.export_json()
+    shift_db.clear_lesson_done(lesson["id"], leader["id"])
+    assert shift_db.import_json(raw) is None
+    assert shift_db.leader_course_summary()[0]["done"] == 1
 
 
 def test_recent_dates_shape(isolated_db):

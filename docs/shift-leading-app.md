@@ -22,6 +22,16 @@ the leadership team:
 - **Announcements** — Operator/admin posts; every leader taps **Got it**, and
   admins see exactly who has acknowledged.
 - **History** — any past day's checklists (who did what), lineups, and notes.
+- **Leadership development** — the Operator's course (from the "Leadership
+  Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,
+  Leading Organization) tracked per leader. Admins see every leader's
+  progress; each leader sees their own. Open a leader during a 1-on-1,
+  tap through to the lesson's doc/slides/video on Drive, mark it complete,
+  and keep a session note. The course structure is pinned in
+  `shift_course.py` — update it there if the course changes on Drive.
+  Note: the Drive links open for whoever the files are shared with — share
+  the course folder with your leaders (view access) so the links work on
+  their phones.
 
 The app registers fault-isolated in `app.py`: if it ever fails to load, the
 GroupMe and Slack bots keep running untouched.
@@ -73,8 +83,9 @@ scale.
   daily and keep the response, following the same token convention as the
   other `/scheduled` endpoints.
 - **Restore**: Admin → *Restore from a backup file* (tick the confirmation
-  box). Leader logins are not in backups (PIN hashes never leave the
-  database) — recreate them in the admin page after a restore.
+  box). Leader accounts come back with **locked PINs** (PIN hashes never
+  leave the database) — reset each leader's PIN in the admin page after a
+  restore. Course progress and everything else comes back as it was.
 
 ## Security model (know its limits)
 
