@@ -467,6 +467,55 @@ def test_seed_flag_recovers_without_duplicating(isolated_db):
             "SELECT 1 FROM meta WHERE key='course_seeded'").fetchone()
 
 
+def test_task_lifecycle(isolated_db):
+    shift_db.add_leader("Maya", "1234")
+    leader = shift_db.leaders()[0]
+
+    assert shift_db.add_task(leader["id"], "  Deep clean  fryer 2 ", "Before Friday",
+                             "2020-01-01", "Operator")
+    assert shift_db.add_task(leader["id"], "Read SERVE ch. 3", "", "", "Operator")
+    assert not shift_db.add_task(leader["id"], "   ", "", "", "Operator")
+    assert not shift_db.add_task(999999, "Ghost task", "", "", "Operator")
+
+    open_tasks, done_tasks = shift_db.tasks_for_leader(leader["id"])
+    assert [t["title"] for t in open_tasks] == ["Deep clean fryer 2", "Read SERVE ch. 3"]
+    assert open_tasks[0]["overdue"] is True     # due 2020, dated tasks sort first
+    assert open_tasks[1]["overdue"] is False
+    assert not done_tasks
+
+    summary = shift_db.leader_task_summary()[0]
+    assert summary["open"] == 2 and summary["overdue"] == 1
+
+    task = open_tasks[0]
+    assert shift_db.set_task_done(task["id"], True, "Maya")
+    open_tasks, done_tasks = shift_db.tasks_for_leader(leader["id"])
+    assert len(open_tasks) == 1 and len(done_tasks) == 1
+    assert done_tasks[0]["completed_by"] == "Maya" and done_tasks[0]["completed_at"]
+    assert shift_db.leader_task_summary()[0]["open"] == 1
+
+    assert shift_db.set_task_done(task["id"], False, "Maya")  # reopen
+    open_tasks, _ = shift_db.tasks_for_leader(leader["id"])
+    assert len(open_tasks) == 2
+    assert open_tasks[0]["completed_at"] is None
+
+    assert not shift_db.set_task_done(999999, True, "X")
+    shift_db.delete_task(open_tasks[0]["id"])
+    assert shift_db.leader_task_summary()[0]["open"] == 1
+    assert shift_db.get_task(999999) is None
+
+
+def test_tasks_survive_export_import(isolated_db):
+    shift_db.add_leader("Maya", "1234")
+    leader = shift_db.leaders()[0]
+    shift_db.add_task(leader["id"], "Survive the restore", "", "", "Operator")
+    raw = shift_db.export_json()
+    open_tasks, _ = shift_db.tasks_for_leader(leader["id"])
+    shift_db.delete_task(open_tasks[0]["id"])
+    assert shift_db.import_json(raw) is None
+    open_tasks, _ = shift_db.tasks_for_leader(leader["id"])
+    assert open_tasks[0]["title"] == "Survive the restore"
+
+
 def test_course_progress_survives_export_import(isolated_db):
     shift_db.add_leader("Maya", "1234")
     leader = shift_db.leaders()[0]

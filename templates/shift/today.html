@@ -20,6 +20,20 @@
 </div>
 {% endfor %}
 
+{% if my_tasks %}
+<div class="section-label">Your to-dos</div>
+<a class="card tap" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) }}">
+  {% for t in my_tasks %}
+  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px; align-items:baseline;">
+    <span style="color:var(--soft);">▢</span>
+    <span style="flex:1; font-weight:700;">{{ t.title }}</span>
+    {% if t.due_date %}<span class="progress-note" style="margin:0;{% if t.overdue %} color:var(--cfa-red); font-weight:700;{% endif %}">due {{ t.due_date }}</span>{% endif %}
+  </div>
+  {% endfor %}
+  <div class="progress-note">Tap to open and check off</div>
+</a>
+{% endif %}
+
 <div class="section-label">This daypart's checklists</div>
 {% for r in current_runs %}
 <a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">

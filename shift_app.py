@@ -253,6 +253,7 @@ def today():
     daypart = shift_db.current_daypart()
     announcements = [a for a in shift_db.active_announcements(reader=current_name())
                      if not a["acked"]]
+    leader_id = session.get("shift_leader_id")
     return render_template(
         "shift/today.html",
         runs=runs,
@@ -262,6 +263,8 @@ def today():
         positions=shift_db.active_positions(),
         goals=shift_db.goals_by_status("active"),
         notes=shift_db.notes_for_date(day)[:3],
+        my_tasks=shift_db.open_tasks_for_leader(leader_id) if leader_id else [],
+        my_leader_id=leader_id,
     )
 
 
@@ -629,6 +632,72 @@ def development_update(leader_id, lesson_id):
         shift_db.clear_lesson_done(lesson_id, leader_id)
     return redirect(url_for("shift.development_leader", leader_id=leader_id)
                     + f"#lesson-{lesson_id}")
+
+
+# ---------------------------------------------------------------------------
+# Leader to-dos
+# ---------------------------------------------------------------------------
+
+@shift_bp.route("/todo")
+def todo():
+    if is_admin():
+        return render_template("shift/todo.html",
+                               leaders=shift_db.leader_task_summary())
+    leader_id = session.get("shift_leader_id")
+    if not leader_id:
+        flash("Your login isn't linked to a leader profile — ask the Operator.")
+        return redirect(url_for("shift.today"))
+    return redirect(url_for("shift.todo_leader", leader_id=leader_id))
+
+
+@shift_bp.route("/todo/<int:leader_id>")
+def todo_leader(leader_id):
+    if not _can_view_development(leader_id):
+        flash("You can only see your own to-do list.")
+        return redirect(url_for("shift.today"))
+    leader = shift_db.get_leader(leader_id)
+    if not leader:
+        flash("That leader doesn't exist.")
+        return redirect(url_for("shift.todo"))
+    open_tasks, done_tasks = shift_db.tasks_for_leader(leader_id)
+    return render_template("shift/todo_leader.html", leader=leader,
+                           open_tasks=open_tasks, done_tasks=done_tasks)
+
+
+@shift_bp.route("/todo/<int:leader_id>/assign", methods=["POST"])
+@admin_required
+def todo_assign(leader_id):
+    ok = shift_db.add_task(
+        leader_id,
+        title=request.form.get("title", ""),
+        details=request.form.get("details", ""),
+        due_date=_optional_date(request.form.get("due_date")),
+        assigned_by=current_name(),
+    )
+    if not ok:
+        flash("A to-do needs a title (and a leader who still exists).")
+    return redirect(url_for("shift.todo_leader", leader_id=leader_id))
+
+
+@shift_bp.route("/todo/task/<int:task_id>/toggle", methods=["POST"])
+def todo_toggle(task_id):
+    task = shift_db.get_task(task_id)
+    if not task or not _can_view_development(task["leader_id"]):
+        flash("That to-do doesn't exist or isn't yours.")
+        return redirect(url_for("shift.today"))
+    shift_db.set_task_done(task_id, request.form.get("done") == "1", current_name())
+    return redirect(url_for("shift.todo_leader", leader_id=task["leader_id"])
+                    + f"#task-{task_id}")
+
+
+@shift_bp.route("/todo/task/<int:task_id>/delete", methods=["POST"])
+@admin_required
+def todo_delete(task_id):
+    task = shift_db.get_task(task_id)
+    if task:
+        shift_db.delete_task(task_id)
+    return redirect(url_for("shift.todo_leader", leader_id=task["leader_id"])
+                    if task else url_for("shift.todo"))
 
 
 # ---------------------------------------------------------------------------

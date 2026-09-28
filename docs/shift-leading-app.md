@@ -22,6 +22,11 @@ the leadership team:
 - **Announcements** — Operator/admin posts; every leader taps **Got it**, and
   admins see exactly who has acknowledged.
 - **History** — any past day's checklists (who did what), lineups, and notes.
+- **Leader to-dos** — admins assign tasks to individual leaders (title,
+  details, due date); each leader's open to-dos appear on their Today
+  screen the moment they sign in, they check them off from their to-do
+  page (stamped who/when), and admins see open/overdue counts per leader
+  with a full completed history.
 - **Leadership development** — the Operator's course (from the "Leadership
   Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,
   Leading Organization) tracked per leader. Admins see every leader's
