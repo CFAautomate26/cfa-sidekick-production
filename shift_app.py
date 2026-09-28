@@ -15,12 +15,14 @@ Setup guide: docs/shift-leading-app.md
 
 import hmac
 import os
+import threading
 import time
 from datetime import date
 from functools import wraps
 
-from flask import (Blueprint, Response, flash, redirect, render_template,
-                   request, session, url_for)
+import requests
+from flask import (Blueprint, Response, current_app, flash, redirect,
+                   render_template, request, session, url_for)
 
 import shift_course
 import shift_db
@@ -36,6 +38,14 @@ OPERATOR_NAME = "Operator"
 DATA_AT_RISK = (
     os.getenv("ENV", "production") == "production" and not os.getenv("SHIFT_DB_PATH")
 )
+
+# Where to-do completion emails go (same FormSubmit path as the /apply form,
+# so the default address is already activated there). Set SHIFT_NOTIFY_EMAIL
+# to "" to disable completion emails entirely.
+SHIFT_NOTIFY_EMAIL = os.getenv(
+    "SHIFT_NOTIFY_EMAIL",
+    os.getenv("APPLICATION_EMAIL", "joshua.huesser@cfafranchisee.ca"),
+).strip()
 
 # In-process login throttle: 5 wrong PINs locks that name for 10 minutes.
 # Resets on redeploy and is per-worker — fine for one small gunicorn service.
@@ -679,13 +689,63 @@ def todo_assign(leader_id):
     return redirect(url_for("shift.todo_leader", leader_id=leader_id))
 
 
+def send_completion_email(task: dict, leader_name: str, remaining: int) -> None:
+    """Email the Operator that a to-do was completed, via FormSubmit —
+    the same delivery path as the /apply form. Best-effort: failures are
+    logged and never surface to the person tapping the checkmark."""
+    payload = {
+        "_subject": f"To-do completed: {task['title']}",
+        "_template": "table",
+        "Leader": leader_name,
+        "Task": task["title"],
+        "Details": task.get("details") or "—",
+        "Due date": task.get("due_date") or "—",
+        "Completed by": task.get("completed_by") or "—",
+        "Completed at": task.get("completed_at") or "—",
+        "Still open for this leader": remaining,
+    }
+    try:
+        resp = requests.post(
+            f"https://formsubmit.co/ajax/{SHIFT_NOTIFY_EMAIL}",
+            json=payload, timeout=20, headers={"Accept": "application/json"},
+        )
+        print(f"To-do completion email status: {resp.status_code}")
+    except Exception as e:
+        print(f"Error sending to-do completion email: {e}")
+
+
+def _notify_completion(task_id: int) -> None:
+    """Fire the completion email in the background so the checkmark tap
+    never waits on (or breaks because of) the mail service."""
+    if not SHIFT_NOTIFY_EMAIL:
+        return
+    task = shift_db.get_task(task_id)
+    if not task or not task["completed_at"]:
+        return
+    leader = shift_db.get_leader(task["leader_id"])
+    remaining = len(shift_db.tasks_for_leader(task["leader_id"])[0])
+    thread = threading.Thread(
+        target=send_completion_email,
+        args=(task, leader["name"] if leader else "(removed)", remaining),
+        daemon=True,
+    )
+    thread.start()
+    if current_app.config.get("TESTING"):
+        thread.join(timeout=5)
+
+
 @shift_bp.route("/todo/task/<int:task_id>/toggle", methods=["POST"])
 def todo_toggle(task_id):
     task = shift_db.get_task(task_id)
     if not task or not _can_view_development(task["leader_id"]):
         flash("That to-do doesn't exist or isn't yours.")
         return redirect(url_for("shift.today"))
-    shift_db.set_task_done(task_id, request.form.get("done") == "1", current_name())
+    done = request.form.get("done") == "1"
+    shift_db.set_task_done(task_id, done, current_name())
+    # Email the Operator when a LEADER checks something off — not when the
+    # Operator marks it done themself during a review.
+    if done and session.get("shift_leader_id"):
+        _notify_completion(task_id)
     return redirect(url_for("shift.todo_leader", leader_id=task["leader_id"])
                     + f"#task-{task_id}")
 

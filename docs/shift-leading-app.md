@@ -26,7 +26,11 @@ the leadership team:
   details, due date); each leader's open to-dos appear on their Today
   screen the moment they sign in, they check them off from their to-do
   page (stamped who/when), and admins see open/overdue counts per leader
-  with a full completed history.
+  with a full completed history. When a leader completes a task, the
+  Operator gets an email (via the same FormSubmit path as the /apply
+  form) — address configurable with `SHIFT_NOTIFY_EMAIL`, set it empty
+  to turn completion emails off. Completions the Operator records
+  themself don't email.
 - **Leadership development** — the Operator's course (from the "Leadership
   Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,
   Leading Organization) tracked per leader. Admins see every leader's
@@ -49,6 +53,7 @@ GroupMe and Slack bots keep running untouched.
 | `SHIFT_DB_PATH` | **Strongly recommended** | Where the SQLite database lives. Point it at a persistent disk (see below) or data is wiped on every deploy. |
 | `FLASK_SECRET_KEY` | Recommended | Signs session cookies. If unset, a stable key is derived from the `SCHEDULE_SECRET` + `SHIFT_ADMIN_PIN` env vars (sessions survive deploys); if none of the three is set, a random per-boot key is used and logins reset each deploy. Generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`. |
 | `SHIFT_TZ` | No | Store timezone; defaults to `America/Toronto`. |
+| `SHIFT_NOTIFY_EMAIL` | No | Where to-do completion emails go. Defaults to `APPLICATION_EMAIL` (the Operator). Set to an empty string to disable completion emails. |
 
 ## The persistent disk (do this before rollout)
 

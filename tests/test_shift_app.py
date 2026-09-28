@@ -532,6 +532,65 @@ def test_todo_other_leader_blocked(client):
                        data={"done": "1"}).status_code == 302
 
 
+# --- to-do completion emails ------------------------------------------------
+
+@pytest.fixture()
+def sent_emails(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "shift_app.send_completion_email",
+        lambda task, leader_name, remaining: calls.append(
+            {"task": task, "leader": leader_name, "remaining": remaining}),
+    )
+    return calls
+
+
+def test_leader_completion_emails_operator(client, sent_emails):
+    make_leader(client)
+    leader = shift_db.leaders()[0]
+    login_operator(client)
+    client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Task A"})
+    client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Task B"})
+    client.post("/shift/logout")
+
+    login_leader(client)
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+
+    assert len(sent_emails) == 1
+    assert sent_emails[0]["leader"] == "Maya"
+    assert sent_emails[0]["task"]["title"] == "Task A"
+    assert sent_emails[0]["task"]["completed_by"] == "Maya"
+    assert sent_emails[0]["remaining"] == 1
+
+    # Reopening sends nothing
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "0"})
+    assert len(sent_emails) == 1
+
+
+def test_operator_completion_sends_no_email(client, sent_emails):
+    make_leader(client)
+    leader = shift_db.leaders()[0]
+    login_operator(client)
+    client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Reviewed live"})
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    assert not sent_emails
+
+
+def test_notify_disabled_by_empty_env(client, sent_emails, monkeypatch):
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_EMAIL", "")
+    make_leader(client)
+    leader = shift_db.leaders()[0]
+    login_operator(client)
+    client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Quiet task"})
+    client.post("/shift/logout")
+    login_leader(client)
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    assert not sent_emails
+
+
 # --- backup ----------------------------------------------------------------
 
 def test_admin_export_import_routes(client):
