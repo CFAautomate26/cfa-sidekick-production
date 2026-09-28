@@ -468,6 +468,70 @@ def test_development_mark_complete_flow(client):
     assert resp.status_code == 302
 
 
+# --- leader to-dos ---------------------------------------------------------
+
+def test_todo_assign_is_admin_only(client):
+    make_leader(client)
+    leader = shift_db.leaders()[0]
+    login_leader(client)
+    client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Self-assigned"})
+    assert not shift_db.tasks_for_leader(leader["id"])[0]  # nothing created
+
+
+def test_todo_full_flow(client):
+    make_leader(client)
+    leader = shift_db.leaders()[0]
+    login_operator(client)
+
+    client.post(f"/shift/todo/{leader['id']}/assign", data={
+        "title": "Deep clean fryer 2", "details": "Before Friday",
+        "due_date": "2030-01-01",
+    })
+    open_tasks, _ = shift_db.tasks_for_leader(leader["id"])
+    assert open_tasks[0]["assigned_by"] == "Operator"
+
+    resp = client.get("/shift/todo")
+    assert resp.status_code == 200 and b"Maya" in resp.data
+    resp = client.get(f"/shift/todo/{leader['id']}")
+    assert b"Deep clean fryer 2" in resp.data
+    client.post("/shift/logout")
+
+    # Maya sees it on Today, completes it from her page
+    login_leader(client)
+    assert b"Deep clean fryer 2" in client.get("/shift/").data
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    _, done_tasks = shift_db.tasks_for_leader(leader["id"])
+    assert done_tasks[0]["completed_by"] == "Maya"
+    assert b"Deep clean fryer 2" not in client.get("/shift/").data
+
+
+def test_todo_other_leader_blocked(client):
+    make_leader(client)
+    make_leader(client, name="Devon", pin="8888")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    devon = next(l for l in shift_db.leaders() if l["name"] == "Devon")
+    login_operator(client)
+    client.post(f"/shift/todo/{devon['id']}/assign", data={"title": "Devon's task"})
+    client.post("/shift/logout")
+
+    login_leader(client)  # Maya
+    resp = client.get("/shift/todo", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/todo/{maya['id']}")
+    assert client.get(f"/shift/todo/{devon['id']}", follow_redirects=False).status_code == 302
+
+    task = shift_db.tasks_for_leader(devon["id"])[0][0]
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    assert not shift_db.tasks_for_leader(devon["id"])[1]  # still open
+
+    client.post(f"/shift/todo/task/{task['id']}/delete")
+    assert shift_db.get_task(task["id"])  # lead can't delete
+
+    # Bogus ids are graceful
+    assert client.post("/shift/todo/task/999999/toggle",
+                       data={"done": "1"}).status_code == 302
+
+
 # --- backup ----------------------------------------------------------------
 
 def test_admin_export_import_routes(client):

@@ -237,6 +237,20 @@ CREATE TABLE IF NOT EXISTS lesson_progress (
     PRIMARY KEY (lesson_id, leader_id)
 );
 
+-- To-dos the Operator/admins assign to individual leaders.
+CREATE TABLE IF NOT EXISTS leader_tasks (
+    id INTEGER PRIMARY KEY,
+    leader_id INTEGER NOT NULL REFERENCES leaders(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    details TEXT,
+    due_date TEXT,                              -- YYYY-MM-DD or NULL
+    assigned_by TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,                          -- NULL = still open
+    completed_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_leader_tasks ON leader_tasks(leader_id, completed_at);
+
 CREATE INDEX IF NOT EXISTS idx_run_items_run ON checklist_run_items(run_id);
 CREATE INDEX IF NOT EXISTS idx_lineup_date ON lineup_assignments(lineup_date, daypart);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lineup_slot
@@ -929,6 +943,103 @@ def clear_lesson_done(lesson_id: int, leader_id: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Leader to-dos
+# ---------------------------------------------------------------------------
+
+def add_task(leader_id: int, title: str, details: str, due_date: str,
+             assigned_by: str) -> bool:
+    """Assign a to-do. Returns False for an unknown leader or empty title."""
+    title = " ".join((title or "").split())
+    if not title:
+        return False
+    with closing(connect()) as conn, conn:
+        if not conn.execute(
+            "SELECT 1 FROM leaders WHERE id=?", (leader_id,)
+        ).fetchone():
+            return False
+        conn.execute(
+            "INSERT INTO leader_tasks (leader_id, title, details, due_date, "
+            "assigned_by, created_at) VALUES (?,?,?,?,?,?)",
+            (leader_id, title, (details or "").strip() or None, due_date or None,
+             assigned_by, now_stamp()),
+        )
+    return True
+
+
+def tasks_for_leader(leader_id: int) -> tuple[list[dict], list[dict]]:
+    """(open, completed) task lists: open by due date then age, completed
+    newest first."""
+    with closing(connect()) as conn:
+        open_tasks = [dict(r) for r in conn.execute(
+            "SELECT * FROM leader_tasks WHERE leader_id=? AND completed_at IS NULL "
+            "ORDER BY due_date IS NULL, due_date, id",
+            (leader_id,),
+        ).fetchall()]
+        done_tasks = [dict(r) for r in conn.execute(
+            "SELECT * FROM leader_tasks WHERE leader_id=? AND completed_at IS NOT NULL "
+            "ORDER BY completed_at DESC, id DESC",
+            (leader_id,),
+        ).fetchall()]
+    today = today_local()
+    for t in open_tasks:
+        t["overdue"] = bool(t["due_date"] and t["due_date"] < today)
+    return open_tasks, done_tasks
+
+
+def open_tasks_for_leader(leader_id: int, limit: int = 5) -> list[dict]:
+    """The leader's open to-dos for the Today dashboard."""
+    open_tasks, _ = tasks_for_leader(leader_id)
+    return open_tasks[:limit]
+
+
+def get_task(task_id: int) -> dict | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT * FROM leader_tasks WHERE id=?", (task_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def set_task_done(task_id: int, done: bool, by: str) -> bool:
+    """Complete or reopen a to-do. Returns False for an unknown id."""
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE leader_tasks SET completed_at=?, completed_by=? WHERE id=?",
+            (now_stamp() if done else None, by if done else None, task_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_task(task_id: int) -> None:
+    with closing(connect()) as conn, conn:
+        conn.execute("DELETE FROM leader_tasks WHERE id=?", (task_id,))
+
+
+def leader_task_summary() -> list[dict]:
+    """Active leaders with open/overdue to-do counts, for the admin index."""
+    today = today_local()
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            """
+            SELECT ld.id, ld.name, ld.role,
+                   -- t.id IS NOT NULL: don't count the LEFT JOIN's null row
+                   -- for leaders with no tasks at all
+                   COUNT(CASE WHEN t.id IS NOT NULL AND t.completed_at IS NULL
+                              THEN 1 END) AS open,
+                   COUNT(CASE WHEN t.completed_at IS NULL AND t.due_date < ?
+                              THEN 1 END) AS overdue,
+                   MAX(t.completed_at) AS last_completed
+            FROM leaders ld
+            LEFT JOIN leader_tasks t ON t.leader_id = ld.id
+            WHERE ld.active = 1
+            GROUP BY ld.id
+            ORDER BY ld.name COLLATE NOCASE
+            """,
+            (today,),
+        ).fetchall()]
+
+
+# ---------------------------------------------------------------------------
 # Roster
 # ---------------------------------------------------------------------------
 
@@ -1112,7 +1223,7 @@ EXPORT_TABLES = [
     "team_members", "checklist_templates", "checklist_template_items",
     "checklist_runs", "checklist_run_items", "goals", "goal_updates",
     "positions", "lineup_assignments", "shift_notes", "announcements",
-    "announcement_reads", "course_lessons", "lesson_progress",
+    "announcement_reads", "course_lessons", "lesson_progress", "leader_tasks",
 ]
 
 
