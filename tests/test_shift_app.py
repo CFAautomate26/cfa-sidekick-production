@@ -578,6 +578,25 @@ def test_operator_completion_sends_no_email(client, sent_emails):
     assert not sent_emails
 
 
+def test_notify_failure_never_breaks_the_tap(client, sent_emails, monkeypatch):
+    make_leader(client)
+    leader = shift_db.leaders()[0]
+    login_operator(client)
+    client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Fragile"})
+    client.post("/shift/logout")
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+
+    def boom(*a, **k):
+        raise RuntimeError("db hiccup")
+    monkeypatch.setattr(shift_db, "tasks_for_leader", boom)
+
+    login_leader(client)
+    resp = client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    assert resp.status_code == 302             # the tap still succeeds
+    assert shift_db.get_task(task["id"])["completed_at"]
+    assert not sent_emails                     # email quietly skipped
+
+
 def test_notify_disabled_by_empty_env(client, sent_emails, monkeypatch):
     monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_EMAIL", "")
     make_leader(client)

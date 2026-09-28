@@ -715,23 +715,28 @@ def send_completion_email(task: dict, leader_name: str, remaining: int) -> None:
 
 
 def _notify_completion(task_id: int) -> None:
-    """Fire the completion email in the background so the checkmark tap
-    never waits on (or breaks because of) the mail service."""
-    if not SHIFT_NOTIFY_EMAIL:
-        return
-    task = shift_db.get_task(task_id)
-    if not task or not task["completed_at"]:
-        return
-    leader = shift_db.get_leader(task["leader_id"])
-    remaining = len(shift_db.tasks_for_leader(task["leader_id"])[0])
-    thread = threading.Thread(
-        target=send_completion_email,
-        args=(task, leader["name"] if leader else "(removed)", remaining),
-        daemon=True,
-    )
-    thread.start()
-    if current_app.config.get("TESTING"):
-        thread.join(timeout=5)
+    """Fire the completion email in the background. Best-effort end to end:
+    the snapshot reads and thread spawn are guarded too, so nothing in the
+    notify path can turn an already-committed completion into an error
+    page for the person tapping the checkmark."""
+    try:
+        if not SHIFT_NOTIFY_EMAIL:
+            return
+        task = shift_db.get_task(task_id)
+        if not task or not task["completed_at"]:
+            return
+        leader = shift_db.get_leader(task["leader_id"])
+        remaining = len(shift_db.tasks_for_leader(task["leader_id"])[0])
+        thread = threading.Thread(
+            target=send_completion_email,
+            args=(task, leader["name"] if leader else "(removed)", remaining),
+            daemon=True,
+        )
+        thread.start()
+        if current_app.config.get("TESTING"):
+            thread.join(timeout=5)
+    except Exception as e:
+        print(f"Error preparing to-do completion email: {e}")
 
 
 @shift_bp.route("/todo/task/<int:task_id>/toggle", methods=["POST"])
