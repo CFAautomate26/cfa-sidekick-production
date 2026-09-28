@@ -1022,7 +1022,10 @@ def leader_task_summary() -> list[dict]:
         return [dict(r) for r in conn.execute(
             """
             SELECT ld.id, ld.name, ld.role,
-                   COUNT(CASE WHEN t.completed_at IS NULL THEN 1 END) AS open,
+                   -- t.id IS NOT NULL: don't count the LEFT JOIN's null row
+                   -- for leaders with no tasks at all
+                   COUNT(CASE WHEN t.id IS NOT NULL AND t.completed_at IS NULL
+                              THEN 1 END) AS open,
                    COUNT(CASE WHEN t.completed_at IS NULL AND t.due_date < ?
                               THEN 1 END) AS overdue,
                    MAX(t.completed_at) AS last_completed

@@ -504,6 +504,19 @@ def test_task_lifecycle(isolated_db):
     assert shift_db.get_task(999999) is None
 
 
+def test_task_summary_zero_task_leader_is_caught_up(isolated_db):
+    shift_db.add_leader("Zoe", "3333")     # never assigned anything
+    shift_db.add_leader("Maya", "1234")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    shift_db.add_task(maya["id"], "One task", "", "", "Operator")
+    task = shift_db.tasks_for_leader(maya["id"])[0][0]
+    shift_db.set_task_done(task["id"], True, "Maya")
+
+    summary = {s["name"]: s for s in shift_db.leader_task_summary()}
+    assert summary["Zoe"]["open"] == 0 and summary["Zoe"]["overdue"] == 0
+    assert summary["Maya"]["open"] == 0   # all completed is also caught up
+
+
 def test_tasks_survive_export_import(isolated_db):
     shift_db.add_leader("Maya", "1234")
     leader = shift_db.leaders()[0]
