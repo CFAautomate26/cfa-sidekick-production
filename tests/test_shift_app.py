@@ -532,20 +532,25 @@ def test_todo_other_leader_blocked(client):
                        data={"done": "1"}).status_code == 302
 
 
-# --- to-do completion emails ------------------------------------------------
+# --- to-do completion notifications (Slack + opt-in email) ------------------
 
 @pytest.fixture()
-def sent_emails(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        "shift_app.send_completion_email",
-        lambda task, leader_name, remaining: calls.append(
-            {"task": task, "leader": leader_name, "remaining": remaining}),
-    )
-    return calls
+def notifications(monkeypatch):
+    """Arm both notification channels and capture what each would send."""
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_CHANNEL", "C123TEST")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_EMAIL", "op@example.com")
+    sent = {"slack": [], "email": []}
+
+    def capture(kind):
+        return lambda task, leader_name, remaining: sent[kind].append(
+            {"task": task, "leader": leader_name, "remaining": remaining})
+
+    monkeypatch.setattr("shift_app.send_completion_slack", capture("slack"))
+    monkeypatch.setattr("shift_app.send_completion_email", capture("email"))
+    return sent
 
 
-def test_leader_completion_emails_operator(client, sent_emails):
+def test_leader_completion_notifies_operator(client, notifications):
     make_leader(client)
     leader = shift_db.leaders()[0]
     login_operator(client)
@@ -557,28 +562,46 @@ def test_leader_completion_emails_operator(client, sent_emails):
     task = shift_db.tasks_for_leader(leader["id"])[0][0]
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
 
-    assert len(sent_emails) == 1
-    assert sent_emails[0]["leader"] == "Maya"
-    assert sent_emails[0]["task"]["title"] == "Task A"
-    assert sent_emails[0]["task"]["completed_by"] == "Maya"
-    assert sent_emails[0]["remaining"] == 1
+    for sent in (notifications["slack"], notifications["email"]):
+        assert len(sent) == 1
+        assert sent[0]["leader"] == "Maya"
+        assert sent[0]["task"]["title"] == "Task A"
+        assert sent[0]["task"]["completed_by"] == "Maya"
+        assert sent[0]["remaining"] == 1
 
     # Reopening sends nothing
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "0"})
-    assert len(sent_emails) == 1
+    assert len(notifications["slack"]) == 1
+    assert len(notifications["email"]) == 1
 
 
-def test_operator_completion_sends_no_email(client, sent_emails):
+def test_slack_only_when_email_unset(client, notifications, monkeypatch):
+    # The production shape: Slack channel configured, email left disabled.
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_EMAIL", "")
+    make_leader(client)
+    leader = shift_db.leaders()[0]
+    login_operator(client)
+    client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Slack me"})
+    client.post("/shift/logout")
+    login_leader(client)
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    assert len(notifications["slack"]) == 1
+    assert not notifications["email"]
+
+
+def test_operator_completion_sends_nothing(client, notifications):
     make_leader(client)
     leader = shift_db.leaders()[0]
     login_operator(client)
     client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Reviewed live"})
     task = shift_db.tasks_for_leader(leader["id"])[0][0]
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
-    assert not sent_emails
+    assert not notifications["slack"]
+    assert not notifications["email"]
 
 
-def test_notify_failure_never_breaks_the_tap(client, sent_emails, monkeypatch):
+def test_notify_failure_never_breaks_the_tap(client, notifications, monkeypatch):
     make_leader(client)
     leader = shift_db.leaders()[0]
     login_operator(client)
@@ -594,10 +617,12 @@ def test_notify_failure_never_breaks_the_tap(client, sent_emails, monkeypatch):
     resp = client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
     assert resp.status_code == 302             # the tap still succeeds
     assert shift_db.get_task(task["id"])["completed_at"]
-    assert not sent_emails                     # email quietly skipped
+    assert not notifications["slack"]          # both quietly skipped
+    assert not notifications["email"]
 
 
-def test_notify_disabled_by_empty_env(client, sent_emails, monkeypatch):
+def test_notify_disabled_by_empty_env(client, notifications, monkeypatch):
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_CHANNEL", "")
     monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_EMAIL", "")
     make_leader(client)
     leader = shift_db.leaders()[0]
@@ -607,7 +632,79 @@ def test_notify_disabled_by_empty_env(client, sent_emails, monkeypatch):
     login_leader(client)
     task = shift_db.tasks_for_leader(leader["id"])[0][0]
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
-    assert not sent_emails
+    assert not notifications["slack"]
+    assert not notifications["email"]
+
+
+def test_slack_ping_payload(monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_CHANNEL", "C123TEST")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_MENTION", "U05R80802EB")
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://app.example.com")
+
+    posted = {}
+
+    def fake_post(url, **kwargs):
+        posted["url"] = url
+        posted.update(kwargs)
+
+        class R:
+            status_code = 200
+            text = '{"ok": true}'
+        return R()
+
+    monkeypatch.setattr(shift_app.requests, "post", fake_post)
+    shift_app.send_completion_slack(
+        {"title": "Clean ice machine", "due_date": "2026-10-01", "leader_id": 7},
+        "Riya", 2)
+
+    assert posted["url"] == "https://slack.com/api/chat.postMessage"
+    assert posted["headers"]["Authorization"] == "Bearer xoxb-test"
+    body = posted["json"]
+    assert body["channel"] == "C123TEST"
+    assert body["text"].startswith("<@U05R80802EB> ")   # the ping that buzzes
+    assert "*Riya*" in body["text"]
+    assert "*Clean ice machine*" in body["text"]
+    assert "Due: 2026-10-01" in body["text"]
+    assert "2 still open for Riya" in body["text"]
+    assert "https://app.example.com/shift/todo/7" in body["text"]
+
+
+def test_slack_ping_without_token_or_extras(monkeypatch, capsys):
+    # No mention, no external URL, no due date — message still well-formed;
+    # and with no token at all, nothing is posted.
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_CHANNEL", "C123TEST")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_MENTION", "")
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+
+    posted = {}
+
+    def fake_post(url, **kwargs):
+        posted.update(kwargs)
+
+        class R:
+            status_code = 200
+            text = '{"ok": true}'
+        return R()
+
+    monkeypatch.setattr(shift_app.requests, "post", fake_post)
+    shift_app.send_completion_slack({"title": "Solo", "leader_id": 3}, "Aron", 0)
+    assert posted["json"]["text"].startswith("✅ *Aron*")
+    assert "last open to-do" in posted["json"]["text"]
+
+    # mrkdwn injection in a title is escaped, never a live mention
+    posted.clear()
+    shift_app.send_completion_slack(
+        {"title": "Tell <!channel> & co", "leader_id": 3}, "Aron", 0)
+    assert "<!channel>" not in posted["json"]["text"]
+    assert "&lt;!channel&gt; &amp; co" in posted["json"]["text"]
+
+    posted.clear()
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "")
+    shift_app.send_completion_slack({"title": "Solo", "leader_id": 3}, "Aron", 0)
+    assert not posted
+    assert "SLACK_BOT_TOKEN is missing" in capsys.readouterr().out
 
 
 # --- backup ----------------------------------------------------------------

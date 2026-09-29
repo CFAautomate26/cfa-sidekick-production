@@ -52,3 +52,6 @@ the ✅ reply. Render logs show every event received and every reply sent.
   duplicate event IDs are ignored, so the bot never double-replies.
 - The channel it watches is controlled by `SLACK_COVERAGE_CHANNEL_ID` — point
   it at a different channel ID to move the flow.
+- The same bot token also posts the shift app's **to-do completion pings**
+  (see [shift-leading-app.md](shift-leading-app.md)) — invite the bot to
+  that private channel too (`SHIFT_NOTIFY_SLACK_CHANNEL`).

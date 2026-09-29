@@ -39,13 +39,17 @@ DATA_AT_RISK = (
     os.getenv("ENV", "production") == "production" and not os.getenv("SHIFT_DB_PATH")
 )
 
-# Where to-do completion emails go (same FormSubmit path as the /apply form,
-# so the default address is already activated there). Set SHIFT_NOTIFY_EMAIL
-# to "" to disable completion emails entirely.
-SHIFT_NOTIFY_EMAIL = os.getenv(
-    "SHIFT_NOTIFY_EMAIL",
-    os.getenv("APPLICATION_EMAIL", "joshua.huesser@cfafranchisee.ca"),
-).strip()
+# Where to-do completion notifications go. Slack is the reliable path:
+# SHIFT_NOTIFY_SLACK_CHANNEL names a channel the CFA Sidekick Slack bot has
+# been invited to (posted with the same SLACK_BOT_TOKEN the coverage bot
+# uses), and SHIFT_NOTIFY_SLACK_MENTION optionally @-mentions a Slack user
+# ID so the post triggers a real phone notification. Email rides FormSubmit,
+# whose Cloudflare front bot-challenges server-side posts, so it's opt-in:
+# set SHIFT_NOTIFY_EMAIL explicitly to also send email.
+SHIFT_NOTIFY_EMAIL = os.getenv("SHIFT_NOTIFY_EMAIL", "").strip()
+SHIFT_NOTIFY_SLACK_CHANNEL = os.getenv("SHIFT_NOTIFY_SLACK_CHANNEL", "").strip()
+SHIFT_NOTIFY_SLACK_MENTION = os.getenv("SHIFT_NOTIFY_SLACK_MENTION", "").strip()
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
 
 # In-process login throttle: 5 wrong PINs locks that name for 10 minutes.
 # Resets on redeploy and is per-worker — fine for one small gunicorn service.
@@ -689,9 +693,50 @@ def todo_assign(leader_id):
     return redirect(url_for("shift.todo_leader", leader_id=leader_id))
 
 
+def send_completion_slack(task: dict, leader_name: str, remaining: int) -> None:
+    """Ping the Operator in Slack that a to-do was completed, using the same
+    bot token as the coverage bot (needs chat:write and the bot invited to
+    the SHIFT_NOTIFY_SLACK_CHANNEL channel). Best-effort: failures are
+    logged and never surface to the person tapping the checkmark."""
+    if not SLACK_BOT_TOKEN:
+        print("ERROR: SLACK_BOT_TOKEN is missing, cannot send the to-do "
+              "completion Slack ping.")
+        return
+    # Slack mrkdwn: &, < and > must be escaped or a task title could inject
+    # a real mention/link (e.g. "<!channel>").
+    def esc(text):
+        return (str(text).replace("&", "&amp;")
+                .replace("<", "&lt;").replace(">", "&gt;"))
+
+    name = esc(leader_name)
+    mention = f"<@{SHIFT_NOTIFY_SLACK_MENTION}> " if SHIFT_NOTIFY_SLACK_MENTION else ""
+    lines = [f"{mention}✅ *{name}* completed a to-do: *{esc(task['title'])}*"]
+    if task.get("due_date"):
+        lines.append(f"Due: {esc(task['due_date'])}")
+    lines.append(f"{remaining} still open for {name}" if remaining
+                 else f"That was {name}'s last open to-do 🎉")
+    base_url = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+    if base_url:
+        lines.append(f"<{base_url}/shift/todo/{task['leader_id']}|Open their to-do list>")
+    try:
+        resp = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+            json={"channel": SHIFT_NOTIFY_SLACK_CHANNEL,
+                  "text": "\n".join(lines), "unfurl_links": False},
+            timeout=15,
+        )
+        # Slack answers 200 even for errors — the body's ok/error field is
+        # what tells the story in the Render logs.
+        print(f"To-do completion Slack status: {resp.status_code}, "
+              f"body: {resp.text[:300]}")
+    except Exception as e:
+        print(f"Error sending to-do completion Slack ping: {e}")
+
+
 def send_completion_email(task: dict, leader_name: str, remaining: int) -> None:
-    """Email the Operator that a to-do was completed, via FormSubmit —
-    the same delivery path as the /apply form. Best-effort: failures are
+    """Email the Operator that a to-do was completed, via FormSubmit.
+    Opt-in (see SHIFT_NOTIFY_EMAIL above). Best-effort: failures are
     logged and never surface to the person tapping the checkmark."""
     payload = {
         "_subject": f"To-do completed: {task['title']}",
@@ -715,28 +760,35 @@ def send_completion_email(task: dict, leader_name: str, remaining: int) -> None:
 
 
 def _notify_completion(task_id: int) -> None:
-    """Fire the completion email in the background. Best-effort end to end:
-    the snapshot reads and thread spawn are guarded too, so nothing in the
-    notify path can turn an already-committed completion into an error
-    page for the person tapping the checkmark."""
+    """Fire the completion notifications (Slack and/or email, whichever is
+    configured) in the background. Best-effort end to end: the snapshot
+    reads and thread spawn are guarded too, so nothing in the notify path
+    can turn an already-committed completion into an error page for the
+    person tapping the checkmark."""
     try:
-        if not SHIFT_NOTIFY_EMAIL:
+        slack_on = bool(SHIFT_NOTIFY_SLACK_CHANNEL)
+        email_on = bool(SHIFT_NOTIFY_EMAIL)
+        if not (slack_on or email_on):
             return
         task = shift_db.get_task(task_id)
         if not task or not task["completed_at"]:
             return
         leader = shift_db.get_leader(task["leader_id"])
+        leader_name = leader["name"] if leader else "(removed)"
         remaining = len(shift_db.tasks_for_leader(task["leader_id"])[0])
-        thread = threading.Thread(
-            target=send_completion_email,
-            args=(task, leader["name"] if leader else "(removed)", remaining),
-            daemon=True,
-        )
+
+        def _send():
+            if slack_on:
+                send_completion_slack(task, leader_name, remaining)
+            if email_on:
+                send_completion_email(task, leader_name, remaining)
+
+        thread = threading.Thread(target=_send, daemon=True)
         thread.start()
         if current_app.config.get("TESTING"):
             thread.join(timeout=5)
     except Exception as e:
-        print(f"Error preparing to-do completion email: {e}")
+        print(f"Error preparing to-do completion notification: {e}")
 
 
 @shift_bp.route("/todo/task/<int:task_id>/toggle", methods=["POST"])
@@ -747,7 +799,7 @@ def todo_toggle(task_id):
         return redirect(url_for("shift.today"))
     done = request.form.get("done") == "1"
     shift_db.set_task_done(task_id, done, current_name())
-    # Email the Operator when a LEADER checks something off — not when the
+    # Notify the Operator when a LEADER checks something off — not when the
     # Operator marks it done themself during a review.
     if done and session.get("shift_leader_id"):
         _notify_completion(task_id)

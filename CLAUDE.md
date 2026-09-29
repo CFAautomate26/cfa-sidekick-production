@@ -34,8 +34,11 @@ Canada.
   `FLASK_SECRET_KEY` (optional; falls back to a key derived from the
   `SCHEDULE_SECRET`/`SHIFT_ADMIN_PIN` env vars, or a random per-boot key if
   neither is set), `SHIFT_TZ` (default America/Toronto),
-  `SHIFT_NOTIFY_EMAIL` (to-do completion emails; defaults to
-  `APPLICATION_EMAIL`, empty string disables). Never store
+  `SHIFT_NOTIFY_SLACK_CHANNEL` + `SHIFT_NOTIFY_SLACK_MENTION` (to-do
+  completion pings to a private Slack channel via `SLACK_BOT_TOKEN`;
+  empty channel disables), `SHIFT_NOTIFY_EMAIL` (opt-in email copy via
+  FormSubmit — unreliable, Cloudflare bot-challenges server-side posts;
+  off by default). Never store
   HR/discipline/wage/medical content in it. The office QR poster in
   `assets/shift-qr/` points at the live `/shift` URL;
   `scripts/generate_shift_qr.py` regenerates it (pass a different URL as
