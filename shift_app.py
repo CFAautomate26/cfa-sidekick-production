@@ -826,6 +826,8 @@ def todo_delete(task_id):
 
 @shift_bp.route("/recovery")
 def recovery():
+    # Opportunistic PII hygiene: contact info ages out of long-resolved rows.
+    shift_db.purge_old_recovery_contacts()
     open_recs, resolved_recs = shift_db.recovery_feed()
     return render_template(
         "shift/recovery.html",
@@ -867,6 +869,16 @@ def recovery_resolve(recovery_id):
     ok = shift_db.set_recovery_resolved(
         recovery_id, resolved, request.form.get("note", ""), current_name())
     if not ok:
+        # Either the row is gone, or another leader beat them to the flip —
+        # in which case the first resolver's stamp and note are kept.
+        rec = shift_db.get_recovery(recovery_id)
+        if rec:
+            if rec["resolved_at"]:
+                flash(f"Already resolved by {rec['resolved_by'] or 'someone'} "
+                      "— nothing changed.")
+            else:
+                flash("Already reopened — nothing changed.")
+            return redirect(url_for("shift.recovery") + f"#rec-{recovery_id}")
         flash("That recovery doesn't exist any more.")
         return redirect(url_for("shift.recovery"))
     return redirect(url_for("shift.recovery") + f"#rec-{recovery_id}")
@@ -945,6 +957,14 @@ def admin_leader_reset_pin(leader_id):
 def admin_leader_role(leader_id):
     role = request.form.get("role", "")
     leader = shift_db.get_leader(leader_id)
+    # Without the Operator master PIN, admin leaders are the only way into
+    # this page — demoting the last one would lock the whole store out.
+    if (role == "lead" and leader and leader["role"] == "admin"
+            and leader["active"] and not SHIFT_ADMIN_PIN
+            and shift_db.active_admin_count() <= 1):
+        flash("That's the only admin login and SHIFT_ADMIN_PIN isn't set — "
+              "demoting them would lock everyone out of this page.")
+        return redirect(url_for("shift.admin"))
     if leader and shift_db.set_leader_role(leader_id, role):
         flash(f"{leader['name']} is now {'an admin' if role == 'admin' else 'a lead'}.")
     return redirect(url_for("shift.admin"))

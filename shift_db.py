@@ -916,6 +916,15 @@ def set_leader_role(leader_id: int, role: str) -> bool:
         return cur.rowcount > 0
 
 
+def active_admin_count() -> int:
+    """Active admin leader accounts — the lockout guard when the Operator
+    master PIN isn't configured."""
+    with closing(connect()) as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM leaders WHERE role='admin' AND active=1"
+        ).fetchone()[0]
+
+
 # ---------------------------------------------------------------------------
 # Leadership development course
 # ---------------------------------------------------------------------------
@@ -1153,8 +1162,11 @@ def add_recovery(guest_name: str, guest_phone: str, guest_email: str,
 
 def recovery_feed(resolved_limit: int = 50) -> tuple[list[dict], list[dict]]:
     """(open, resolved): open oldest-first so the longest-waiting guest is
-    on top; resolved newest-first, capped."""
+    on top; resolved newest-first, capped. Both reads share one transaction
+    (same reason as export_json) so a resolve landing between them can't
+    show the same recovery in both lists."""
     with closing(connect()) as conn:
+        conn.execute("BEGIN")
         open_recs = [_annotate_recovery(dict(r)) for r in conn.execute(
             "SELECT * FROM guest_recoveries WHERE resolved_at IS NULL "
             "ORDER BY recovery_date, id"
@@ -1164,6 +1176,7 @@ def recovery_feed(resolved_limit: int = 50) -> tuple[list[dict], list[dict]]:
             "ORDER BY resolved_at DESC, id DESC LIMIT ?",
             (resolved_limit,),
         ).fetchall()]
+        conn.commit()
     return open_recs, resolved
 
 
@@ -1190,11 +1203,14 @@ def get_recovery(recovery_id: int) -> dict | None:
 def set_recovery_resolved(recovery_id: int, resolved: bool, note: str,
                           by: str) -> bool:
     """Resolve or reopen. Reopening clears all three resolution columns so
-    no stale stamp survives. Returns False for an unknown id."""
+    no stale stamp survives. Only flips rows in the opposite state, so two
+    leaders resolving from stale pages can't overwrite each other's
+    who/when/note stamp. Returns False for an unknown id or a no-op flip."""
+    guard = "IS NULL" if resolved else "IS NOT NULL"
     with closing(connect()) as conn, conn:
         cur = conn.execute(
             "UPDATE guest_recoveries SET resolved_at=?, resolved_by=?, "
-            "resolution_note=? WHERE id=?",
+            f"resolution_note=? WHERE id=? AND resolved_at {guard}",
             (now_stamp() if resolved else None,
              by if resolved else None,
              ((note or "").strip() or None) if resolved else None,
@@ -1210,14 +1226,32 @@ def delete_recovery(recovery_id: int) -> None:
 
 def recovery_issue_counts(days: int = 28) -> list[dict]:
     """[{'issue', 'count'}] for recent recoveries, biggest first — the
-    Operator's repeat-issue radar on the recovery page."""
-    since = (date.fromisoformat(today_local()) - timedelta(days=days)).isoformat()
+    Operator's repeat-issue radar on the recovery page. The window is
+    exactly `days` business dates including today (hence days - 1)."""
+    since = (date.fromisoformat(today_local())
+             - timedelta(days=days - 1)).isoformat()
     with closing(connect()) as conn:
         return [dict(r) for r in conn.execute(
             "SELECT issue, COUNT(*) AS count FROM guest_recoveries "
             "WHERE recovery_date>=? GROUP BY issue ORDER BY count DESC, issue",
             (since,),
         ).fetchall()]
+
+
+def purge_old_recovery_contacts(days: int = 90) -> int:
+    """Clear guest phone/email on recoveries resolved more than `days` ago
+    (the row itself — name, issue, remedy, outcome — stays for history).
+    Called on every recovery-page view, so old contact info ages out of the
+    database and future backups without any cron. Returns rows purged."""
+    cutoff = (date.fromisoformat(today_local()) - timedelta(days=days)).isoformat()
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE guest_recoveries SET guest_phone=NULL, guest_email=NULL "
+            "WHERE resolved_at IS NOT NULL AND resolved_at < ? "
+            "AND (guest_phone IS NOT NULL OR guest_email IS NOT NULL)",
+            (cutoff,),
+        )
+        return cur.rowcount
 
 
 # ---------------------------------------------------------------------------

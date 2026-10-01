@@ -68,9 +68,10 @@
     {% if r.follow_up %}<span class="critical-flag">📞 call-back</span>{% endif %}
   </div>
   <div style="font-size:14px; margin-top:6px;">
-    {% if r.phone_digits %}<a href="tel:{{ r.phone_digits }}">{{ r.guest_phone }}</a>{% endif %}
-    {% if r.guest_email %}{% if r.phone_digits %} · {% endif %}<a href="mailto:{{ r.guest_email }}">{{ r.guest_email }}</a>{% endif %}
-    {% if not r.phone_digits and not r.guest_email %}<span style="color:var(--soft);">no contact on file — can't call back</span>{% endif %}
+    {% if r.phone_digits %}<a href="tel:{{ r.phone_digits }}">{{ r.guest_phone }}</a>
+    {% elif r.guest_phone %}{{ r.guest_phone }}{% endif %}
+    {% if r.guest_email %}{% if r.guest_phone %} · {% endif %}<a href="mailto:{{ r.guest_email }}">{{ r.guest_email }}</a>{% endif %}
+    {% if not r.guest_phone and not r.guest_email %}<span style="color:var(--soft);">no contact on file — can't call back</span>{% endif %}
   </div>
   {% if r.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:4px;">{{ r.details }}</div>{% endif %}
   <div class="progress-note">logged by {{ r.logged_by }} · {{ r.created_at }}</div>
@@ -99,7 +100,7 @@
 
 {% if resolved_recs %}
 <details style="margin-top:14px;">
-  <summary style="cursor:pointer;" class="section-label">Resolved ({{ resolved_recs | length }})</summary>
+  <summary style="cursor:pointer;" class="section-label">Resolved ({% if resolved_recs | length >= 50 %}latest 50{% else %}{{ resolved_recs | length }}{% endif %})</summary>
   {% for r in resolved_recs %}
   <div class="card" id="rec-{{ r.id }}" style="opacity:0.75;">
     <div style="display:flex; gap:12px; align-items:flex-start;">

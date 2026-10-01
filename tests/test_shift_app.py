@@ -646,6 +646,90 @@ def test_recovery_stale_id_graceful(client):
     assert client.post("/shift/recovery/999999/delete").status_code == 302
 
 
+def test_recovery_operator_create_and_resolve(client):
+    login_operator(client)
+    client.post("/shift/recovery", data={
+        "guest_name": "Pat", "issue": "wait-time", "remedy": "free-dessert-drink",
+    })
+    rec = shift_db.recovery_feed()[0][0]
+    assert rec["logged_by"] == "Operator"
+    client.post(f"/shift/recovery/{rec['id']}/resolve",
+                data={"resolved": "1", "note": "spoke in person"})
+    assert shift_db.get_recovery(rec["id"])["resolved_by"] == "Operator"
+
+
+def test_recovery_double_resolve_route_flashes(client):
+    make_leader(client)
+    login_operator(client)
+    client.post("/shift/recovery", data={"guest_name": "Jordan",
+                                         "issue": "service", "remedy": "refund"})
+    rec = shift_db.recovery_feed()[0][0]
+    client.post(f"/shift/recovery/{rec['id']}/resolve",
+                data={"resolved": "1", "note": "mailed cards"})
+    client.post("/shift/logout")
+
+    # Maya resolves from a stale page: first stamp survives, she's told
+    login_leader(client)
+    resp = client.post(f"/shift/recovery/{rec['id']}/resolve",
+                       data={"resolved": "1"}, follow_redirects=True)
+    assert b"Already resolved by Operator" in resp.data
+    kept = shift_db.get_recovery(rec["id"])
+    assert kept["resolved_by"] == "Operator"
+    assert kept["resolution_note"] == "mailed cards"
+
+
+def test_recovery_today_card_truncates(client):
+    make_leader(client)
+    login_leader(client)
+    for n in range(5):
+        client.post("/shift/recovery", data={"guest_name": f"Guest{n}",
+                                             "issue": "service", "remedy": "refund"})
+    page = client.get("/shift/").data
+    for n in range(3):
+        assert f"Guest{n}".encode() in page
+    assert b"Guest3" not in page and b"Guest4" not in page
+    assert b"+2 more" in page
+    assert b"5 guests waiting" in page
+
+
+def test_recovery_more_badge_counts_open(client):
+    make_leader(client)
+    login_leader(client)
+    assert b"open" not in client.get("/shift/more").data.split(b"Guest recovery")[1][:120]
+    client.post("/shift/recovery", data={"guest_name": "Jordan",
+                                         "issue": "service", "remedy": "refund"})
+    assert "● 1 open".encode() in client.get("/shift/more").data
+
+
+def test_recovery_textual_phone_still_shown(client):
+    login_operator(client)
+    client.post("/shift/recovery", data={
+        "guest_name": "Maria", "guest_phone": "ask for Maria at pickup",
+        "issue": "order-error", "remedy": "remade-now",
+    })
+    page = client.get("/shift/recovery").data
+    assert b"ask for Maria at pickup" in page       # visible, just not a tel: link
+    assert b"tel:" not in page
+    assert "no contact on file".encode() not in page
+
+
+def test_demote_last_admin_blocked_without_pin(client, monkeypatch):
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    dana = shift_db.leaders()[0]
+    login_leader(client, name="Dana", pin="5555")
+    monkeypatch.setattr(shift_app, "SHIFT_ADMIN_PIN", "")
+
+    resp = client.post(f"/shift/admin/leaders/{dana['id']}/role",
+                       data={"role": "lead"}, follow_redirects=True)
+    assert b"lock everyone out" in resp.data
+    assert shift_db.get_leader(dana["id"])["role"] == "admin"
+
+    # With a second admin (or the master PIN back), demotion works again
+    shift_db.add_leader("Backup", "7777", role="admin")
+    client.post(f"/shift/admin/leaders/{dana['id']}/role", data={"role": "lead"})
+    assert shift_db.get_leader(dana["id"])["role"] == "lead"
+
+
 def test_recovery_admin_sees_issue_radar(client):
     make_leader(client)
     login_leader(client)

@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import os
 import random
 import secrets
@@ -52,7 +53,15 @@ except Exception as e:  # pragma: no cover - defensive boot guard
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GROUPME_BOT_ID = os.getenv("GROUPME_BOT_ID")
-SCHEDULE_SECRET = os.getenv("SCHEDULE_SECRET", "cfa-sidekick-production-2026")
+# No fallback on purpose: a repo-committed default token would leave the
+# /scheduled endpoints (including the shift backup, which carries guest
+# contact info) open to anyone who has read this repo. Unset = disabled.
+SCHEDULE_SECRET = os.getenv("SCHEDULE_SECRET", "").strip()
+
+
+def schedule_token_ok(token: str) -> bool:
+    return bool(SCHEDULE_SECRET) and hmac.compare_digest(
+        token or "", SCHEDULE_SECRET)
 ENV = os.getenv("ENV", "production")
 # Where leadership applications are delivered (privately, not to the team chat)
 APPLICATION_EMAIL = os.getenv("APPLICATION_EMAIL", "joshua.huesser@cfafranchisee.ca")
@@ -513,7 +522,7 @@ def scheduled_send():
     token = request.args.get("token", "")
     kind = (request.args.get("kind", "") or "").lower().strip()
 
-    if not SCHEDULE_SECRET or token != SCHEDULE_SECRET:
+    if not schedule_token_ok(token):
         return "Unauthorized", 401
 
     if kind == "affirmation":
@@ -527,7 +536,7 @@ def scheduled_send():
 @app.route("/scheduled/intro", methods=["GET"])
 def scheduled_intro():
     token = request.args.get("token", "")
-    if not SCHEDULE_SECRET or token != SCHEDULE_SECRET:
+    if not schedule_token_ok(token):
         return "Unauthorized", 401
 
     send_groupme_message(INTRO_NOTE)
@@ -539,7 +548,7 @@ def scheduled_shift_backup():
     """Shift-app JSON backup, for a cron pinger (e.g. cron-job.org saves the
     response body daily). Same token convention as the other /scheduled routes."""
     token = request.args.get("token", "")
-    if not SCHEDULE_SECRET or token != SCHEDULE_SECRET:
+    if not schedule_token_ok(token):
         return "Unauthorized", 401
     if shift_db is None:
         return "Shift app not loaded", 503

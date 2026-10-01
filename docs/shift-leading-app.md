@@ -123,7 +123,13 @@ scale.
 - **Automated**: `GET /scheduled/shift-backup?token=<SCHEDULE_SECRET>`
   returns the same JSON. Point a free cron pinger (e.g. cron-job.org) at it
   daily and keep the response, following the same token convention as the
-  other `/scheduled` endpoints.
+  other `/scheduled` endpoints. `SCHEDULE_SECRET` must be explicitly set on
+  the service (the endpoint answers 401 without it — there is deliberately
+  no default), and since the backup carries guest recovery contact info,
+  only store it with services you'd trust with the database itself.
+- **PII aging**: phone/email on recoveries resolved more than 90 days ago
+  are cleared automatically (next time the recovery page loads), so guest
+  contact info doesn't accumulate forever in the DB or in new backups.
 - **Restore**: Admin → *Restore from a backup file* (tick the confirmation
   box). Leader accounts come back with **locked PINs** (PIN hashes never
   leave the database) — reset each leader's PIN in the admin page after a
