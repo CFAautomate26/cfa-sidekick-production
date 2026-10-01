@@ -1,0 +1,152 @@
+{% extends "shift/base.html" %}
+{% block title %}Guest Recovery{% endblock %}
+{% block content %}
+<h1 class="page">Guest recovery</h1>
+<div class="sub">A guest had a bad experience — log it, make it right, close the loop.</div>
+
+<details class="compose" open>
+  <summary>+ Log a recovery</summary>
+  <form method="post" action="{{ url_for('shift.recovery_create') }}" class="card">
+    <label class="field" for="r-name">Guest name</label>
+    <input type="text" id="r-name" name="guest_name" required
+           placeholder="Guest's name (or how to spot them)">
+    <div style="display:flex; gap:8px;">
+      <div style="flex:1;">
+        <label class="field" for="r-phone">Phone</label>
+        <input type="tel" id="r-phone" name="guest_phone" placeholder="Optional">
+      </div>
+      <div style="flex:1;">
+        <label class="field" for="r-email">Email</label>
+        <input type="text" inputmode="email" id="r-email" name="guest_email" placeholder="Optional">
+      </div>
+    </div>
+    <div class="progress-note">Name + phone/email only — never write down payment
+    or card info. Injury or damage claim? Log the basics and tell the Operator
+    directly.</div>
+    <div style="display:flex; gap:8px;">
+      <div style="flex:1;">
+        <label class="field" for="r-issue">What went wrong</label>
+        <select id="r-issue" name="issue">
+          {% for i in RECOVERY_ISSUES %}<option value="{{ i }}">{{ RECOVERY_ISSUE_LABELS[i] }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:1;">
+        <label class="field" for="r-remedy">Making it right with</label>
+        <select id="r-remedy" name="remedy">
+          {% for m in RECOVERY_REMEDIES %}<option value="{{ m }}">{{ RECOVERY_REMEDY_LABELS[m] }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <label class="field" for="r-details">Details</label>
+    <textarea id="r-details" name="details" style="min-height:70px;"
+      placeholder="What happened + exactly what we promised — e.g. order #, 'mail 2 free entrée cards'"></textarea>
+    <label class="pill" style="cursor:pointer; margin-top:8px; display:inline-block;">
+      <input type="checkbox" name="follow_up" value="1" style="accent-color:var(--cfa-red);">
+      Guest expects a call-back
+    </label>
+    <label class="pill" style="cursor:pointer; margin-top:8px; display:inline-block;">
+      <input type="checkbox" name="resolved_now" value="1" style="accent-color:var(--cfa-red);">
+      Handled on the spot — nothing left to do
+    </label>
+    <div style="margin-top:12px;">
+      <button class="pill primary" type="submit">Log recovery</button>
+    </div>
+  </form>
+</details>
+
+<div class="section-label">Open — take care of these ({{ open_recs | length }})</div>
+{% for r in open_recs %}
+<div class="card" id="rec-{{ r.id }}" {% if r.stale or r.follow_up %}style="border-color: var(--cfa-red);"{% endif %}>
+  <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+    <span style="font-size:15px; font-weight:700;">{{ r.guest_name }}</span>
+    <span class="progress-note" style="margin:0;{% if r.stale %} color:var(--cfa-red); font-weight:700;{% endif %}">
+      {{ r.recovery_date }}{% if r.age_days %} · {{ r.age_days }}d open{% endif %}</span>
+  </div>
+  <div style="margin-top:6px;">
+    <span class="note-cat cat-issue">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
+    <span class="note-cat">→ {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) }}</span>
+    {% if r.follow_up %}<span class="critical-flag">📞 call-back</span>{% endif %}
+  </div>
+  <div style="font-size:14px; margin-top:6px;">
+    {% if r.phone_digits %}<a href="tel:{{ r.phone_digits }}">{{ r.guest_phone }}</a>{% endif %}
+    {% if r.guest_email %}{% if r.phone_digits %} · {% endif %}<a href="mailto:{{ r.guest_email }}">{{ r.guest_email }}</a>{% endif %}
+    {% if not r.phone_digits and not r.guest_email %}<span style="color:var(--soft);">no contact on file — can't call back</span>{% endif %}
+  </div>
+  {% if r.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:4px;">{{ r.details }}</div>{% endif %}
+  <div class="progress-note">logged by {{ r.logged_by }} · {{ r.created_at }}</div>
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-top:8px;">
+    <details style="flex:1;">
+      <summary class="pill small primary" style="cursor:pointer; display:inline-block;">Resolve ✓</summary>
+      <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}" style="margin-top:8px;">
+        <input type="hidden" name="resolved" value="1">
+        <input type="text" name="note" placeholder="How it was closed — e.g. called, card mailed">
+        <div style="margin-top:8px;">
+          <button class="pill primary small" type="submit">Mark resolved</button>
+        </div>
+      </form>
+    </details>
+    {% if shift_is_admin %}
+    <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
+          onsubmit="return confirm('Delete this recovery?');">
+      <button class="pill small ghost" type="submit">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="empty">No open recoveries — every guest taken care of ✓</div>
+{% endfor %}
+
+{% if resolved_recs %}
+<details style="margin-top:14px;">
+  <summary style="cursor:pointer;" class="section-label">Resolved ({{ resolved_recs | length }})</summary>
+  {% for r in resolved_recs %}
+  <div class="card" id="rec-{{ r.id }}" style="opacity:0.75;">
+    <div style="display:flex; gap:12px; align-items:flex-start;">
+      <span class="checkmark" style="background:var(--good); border-color:var(--good); color:#fff; flex:none;">✓</span>
+      <div style="flex:1;">
+        <div style="font-size:15px; font-weight:700;">{{ r.guest_name }}</div>
+        <div style="margin-top:4px;">
+          <span class="note-cat cat-issue">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
+          <span class="note-cat">→ {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) }}</span>
+        </div>
+        {% if r.resolution_note %}<div style="font-size:14px; color:var(--soft); margin-top:4px;">{{ r.resolution_note }}</div>{% endif %}
+        <div class="progress-note">resolved {{ r.resolved_at }} by {{ r.resolved_by }}</div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+        <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}">
+          <input type="hidden" name="resolved" value="0">
+          <button class="pill small ghost" type="submit">Reopen</button>
+        </form>
+        {% if shift_is_admin %}
+        <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
+              onsubmit="return confirm('Delete this recovery?');">
+          <button class="pill small ghost" type="submit">Delete</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</details>
+{% endif %}
+
+{% if shift_is_admin and issue_counts %}
+{% set max_count = issue_counts | map(attribute='count') | max %}
+<details style="margin-top:14px;">
+  <summary style="cursor:pointer;" class="section-label">📊 Last 28 days</summary>
+  <div class="card">
+    {% for row in issue_counts %}
+    <div style="padding:4px 0;">
+      <div style="display:flex; justify-content:space-between; font-size:13px;">
+        <span>{{ RECOVERY_ISSUE_LABELS.get(row.issue, row.issue) }}</span>
+        <strong>{{ row.count }}</strong>
+      </div>
+      <div class="bar"><span style="width: {{ (row.count / max_count * 100) | round }}%"></span></div>
+    </div>
+    {% endfor %}
+    <div class="progress-note">What keeps going wrong — worth a huddle topic if one bar grows.</div>
+  </div>
+</details>
+{% endif %}
+{% endblock %}

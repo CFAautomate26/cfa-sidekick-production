@@ -279,6 +279,8 @@ def today():
         notes=shift_db.notes_for_date(day)[:3],
         my_tasks=shift_db.open_tasks_for_leader(leader_id) if leader_id else [],
         my_leader_id=leader_id,
+        open_recoveries=shift_db.open_recoveries(),
+        RECOVERY_ISSUE_LABELS=shift_db.RECOVERY_ISSUE_LABELS,
     )
 
 
@@ -587,7 +589,8 @@ def roster_toggle(member_id):
 
 @shift_bp.route("/more")
 def more():
-    return render_template("shift/more.html")
+    return render_template("shift/more.html",
+                           open_recoveries=shift_db.open_recovery_count())
 
 
 # ---------------------------------------------------------------------------
@@ -815,6 +818,65 @@ def todo_delete(task_id):
         shift_db.delete_task(task_id)
     return redirect(url_for("shift.todo_leader", leader_id=task["leader_id"])
                     if task else url_for("shift.todo"))
+
+
+# ---------------------------------------------------------------------------
+# Guest recovery
+# ---------------------------------------------------------------------------
+
+@shift_bp.route("/recovery")
+def recovery():
+    open_recs, resolved_recs = shift_db.recovery_feed()
+    return render_template(
+        "shift/recovery.html",
+        open_recs=open_recs,
+        resolved_recs=resolved_recs,
+        issue_counts=shift_db.recovery_issue_counts() if is_admin() else [],
+        RECOVERY_ISSUES=shift_db.RECOVERY_ISSUES,
+        RECOVERY_ISSUE_LABELS=shift_db.RECOVERY_ISSUE_LABELS,
+        RECOVERY_REMEDIES=shift_db.RECOVERY_REMEDIES,
+        RECOVERY_REMEDY_LABELS=shift_db.RECOVERY_REMEDY_LABELS,
+    )
+
+
+@shift_bp.route("/recovery", methods=["POST"])
+def recovery_create():
+    issue = request.form.get("issue", "")
+    remedy = request.form.get("remedy", "")
+    rid = shift_db.add_recovery(
+        guest_name=request.form.get("guest_name", ""),
+        guest_phone=request.form.get("guest_phone", ""),
+        guest_email=request.form.get("guest_email", ""),
+        issue=issue if issue in shift_db.RECOVERY_ISSUES else "other",
+        remedy=remedy if remedy in shift_db.RECOVERY_REMEDIES else "other",
+        details=request.form.get("details", ""),
+        follow_up=request.form.get("follow_up") == "1",
+        by=current_name(),
+        resolved_now=request.form.get("resolved_now") == "1",
+    )
+    if rid is None:
+        flash("A recovery needs the guest's name.")
+        return redirect(url_for("shift.recovery"))
+    flash("Logged. Make it right!")
+    return redirect(url_for("shift.recovery") + f"#rec-{rid}")
+
+
+@shift_bp.route("/recovery/<int:recovery_id>/resolve", methods=["POST"])
+def recovery_resolve(recovery_id):
+    resolved = request.form.get("resolved") == "1"
+    ok = shift_db.set_recovery_resolved(
+        recovery_id, resolved, request.form.get("note", ""), current_name())
+    if not ok:
+        flash("That recovery doesn't exist any more.")
+        return redirect(url_for("shift.recovery"))
+    return redirect(url_for("shift.recovery") + f"#rec-{recovery_id}")
+
+
+@shift_bp.route("/recovery/<int:recovery_id>/delete", methods=["POST"])
+@admin_required
+def recovery_delete(recovery_id):
+    shift_db.delete_recovery(recovery_id)
+    return redirect(url_for("shift.recovery"))
 
 
 # ---------------------------------------------------------------------------

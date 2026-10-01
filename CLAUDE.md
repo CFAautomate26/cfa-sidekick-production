@@ -22,7 +22,10 @@ Canada.
 - `shift_app.py` + `shift_db.py` — the shift leading app at `/shift`
   (Huddle-style: daily checklists with who-did-what stamps, position
   lineups, goals, shift notes, announcements with read receipts,
-  per-leader assigned to-dos under `/shift/todo`, and per-leader
+  per-leader assigned to-dos under `/shift/todo`, a guest recovery log
+  under `/shift/recovery` (guest + issue + make-it-right remedy, open
+  queue on the Today screen until resolved; guest name/contact only —
+  never payment info), and per-leader
   leadership-course tracking under `/shift/development` — course
   structure pinned from Drive in `shift_course.py`). Blueprint
   registers fault-isolated so it can never take down the bots. Storage is

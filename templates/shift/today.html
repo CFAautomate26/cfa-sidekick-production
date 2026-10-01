@@ -34,6 +34,24 @@
 </a>
 {% endif %}
 
+{% if open_recoveries %}
+<div class="section-label">Guest recovery — still open</div>
+<a class="card tap" style="border-color: var(--cfa-red);" href="{{ url_for('shift.recovery') }}">
+  {% for r in open_recoveries[:3] %}
+  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px; align-items:baseline;">
+    <span style="flex:1; font-weight:700;">{{ r.guest_name }}</span>
+    <span class="progress-note" style="margin:0;">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
+    {% if r.follow_up %}<span>📞</span>{% endif %}
+    {% if r.age_days %}<span class="progress-note" style="margin:0;{% if r.stale %} color:var(--cfa-red); font-weight:700;{% endif %}">{{ r.age_days }}d</span>{% endif %}
+  </div>
+  {% endfor %}
+  {% if open_recoveries | length > 3 %}
+  <div style="font-size:13px; color:var(--soft); padding:3px 0;">+{{ open_recoveries | length - 3 }} more</div>
+  {% endif %}
+  <div class="progress-note">{{ open_recoveries | length }} guest{{ 's' if open_recoveries | length != 1 }} waiting — tap to resolve or log a new one</div>
+</a>
+{% endif %}
+
 <div class="section-label">This daypart's checklists</div>
 {% for r in current_runs %}
 <a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">

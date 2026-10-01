@@ -45,7 +45,8 @@ def test_bots_unaffected(client):
 
 def test_requires_login(client):
     for path in ["/shift/", "/shift/checklists", "/shift/lineup", "/shift/goals",
-                 "/shift/notes", "/shift/roster", "/shift/history", "/shift/more"]:
+                 "/shift/notes", "/shift/roster", "/shift/history", "/shift/more",
+                 "/shift/recovery"]:
         resp = client.get(path)
         assert resp.status_code == 302, path
         assert "/shift/login" in resp.headers["Location"]
@@ -565,6 +566,95 @@ def test_todo_other_leader_blocked(client):
     # Bogus ids are graceful
     assert client.post("/shift/todo/task/999999/toggle",
                        data={"done": "1"}).status_code == 302
+
+
+# --- guest recovery ---------------------------------------------------------
+
+def test_recovery_create_resolve_flow(client):
+    make_leader(client)
+    login_leader(client)
+
+    resp = client.post("/shift/recovery", data={
+        "guest_name": "Jordan Lee", "guest_phone": "519-555-0142",
+        "issue": "not-a-real-issue", "remedy": "free-entree-card",
+        "details": "Order #88 missing entrée", "follow_up": "1",
+    })
+    assert resp.status_code == 302
+    assert "#rec-" in resp.headers["Location"]
+
+    page = client.get("/shift/recovery").data
+    assert b"Jordan Lee" in page and b"519-555-0142" in page
+    rec = shift_db.recovery_feed()[0][0]
+    assert rec["issue"] == "other"            # coerced, not stored raw
+    assert rec["logged_by"] == "Maya"
+
+    # Shows on the Today dashboard until resolved
+    assert b"Jordan Lee" in client.get("/shift/").data
+
+    resp = client.post(f"/shift/recovery/{rec['id']}/resolve",
+                       data={"resolved": "1", "note": "called, cards mailed"})
+    assert resp.headers["Location"].endswith(f"#rec-{rec['id']}")
+    done = shift_db.get_recovery(rec["id"])
+    assert done["resolved_by"] == "Maya" and done["resolution_note"]
+    assert b"Jordan Lee" not in client.get("/shift/").data
+
+    # Reopen puts it back in the queue
+    client.post(f"/shift/recovery/{rec['id']}/resolve", data={"resolved": "0"})
+    assert shift_db.open_recovery_count() == 1
+
+
+def test_recovery_resolved_now_route(client):
+    make_leader(client)
+    login_leader(client)
+    client.post("/shift/recovery", data={
+        "guest_name": "Sam", "issue": "food-quality", "remedy": "remade-now",
+        "resolved_now": "1",
+    })
+    assert shift_db.open_recovery_count() == 0
+    assert shift_db.recovery_feed()[1][0]["guest_name"] == "Sam"
+
+
+def test_recovery_empty_name_flashes(client):
+    login_operator(client)
+    resp = client.post("/shift/recovery", data={"guest_name": "   "},
+                       follow_redirects=True)
+    assert resp.status_code == 200
+    assert b"needs the guest" in resp.data
+    assert shift_db.open_recovery_count() == 0
+
+
+def test_recovery_delete_is_admin_only(client):
+    make_leader(client)
+    login_leader(client)
+    client.post("/shift/recovery", data={"guest_name": "Jordan",
+                                         "issue": "service", "remedy": "refund"})
+    rec = shift_db.recovery_feed()[0][0]
+    resp = client.post(f"/shift/recovery/{rec['id']}/delete")
+    assert resp.status_code == 302
+    assert shift_db.get_recovery(rec["id"])   # lead can't delete
+    client.post("/shift/logout")
+
+    login_operator(client)
+    client.post(f"/shift/recovery/{rec['id']}/delete")
+    assert shift_db.get_recovery(rec["id"]) is None
+
+
+def test_recovery_stale_id_graceful(client):
+    login_operator(client)
+    assert client.post("/shift/recovery/999999/resolve",
+                       data={"resolved": "1"}).status_code == 302
+    assert client.post("/shift/recovery/999999/delete").status_code == 302
+
+
+def test_recovery_admin_sees_issue_radar(client):
+    make_leader(client)
+    login_leader(client)
+    client.post("/shift/recovery", data={"guest_name": "G1",
+                                         "issue": "order-error", "remedy": "refund"})
+    assert b"Last 28 days" not in client.get("/shift/recovery").data
+    client.post("/shift/logout")
+    login_operator(client)
+    assert b"Last 28 days" in client.get("/shift/recovery").data
 
 
 # --- to-do completion notifications (Slack + opt-in email) ------------------

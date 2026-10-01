@@ -33,6 +33,15 @@ the leadership team:
   opt-in with `SHIFT_NOTIFY_EMAIL` (FormSubmit's Cloudflare front
   bot-challenges server-side posts, so treat email as unreliable).
   Completions the Operator records themself don't notify.
+- **Guest recovery** — when a guest has a bad experience, any leader logs
+  the guest's name and phone/email, what went wrong (order error, food
+  quality, wait, service…), and the make-it-right remedy being provided
+  (remade on the spot, refund, free entrée card, dessert/drink, catering
+  credit…), plus whether the guest expects a call-back. Open recoveries
+  sit on everyone's Today screen until someone resolves them (stamped
+  who/when, with a note on how it was closed); admins also get a 28-day
+  what-keeps-going-wrong breakdown. Guest name + contact only — never
+  payment/card info; injury or damage claims go to the Operator directly.
 - **Leadership development** — the Operator's course (from the "Leadership
   Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,
   Leading Organization) tracked per leader. Admins see every leader's
@@ -109,6 +118,8 @@ scale.
 ## Backups
 
 - **Manual**: Admin → *Download backup (JSON)* — everything except PINs.
+  Backups now include guest recovery rows (guest names + contact info), so
+  treat exported files with the same care as the database itself.
 - **Automated**: `GET /scheduled/shift-backup?token=<SCHEDULE_SECRET>`
   returns the same JSON. Point a free cron pinger (e.g. cron-job.org) at it
   daily and keep the response, following the same token convention as the
