@@ -856,6 +856,18 @@ def reset_leader_pin(leader_id: int, pin: str) -> str | None:
     return None
 
 
+def set_leader_role(leader_id: int, role: str) -> bool:
+    """Promote/demote an existing leader. The before_request role refresh
+    makes the change effective on their next request, no re-login needed."""
+    if role not in ("lead", "admin"):
+        return False
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE leaders SET role=? WHERE id=?", (role, leader_id)
+        )
+        return cur.rowcount > 0
+
+
 # ---------------------------------------------------------------------------
 # Leadership development course
 # ---------------------------------------------------------------------------

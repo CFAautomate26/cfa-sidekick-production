@@ -878,6 +878,16 @@ def admin_leader_reset_pin(leader_id):
     return redirect(url_for("shift.admin"))
 
 
+@shift_bp.route("/admin/leaders/<int:leader_id>/role", methods=["POST"])
+@admin_required
+def admin_leader_role(leader_id):
+    role = request.form.get("role", "")
+    leader = shift_db.get_leader(leader_id)
+    if leader and shift_db.set_leader_role(leader_id, role):
+        flash(f"{leader['name']} is now {'an admin' if role == 'admin' else 'a lead'}.")
+    return redirect(url_for("shift.admin"))
+
+
 def _parse_items(raw: str) -> list[tuple[str, bool]]:
     """One checklist item per line; a leading '!' marks it critical."""
     items = []

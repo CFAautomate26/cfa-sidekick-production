@@ -113,6 +113,41 @@ def test_demoted_admin_loses_admin_on_next_request(client):
     assert shift_db.get_leader(leader_id)["role"] == "lead"
 
 
+def test_promote_leader_to_admin(client):
+    make_leader(client)  # Maya, role lead
+    leader_id = shift_db.leaders()[0]["id"]
+
+    # The Operator promotes her through the admin route
+    login_operator(client)
+    client.post(f"/shift/admin/leaders/{leader_id}/role", data={"role": "admin"})
+    assert shift_db.get_leader(leader_id)["role"] == "admin"
+    client.post("/shift/logout")
+
+    # Her very next request carries admin (no re-login needed): sign in,
+    # demote via db, confirm loss; then promote via db, confirm gain.
+    login_leader(client)
+    assert client.get("/shift/admin").status_code == 200
+    shift_db.set_leader_role(leader_id, "lead")
+    assert client.get("/shift/admin").status_code == 302
+    shift_db.set_leader_role(leader_id, "admin")
+    assert client.get("/shift/admin").status_code == 200
+
+    # Bogus roles are rejected
+    assert not shift_db.set_leader_role(leader_id, "owner")
+    assert shift_db.get_leader(leader_id)["role"] == "admin"
+
+
+def test_lead_cannot_change_roles(client):
+    make_leader(client)
+    make_leader(client, name="Devon", pin="8888")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    login_leader(client, name="Devon", pin="8888")
+    resp = client.post(f"/shift/admin/leaders/{maya['id']}/role",
+                       data={"role": "admin"})
+    assert resp.status_code == 302
+    assert shift_db.get_leader(maya["id"])["role"] == "lead"
+
+
 def test_ack_deleted_announcement_route_is_graceful(client):
     make_leader(client)
     login_leader(client)

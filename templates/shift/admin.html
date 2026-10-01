@@ -26,6 +26,11 @@
       <input type="text" name="pin" inputmode="numeric" placeholder="New PIN" style="width:90px; padding:7px;">
       <button class="pill small" type="submit">Reset</button>
     </form>
+    <form method="post" action="{{ url_for('shift.admin_leader_role', leader_id=l.id) }}"
+          {% if l.role != 'admin' %}onsubmit="return confirm('Make {{ l.name }} an admin? They can then assign to-dos, post announcements, edit templates, and manage backups.');"{% endif %}>
+      <input type="hidden" name="role" value="{{ 'lead' if l.role == 'admin' else 'admin' }}">
+      <button class="pill small ghost" type="submit">{{ 'Make lead' if l.role == 'admin' else 'Make admin' }}</button>
+    </form>
     <form method="post" action="{{ url_for('shift.admin_leader_toggle', leader_id=l.id) }}">
       <input type="hidden" name="active" value="{{ '0' if l.active else '1' }}">
       <button class="pill small ghost" type="submit">{{ 'Deactivate' if l.active else 'Reactivate' }}</button>
