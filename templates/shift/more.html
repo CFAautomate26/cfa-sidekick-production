@@ -15,7 +15,8 @@
 </a>
 <a class="card tap" href="{{ url_for('shift.recovery') }}">
   <h2>💛 Guest recovery
-    {% if open_recoveries %}<span class="critical-flag">● {{ open_recoveries }} open</span>{% endif %}</h2>
+    {% if open_recoveries %}<span class="critical-flag">● {{ open_recoveries }} open</span>{% endif %}
+    {% if awaiting_recoveries %}<span style="font-size:13px; font-weight:400; color:var(--soft);">📞 {{ awaiting_recoveries }} coming back</span>{% endif %}</h2>
   <div class="progress-note">Log a guest issue + what we're providing to make it right</div>
 </a>
 <a class="card tap" href="{{ url_for('shift.development') }}">

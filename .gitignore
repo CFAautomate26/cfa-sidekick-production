@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .env
+shift_data.db
+*.db-wal
+*.db-shm

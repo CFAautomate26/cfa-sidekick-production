@@ -34,9 +34,9 @@
 </a>
 {% endif %}
 
-{% if open_recoveries %}
-<div class="section-label">Guest recovery — still open</div>
-<a class="card tap" style="border-color: var(--cfa-red);" href="{{ url_for('shift.recovery') }}">
+{% if open_recoveries or awaiting_recoveries %}
+<div class="section-label">Guest recovery</div>
+<a class="card tap" {% if open_recoveries %}style="border-color: var(--cfa-red);"{% endif %} href="{{ url_for('shift.recovery') }}">
   {% for r in open_recoveries[:3] %}
   <div style="display:flex; gap:8px; padding:3px 0; font-size:14px; align-items:baseline;">
     <span style="flex:1; font-weight:700;">{{ r.guest_name }}</span>
@@ -48,7 +48,11 @@
   {% if open_recoveries | length > 3 %}
   <div style="font-size:13px; color:var(--soft); padding:3px 0;">+{{ open_recoveries | length - 3 }} more</div>
   {% endif %}
-  <div class="progress-note">{{ open_recoveries | length }} guest{{ 's' if open_recoveries | length != 1 }} waiting — tap to resolve or log a new one</div>
+  {% if awaiting_recoveries %}
+  <div style="font-size:13px; padding:3px 0;">📞 {{ awaiting_recoveries | length }} contacted — coming back
+    ({{ awaiting_recoveries[:2] | map(attribute='guest_name') | join(', ') }}{{ '…' if awaiting_recoveries | length > 2 }})</div>
+  {% endif %}
+  <div class="progress-note">{% if open_recoveries %}{{ open_recoveries | length }} guest{{ 's' if open_recoveries | length != 1 }} waiting — tap to resolve or log a new one{% else %}Hand over what was promised when they're in, then mark it done{% endif %}</div>
 </a>
 {% endif %}
 

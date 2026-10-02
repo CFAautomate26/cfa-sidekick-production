@@ -558,7 +558,7 @@ def test_recovery_lifecycle(isolated_db):
     assert rec["details"] == "cold fries"
     assert rec["follow_up"] == 1 and rec["logged_by"] == "Riya"
 
-    open_recs, resolved = shift_db.recovery_feed()
+    open_recs, awaiting, resolved = shift_db.recovery_feed()
     assert [r["id"] for r in open_recs] == [rid] and not resolved
     assert open_recs[0]["age_days"] == 0 and not open_recs[0]["stale"]
     assert open_recs[0]["phone_digits"] == "5195550142"
@@ -569,7 +569,7 @@ def test_recovery_lifecycle(isolated_db):
     rec = shift_db.get_recovery(rid)
     assert rec["resolved_at"] and rec["resolved_by"] == "Neha"
     assert rec["resolution_note"] == "called, card mailed"
-    open_recs, resolved = shift_db.recovery_feed()
+    open_recs, awaiting, resolved = shift_db.recovery_feed()
     assert not open_recs and resolved[0]["id"] == rid
 
     assert shift_db.set_recovery_resolved(rid, False, "", "Neha")
@@ -590,7 +590,7 @@ def test_recovery_open_queue_oldest_first_and_stale(isolated_db):
                      ("2020-01-01", rid_old))
     rid_new = shift_db.add_recovery("New Guest", "", "", "service",
                                     "refund", "", False, "Riya")
-    open_recs, _ = shift_db.recovery_feed()
+    open_recs, _, _ = shift_db.recovery_feed()
     assert [r["id"] for r in open_recs] == [rid_old, rid_new]
     assert open_recs[0]["stale"] and open_recs[0]["age_days"] >= 2
     # phone-less rows render the "can't call back" path
@@ -609,6 +609,81 @@ def test_recovery_double_resolve_keeps_first_stamp(isolated_db):
     # Reopening an already-open row is likewise a no-op
     assert shift_db.set_recovery_resolved(rid, False, "", "Devon")
     assert not shift_db.set_recovery_resolved(rid, False, "", "Maya")
+
+
+def test_recovery_contact_lifecycle(isolated_db):
+    rid = shift_db.add_recovery("Jordan", "", "", "order-error",
+                                "free-entree-card", "", True, "Riya")
+    assert shift_db.set_recovery_contacted(rid, True, " coming Sat ", "Maya")
+    open_recs, awaiting, resolved = shift_db.recovery_feed()
+    assert not open_recs and not resolved
+    assert awaiting[0]["id"] == rid
+    assert awaiting[0]["contacted_by"] == "Maya"
+    assert awaiting[0]["contact_note"] == "coming Sat"
+
+    # Double-contact from a stale page is a no-op keeping the first stamp
+    assert not shift_db.set_recovery_contacted(rid, True, "", "Devon")
+    assert shift_db.get_recovery(rid)["contacted_by"] == "Maya"
+
+    # Resolving from awaiting keeps the contact stamp for the record
+    assert shift_db.set_recovery_resolved(rid, True, "picked up", "Neha")
+    rec = shift_db.get_recovery(rid)
+    assert rec["contacted_by"] == "Maya" and rec["resolved_by"] == "Neha"
+
+    # Contacting a resolved row is refused
+    assert not shift_db.set_recovery_contacted(rid, True, "", "Devon")
+
+    # Reopening a contacted+resolved row returns it to the awaiting bucket
+    assert shift_db.set_recovery_resolved(rid, False, "", "Neha")
+    assert shift_db.recovery_feed()[1][0]["id"] == rid
+
+    # Undo contact puts it back in the open queue; undo-on-open is a no-op
+    assert shift_db.set_recovery_contacted(rid, False, "", "Maya")
+    rec = shift_db.get_recovery(rid)
+    assert rec["contacted_at"] is None and rec["contact_note"] is None
+    assert shift_db.recovery_feed()[0][0]["id"] == rid
+    assert not shift_db.set_recovery_contacted(rid, False, "", "Maya")
+
+
+def test_recovery_contacted_now_at_log_time(isolated_db):
+    rid = shift_db.add_recovery("Sam", "", "", "food-quality", "remade-now",
+                                "", False, "Riya", contacted_now=True)
+    open_recs, awaiting, _ = shift_db.recovery_feed()
+    assert not open_recs and awaiting[0]["id"] == rid
+    assert awaiting[0]["contacted_by"] == "Riya"
+    # resolved_now wins over contacted_now
+    rid2 = shift_db.add_recovery("Lee", "", "", "service", "refund", "",
+                                 False, "Riya", resolved_now=True,
+                                 contacted_now=True)
+    rec = shift_db.get_recovery(rid2)
+    assert rec["resolved_at"] and rec["contacted_at"] is None
+
+
+def test_migration_adds_contact_columns(tmp_path, monkeypatch):
+    # An existing production DB from before the contacted state gains the
+    # new columns on boot, keeping its rows.
+    import sqlite3
+    monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "old.db"))
+    conn = sqlite3.connect(shift_db.DB_PATH)
+    conn.executescript("""
+        CREATE TABLE guest_recoveries (
+            id INTEGER PRIMARY KEY, recovery_date TEXT NOT NULL,
+            guest_name TEXT NOT NULL, guest_phone TEXT, guest_email TEXT,
+            issue TEXT NOT NULL DEFAULT 'other',
+            remedy TEXT NOT NULL DEFAULT 'other', details TEXT,
+            follow_up INTEGER NOT NULL DEFAULT 0, logged_by TEXT,
+            created_at TEXT NOT NULL, resolved_at TEXT, resolved_by TEXT,
+            resolution_note TEXT);
+        INSERT INTO guest_recoveries (recovery_date, guest_name, created_at)
+            VALUES ('2026-10-01', 'Pre-upgrade guest', '2026-10-01 09:00');
+    """)
+    conn.commit()
+    conn.close()
+    shift_db.init_db()
+    shift_db.init_db()   # idempotent — second boot must not double-ALTER
+    open_recs, awaiting, _ = shift_db.recovery_feed()
+    assert open_recs[0]["guest_name"] == "Pre-upgrade guest"
+    assert open_recs[0]["contacted_at"] is None and not awaiting
 
 
 def test_recovery_phone_plus_prefix(isolated_db):
@@ -649,15 +724,28 @@ def test_recovery_contact_purge_after_90_days(isolated_db):
                                   "refund", "", False, "Riya", resolved_now=True)
     still_open = shift_db.add_recovery("Open", "519-555-0003", "", "service",
                                        "refund", "", False, "Riya")
+    # A guest who was contacted but never came back must also age out —
+    # the awaiting state can't park PII forever.
+    no_show = shift_db.add_recovery("NoShow", "519-555-0004", "", "service",
+                                    "refund", "", False, "Riya")
+    shift_db.set_recovery_contacted(no_show, True, "said next week", "Riya")
+    waiting_fresh = shift_db.add_recovery("Waiting", "519-555-0005", "",
+                                          "service", "refund", "", False, "Riya")
+    shift_db.set_recovery_contacted(waiting_fresh, True, "Sat", "Riya")
     with shift_db.closing(shift_db.connect()) as conn, conn:
         conn.execute("UPDATE guest_recoveries SET resolved_at=? WHERE id=?",
                      ("2020-01-01 09:00", old))
-    assert shift_db.purge_old_recovery_contacts() == 1
+        conn.execute("UPDATE guest_recoveries SET contacted_at=? WHERE id=?",
+                     ("2020-01-01 09:00", no_show))
+    assert shift_db.purge_old_recovery_contacts() == 2
     purged = shift_db.get_recovery(old)
     assert purged["guest_phone"] is None and purged["guest_email"] is None
     assert purged["guest_name"] == "Old"              # history row survives
+    gone = shift_db.get_recovery(no_show)
+    assert gone["guest_phone"] is None and gone["contact_note"] is None
     assert shift_db.get_recovery(fresh)["guest_phone"] == "519-555-0002"
     assert shift_db.get_recovery(still_open)["guest_phone"] == "519-555-0003"
+    assert shift_db.get_recovery(waiting_fresh)["contact_note"] == "Sat"
     assert shift_db.purge_old_recovery_contacts() == 0  # idempotent
 
 
@@ -675,7 +763,7 @@ def test_recovery_resolved_now_skips_open_queue(isolated_db):
     rid = shift_db.add_recovery("Sam", "", "sam@x.ca", "food-quality",
                                 "remade-now", "", False, "Riya",
                                 resolved_now=True)
-    open_recs, resolved = shift_db.recovery_feed()
+    open_recs, awaiting, resolved = shift_db.recovery_feed()
     assert not open_recs
     assert resolved[0]["id"] == rid and resolved[0]["resolved_by"] == "Riya"
     assert shift_db.open_recovery_count() == 0
@@ -717,7 +805,7 @@ def test_recoveries_survive_export_import(isolated_db):
     raw = shift_db.export_json()
     shift_db.delete_recovery(rid)
     assert shift_db.import_json(raw) is None
-    open_recs, _ = shift_db.recovery_feed()
+    open_recs, _, _ = shift_db.recovery_feed()
     assert open_recs[0]["guest_name"] == "Jordan"
     assert open_recs[0]["follow_up"] == 1
 
