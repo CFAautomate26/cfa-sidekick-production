@@ -611,7 +611,7 @@ def test_recovery_resolved_now_route(client):
         "resolved_now": "1",
     })
     assert shift_db.open_recovery_count() == 0
-    assert shift_db.recovery_feed()[1][0]["guest_name"] == "Sam"
+    assert shift_db.recovery_feed()[2][0]["guest_name"] == "Sam"
 
 
 def test_recovery_empty_name_flashes(client):
@@ -644,6 +644,56 @@ def test_recovery_stale_id_graceful(client):
     assert client.post("/shift/recovery/999999/resolve",
                        data={"resolved": "1"}).status_code == 302
     assert client.post("/shift/recovery/999999/delete").status_code == 302
+
+
+def test_recovery_contact_route_flow(client):
+    make_leader(client)
+    login_leader(client)
+    client.post("/shift/recovery", data={"guest_name": "Jordan",
+                                         "issue": "order-error",
+                                         "remedy": "free-entree-card"})
+    rec = shift_db.recovery_feed()[0][0]
+    resp = client.post(f"/shift/recovery/{rec['id']}/contact",
+                       data={"contacted": "1", "note": "coming Saturday"})
+    assert resp.headers["Location"].endswith(f"#rec-{rec['id']}")
+    page = client.get("/shift/recovery").data
+    assert b"Waiting to come back (1)" in page and b"coming Saturday" in page
+
+    today_page = client.get("/shift/").data
+    assert b"coming back for their replacement" in today_page
+    assert b"Jordan" in today_page
+
+    # Second contact from a stale page: told, first stamp kept
+    resp = client.post(f"/shift/recovery/{rec['id']}/contact",
+                       data={"contacted": "1"}, follow_redirects=True)
+    assert b"Already marked contacted by Maya" in resp.data
+
+    # They came back: resolving keeps both stamps
+    client.post(f"/shift/recovery/{rec['id']}/resolve",
+                data={"resolved": "1", "note": "picked up the card"})
+    done = shift_db.get_recovery(rec["id"])
+    assert done["resolved_by"] == "Maya" and done["contacted_by"] == "Maya"
+    assert b"Jordan" not in client.get("/shift/").data
+
+    # Undo on a resolved row is refused with a flash, not a 500
+    resp = client.post(f"/shift/recovery/{rec['id']}/contact",
+                       data={"contacted": "0"}, follow_redirects=True)
+    assert b"already fully resolved" in resp.data
+
+
+def test_recovery_contacted_now_checkbox(client):
+    login_operator(client)
+    client.post("/shift/recovery", data={
+        "guest_name": "Sam", "issue": "food-quality", "remedy": "remade-now",
+        "contacted_now": "1",
+    })
+    open_recs, awaiting, _ = shift_db.recovery_feed()
+    assert not open_recs and awaiting[0]["guest_name"] == "Sam"
+    assert b"Waiting to come back (1)" in client.get("/shift/recovery").data
+    # Today card renders in its calm (non-red) awaiting-only form
+    today_page = client.get("/shift/").data
+    assert b"coming back for their replacement" in today_page
+    assert b"Hand over their replacement" in today_page
 
 
 def test_recovery_operator_create_and_resolve(client):

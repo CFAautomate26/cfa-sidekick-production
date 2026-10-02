@@ -45,6 +45,10 @@
       Guest expects a call-back
     </label>
     <label class="pill" style="cursor:pointer; margin-top:8px; display:inline-block;">
+      <input type="checkbox" name="contacted_now" value="1" style="accent-color:var(--cfa-red);">
+      Already talked to the guest — they'll come back for it
+    </label>
+    <label class="pill" style="cursor:pointer; margin-top:8px; display:inline-block;">
       <input type="checkbox" name="resolved_now" value="1" style="accent-color:var(--cfa-red);">
       Handled on the spot — nothing left to do
     </label>
@@ -77,6 +81,16 @@
   <div class="progress-note">logged by {{ r.logged_by }} · {{ r.created_at }}</div>
   <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-top:8px;">
     <details style="flex:1;">
+      <summary class="pill small" style="cursor:pointer; display:inline-block;">📞 Contacted — coming back</summary>
+      <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}" style="margin-top:8px;">
+        <input type="hidden" name="contacted" value="1">
+        <input type="text" name="note" placeholder="What was agreed — e.g. coming Sat for the remake">
+        <div style="margin-top:8px;">
+          <button class="pill primary small" type="submit">They'll come back for it</button>
+        </div>
+      </form>
+    </details>
+    <details style="flex:1;">
       <summary class="pill small primary" style="cursor:pointer; display:inline-block;">Resolve ✓</summary>
       <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}" style="margin-top:8px;">
         <input type="hidden" name="resolved" value="1">
@@ -98,6 +112,53 @@
 <div class="empty">No open recoveries — every guest taken care of ✓</div>
 {% endfor %}
 
+{% if awaiting_recs %}
+<div class="section-label">Waiting to come back ({{ awaiting_recs | length }})</div>
+{% for r in awaiting_recs %}
+<div class="card" id="rec-{{ r.id }}">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+    <span style="font-size:15px; font-weight:700;">{{ r.guest_name }}</span>
+    <span class="progress-note" style="margin:0;">{{ r.recovery_date }}</span>
+  </div>
+  <div style="margin-top:6px;">
+    <span class="note-cat cat-issue">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
+    <span class="note-cat">→ {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) }}</span>
+  </div>
+  <div style="font-size:14px; margin-top:6px;">
+    {% if r.phone_digits %}<a href="tel:{{ r.phone_digits }}">{{ r.guest_phone }}</a>
+    {% elif r.guest_phone %}{{ r.guest_phone }}{% endif %}
+    {% if r.guest_email %}{% if r.guest_phone %} · {% endif %}<a href="mailto:{{ r.guest_email }}">{{ r.guest_email }}</a>{% endif %}
+  </div>
+  {% if r.contact_note %}<div style="font-size:14px; color:var(--soft); margin-top:4px;">{{ r.contact_note }}</div>{% endif %}
+  {% if r.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:4px;">{{ r.details }}</div>{% endif %}
+  <div class="progress-note">📞 contacted {{ r.contacted_at }} by {{ r.contacted_by }} · hand over the
+    {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) | lower }} when they're in</div>
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-top:8px;">
+    <details style="flex:1;">
+      <summary class="pill small primary" style="cursor:pointer; display:inline-block;">They came back ✓</summary>
+      <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}" style="margin-top:8px;">
+        <input type="hidden" name="resolved" value="1">
+        <input type="text" name="note" placeholder="Optional — e.g. picked up the replacement">
+        <div style="margin-top:8px;">
+          <button class="pill primary small" type="submit">Mark resolved</button>
+        </div>
+      </form>
+    </details>
+    <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}">
+      <input type="hidden" name="contacted" value="0">
+      <button class="pill small ghost" type="submit">Undo</button>
+    </form>
+    {% if shift_is_admin %}
+    <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
+          onsubmit="return confirm('Delete this recovery?');">
+      <button class="pill small ghost" type="submit">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
 {% if resolved_recs %}
 <details style="margin-top:14px;">
   <summary style="cursor:pointer;" class="section-label">Resolved ({% if resolved_recs | length >= 50 %}latest 50{% else %}{{ resolved_recs | length }}{% endif %})</summary>
@@ -112,7 +173,7 @@
           <span class="note-cat">→ {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) }}</span>
         </div>
         {% if r.resolution_note %}<div style="font-size:14px; color:var(--soft); margin-top:4px;">{{ r.resolution_note }}</div>{% endif %}
-        <div class="progress-note">resolved {{ r.resolved_at }} by {{ r.resolved_by }}</div>
+        <div class="progress-note">{% if r.contacted_at %}📞 contacted {{ r.contacted_at }} by {{ r.contacted_by }} · {% endif %}resolved {{ r.resolved_at }} by {{ r.resolved_by }}</div>
       </div>
       <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
         <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}">

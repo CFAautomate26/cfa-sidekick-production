@@ -292,9 +292,12 @@ CREATE TABLE IF NOT EXISTS guest_recoveries (
     follow_up INTEGER NOT NULL DEFAULT 0,       -- 1 = guest expects a call-back
     logged_by TEXT,
     created_at TEXT NOT NULL,
+    contacted_at TEXT,                          -- guest reached; coming back for the remedy
+    contacted_by TEXT,
+    contact_note TEXT,                          -- what was agreed, e.g. "coming Sat for remake"
     resolved_at TEXT,                           -- NULL = promise still outstanding
     resolved_by TEXT,
-    resolution_note TEXT                        -- e.g. "called, card mailed"
+    resolution_note TEXT                        -- e.g. "picked up replacement"
 );
 CREATE INDEX IF NOT EXISTS idx_recoveries_status
     ON guest_recoveries(resolved_at, recovery_date);
@@ -417,12 +420,23 @@ def init_db() -> None:
         # passing a guard and one crashing on the meta PRIMARY KEY.
         conn.execute("BEGIN IMMEDIATE")
         try:
+            _migrate(conn)
             _seed_base(conn)
             _seed_course(conn)
             conn.commit()
         except BaseException:
             conn.rollback()
             raise
+
+
+def _migrate(conn) -> None:
+    """Additive column migrations for existing databases — executescript's
+    CREATE TABLE IF NOT EXISTS only shapes brand-new tables. Runs under
+    init_db's write lock so concurrent workers can't double-ALTER."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(guest_recoveries)")}
+    for col_def in ("contacted_at TEXT", "contacted_by TEXT", "contact_note TEXT"):
+        if col_def.split()[0] not in cols:
+            conn.execute(f"ALTER TABLE guest_recoveries ADD COLUMN {col_def}")
 
 
 def _seed_base(conn) -> None:
@@ -1132,21 +1146,25 @@ def _annotate_recovery(r: dict) -> dict:
 
 def add_recovery(guest_name: str, guest_phone: str, guest_email: str,
                  issue: str, remedy: str, details: str, follow_up: bool,
-                 by: str, resolved_now: bool = False) -> int | None:
+                 by: str, resolved_now: bool = False,
+                 contacted_now: bool = False) -> int | None:
     """Log a recovery. Returns the new row id, or None for an empty guest
     name. Unknown issue/remedy values are stored as 'other' (double-guard
     under the route's coercion). resolved_now stamps the resolution in the
-    same INSERT, so handled-on-the-spot never shows in the open queue."""
+    same INSERT, so handled-on-the-spot never shows in the open queue;
+    contacted_now stamps the contact, for "already talked to the guest —
+    they'll come back for it" (resolved_now wins if both are set)."""
     guest_name = " ".join((guest_name or "").split())
     if not guest_name:
         return None
     stamp = now_stamp()
+    contacted = contacted_now and not resolved_now
     with closing(connect()) as conn, conn:
         cur = conn.execute(
             "INSERT INTO guest_recoveries (recovery_date, guest_name, "
             "guest_phone, guest_email, issue, remedy, details, follow_up, "
-            "logged_by, created_at, resolved_at, resolved_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "logged_by, created_at, contacted_at, contacted_by, "
+            "resolved_at, resolved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (today_local(), guest_name,
              (guest_phone or "").strip() or None,
              (guest_email or "").strip() or None,
@@ -1154,22 +1172,30 @@ def add_recovery(guest_name: str, guest_phone: str, guest_email: str,
              remedy if remedy in RECOVERY_REMEDIES else "other",
              (details or "").strip() or None,
              1 if follow_up else 0, by, stamp,
+             stamp if contacted else None,
+             by if contacted else None,
              stamp if resolved_now else None,
              by if resolved_now else None),
         )
         return cur.lastrowid
 
 
-def recovery_feed(resolved_limit: int = 50) -> tuple[list[dict], list[dict]]:
-    """(open, resolved): open oldest-first so the longest-waiting guest is
-    on top; resolved newest-first, capped. Both reads share one transaction
-    (same reason as export_json) so a resolve landing between them can't
-    show the same recovery in both lists."""
+def recovery_feed(resolved_limit: int = 50) \
+        -> tuple[list[dict], list[dict], list[dict]]:
+    """(open, awaiting, resolved): open (nobody has reached the guest yet)
+    and awaiting (contacted — guest coming back for the remedy) oldest-first
+    so the longest-waiting guest is on top; resolved newest-first, capped.
+    All reads share one transaction (same reason as export_json) so a flip
+    landing between them can't show one recovery in two lists."""
     with closing(connect()) as conn:
         conn.execute("BEGIN")
         open_recs = [_annotate_recovery(dict(r)) for r in conn.execute(
             "SELECT * FROM guest_recoveries WHERE resolved_at IS NULL "
-            "ORDER BY recovery_date, id"
+            "AND contacted_at IS NULL ORDER BY recovery_date, id"
+        ).fetchall()]
+        awaiting = [_annotate_recovery(dict(r)) for r in conn.execute(
+            "SELECT * FROM guest_recoveries WHERE resolved_at IS NULL "
+            "AND contacted_at IS NOT NULL ORDER BY recovery_date, id"
         ).fetchall()]
         resolved = [dict(r) for r in conn.execute(
             "SELECT * FROM guest_recoveries WHERE resolved_at IS NOT NULL "
@@ -1177,12 +1203,7 @@ def recovery_feed(resolved_limit: int = 50) -> tuple[list[dict], list[dict]]:
             (resolved_limit,),
         ).fetchall()]
         conn.commit()
-    return open_recs, resolved
-
-
-def open_recoveries() -> list[dict]:
-    """All open recoveries, oldest first, annotated — for the Today card."""
-    return recovery_feed()[0]
+    return open_recs, awaiting, resolved
 
 
 def open_recovery_count() -> int:
@@ -1198,6 +1219,27 @@ def get_recovery(recovery_id: int) -> dict | None:
             "SELECT * FROM guest_recoveries WHERE id=?", (recovery_id,)
         ).fetchone()
     return dict(row) if row else None
+
+
+def set_recovery_contacted(recovery_id: int, contacted: bool, note: str,
+                           by: str) -> bool:
+    """Mark that the guest was reached and will come back for the remedy
+    (or undo a mis-tap). Guarded like set_recovery_resolved: only flips
+    unresolved rows that are in the opposite contact state, so two leaders
+    can't overwrite each other's stamp. Returns False for an unknown id or
+    a no-op flip."""
+    guard = "IS NULL" if contacted else "IS NOT NULL"
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE guest_recoveries SET contacted_at=?, contacted_by=?, "
+            f"contact_note=? WHERE id=? AND resolved_at IS NULL "
+            f"AND contacted_at {guard}",
+            (now_stamp() if contacted else None,
+             by if contacted else None,
+             ((note or "").strip() or None) if contacted else None,
+             recovery_id),
+        )
+        return cur.rowcount > 0
 
 
 def set_recovery_resolved(recovery_id: int, resolved: bool, note: str,

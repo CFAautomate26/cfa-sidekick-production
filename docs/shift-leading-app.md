@@ -40,7 +40,12 @@ the leadership team:
   credit…), plus whether the guest expects a call-back. Open recoveries
   sit on everyone's Today screen until someone resolves them (stamped
   who/when, with a note on how it was closed); admins also get a 28-day
-  what-keeps-going-wrong breakdown. Guest name + contact only — never
+  what-keeps-going-wrong breakdown. A middle state covers the common case
+  of reaching the guest before they've been made whole: mark it
+  **"Contacted — coming back"** (or tick "already talked to the guest"
+  when logging) and it moves to a *Waiting to come back* list — every
+  leader sees who to expect and hands over the replacement, then taps
+  "They came back ✓". Guest name + contact only — never
   payment/card info; injury or damage claims go to the Operator directly.
 - **Leadership development** — the Operator's course (from the "Leadership
   Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,

@@ -268,6 +268,7 @@ def today():
     announcements = [a for a in shift_db.active_announcements(reader=current_name())
                      if not a["acked"]]
     leader_id = session.get("shift_leader_id")
+    open_recs, awaiting_recs, _ = shift_db.recovery_feed(resolved_limit=0)
     return render_template(
         "shift/today.html",
         runs=runs,
@@ -279,7 +280,8 @@ def today():
         notes=shift_db.notes_for_date(day)[:3],
         my_tasks=shift_db.open_tasks_for_leader(leader_id) if leader_id else [],
         my_leader_id=leader_id,
-        open_recoveries=shift_db.open_recoveries(),
+        open_recoveries=open_recs,
+        awaiting_recoveries=awaiting_recs,
         RECOVERY_ISSUE_LABELS=shift_db.RECOVERY_ISSUE_LABELS,
     )
 
@@ -828,10 +830,11 @@ def todo_delete(task_id):
 def recovery():
     # Opportunistic PII hygiene: contact info ages out of long-resolved rows.
     shift_db.purge_old_recovery_contacts()
-    open_recs, resolved_recs = shift_db.recovery_feed()
+    open_recs, awaiting_recs, resolved_recs = shift_db.recovery_feed()
     return render_template(
         "shift/recovery.html",
         open_recs=open_recs,
+        awaiting_recs=awaiting_recs,
         resolved_recs=resolved_recs,
         issue_counts=shift_db.recovery_issue_counts() if is_admin() else [],
         RECOVERY_ISSUES=shift_db.RECOVERY_ISSUES,
@@ -855,12 +858,34 @@ def recovery_create():
         follow_up=request.form.get("follow_up") == "1",
         by=current_name(),
         resolved_now=request.form.get("resolved_now") == "1",
+        contacted_now=request.form.get("contacted_now") == "1",
     )
     if rid is None:
         flash("A recovery needs the guest's name.")
         return redirect(url_for("shift.recovery"))
     flash("Logged. Make it right!")
     return redirect(url_for("shift.recovery") + f"#rec-{rid}")
+
+
+@shift_bp.route("/recovery/<int:recovery_id>/contact", methods=["POST"])
+def recovery_contact(recovery_id):
+    contacted = request.form.get("contacted") == "1"
+    ok = shift_db.set_recovery_contacted(
+        recovery_id, contacted, request.form.get("note", ""), current_name())
+    if not ok:
+        rec = shift_db.get_recovery(recovery_id)
+        if rec:
+            if rec["resolved_at"]:
+                flash("That one is already fully resolved — nothing changed.")
+            elif rec["contacted_at"]:
+                flash(f"Already marked contacted by "
+                      f"{rec['contacted_by'] or 'someone'} — nothing changed.")
+            else:
+                flash("That one wasn't marked contacted — nothing changed.")
+            return redirect(url_for("shift.recovery") + f"#rec-{recovery_id}")
+        flash("That recovery doesn't exist any more.")
+        return redirect(url_for("shift.recovery"))
+    return redirect(url_for("shift.recovery") + f"#rec-{recovery_id}")
 
 
 @shift_bp.route("/recovery/<int:recovery_id>/resolve", methods=["POST"])
