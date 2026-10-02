@@ -86,7 +86,7 @@
         <input type="hidden" name="contacted" value="1">
         <input type="text" name="note" placeholder="What was agreed — e.g. coming Sat for the remake">
         <div style="margin-top:8px;">
-          <button class="pill primary small" type="submit">They'll come back for it</button>
+          <button class="pill small" type="submit">They'll come back for it</button>
         </div>
       </form>
     </details>
@@ -131,8 +131,8 @@
   </div>
   {% if r.contact_note %}<div style="font-size:14px; color:var(--soft); margin-top:4px;">{{ r.contact_note }}</div>{% endif %}
   {% if r.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:4px;">{{ r.details }}</div>{% endif %}
-  <div class="progress-note">📞 contacted {{ r.contacted_at }} by {{ r.contacted_by }} · hand over the
-    {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) | lower }} when they're in</div>
+  <div class="progress-note">📞 contacted {{ r.contacted_at }} by {{ r.contacted_by }}{% if r.waiting_days %} ·
+    <span {% if r.waiting_days >= 7 %}class="critical-flag"{% endif %}>waiting {{ r.waiting_days }}d</span>{% endif %}</div>
   <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-top:8px;">
     <details style="flex:1;">
       <summary class="pill small primary" style="cursor:pointer; display:inline-block;">They came back ✓</summary>
@@ -194,7 +194,7 @@
 </details>
 {% endif %}
 
-{% if shift_is_admin and issue_counts %}
+{% if issue_counts %}
 {% set max_count = issue_counts | map(attribute='count') | max %}
 <details style="margin-top:14px;">
   <summary style="cursor:pointer;" class="section-label">📊 Last 28 days</summary>

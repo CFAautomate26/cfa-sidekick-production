@@ -59,6 +59,20 @@ RECOVERY_ISSUE_LABELS = {
 RECOVERY_REMEDIES = ["remade-now", "refund", "free-entree-card",
                      "free-dessert-drink", "catering-credit", "apology-only",
                      "other"]
+SHOUTOUT_VALUES = ["2nd-mile-service", "speed", "food-safety", "teamwork",
+                   "hospitality", "cleanliness"]
+SHOUTOUT_VALUE_LABELS = {
+    "2nd-mile-service": "⭐ 2nd-mile service", "speed": "⚡ Speed of service",
+    "food-safety": "🧤 Food safety", "teamwork": "🤝 Teamwork",
+    "hospitality": "❤️ Hospitality", "cleanliness": "✨ Cleanliness",
+}
+# Short forms for the filter chip row, so most chips fit a phone width.
+SHOUTOUT_VALUE_SHORT = {
+    "2nd-mile-service": "⭐ 2nd-mile", "speed": "⚡ Speed",
+    "food-safety": "🧤 Safety", "teamwork": "🤝 Teamwork",
+    "hospitality": "❤️ Hospitality", "cleanliness": "✨ Clean",
+}
+
 RECOVERY_REMEDY_LABELS = {
     "remade-now": "Remade / replaced on the spot",
     "refund": "Refund (at the register — no card info here)",
@@ -185,7 +199,9 @@ CREATE TABLE IF NOT EXISTS goals (
     due_date TEXT,                              -- YYYY-MM-DD or NULL
     status TEXT NOT NULL DEFAULT 'active',      -- active | achieved | archived
     created_by TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    leader_id INTEGER REFERENCES leaders(id) ON DELETE SET NULL
+                                                -- NULL = store-wide; set = rides on that leader's 1:1 page
 );
 
 CREATE TABLE IF NOT EXISTS goal_updates (
@@ -301,6 +317,43 @@ CREATE TABLE IF NOT EXISTS guest_recoveries (
 );
 CREATE INDEX IF NOT EXISTS idx_recoveries_status
     ON guest_recoveries(resolved_at, recovery_date);
+
+-- 1:1 meeting agendas. A topic with discussed_at NULL IS the agenda, so
+-- unchecked topics carry forward automatically; checking one off stamps
+-- who/when plus the business date, and grouping by discussed_on forms the
+-- browsable past-meetings thread (no meetings table). Private between each
+-- leader and the Operator. Growth/operational topics ONLY — per CLAUDE.md,
+-- conduct/discipline/wage/health content never goes in this database
+-- (those live under docs/legal-counsel).
+CREATE TABLE IF NOT EXISTS oneonone_topics (
+    id INTEGER PRIMARY KEY,
+    leader_id INTEGER NOT NULL REFERENCES leaders(id) ON DELETE CASCADE,
+    topic TEXT NOT NULL,
+    added_by TEXT,                              -- Operator or the leader — both feed the agenda
+    created_at TEXT NOT NULL,
+    discussed_at TEXT,                          -- NULL = still on the agenda
+    discussed_by TEXT,
+    discussed_on TEXT,                          -- YYYY-MM-DD store-local meeting date (4am rollover)
+    outcome_note TEXT                           -- optional "what we decided"
+);
+CREATE INDEX IF NOT EXISTS idx_oneonone_topics
+    ON oneonone_topics(leader_id, discussed_at);
+
+-- Recognition / shout-outs, posted by any leader, optionally cross-posted
+-- to the team Slack channel (best-effort; shared_at records the REQUEST,
+-- not a confirmed delivery).
+CREATE TABLE IF NOT EXISTS shoutouts (
+    id INTEGER PRIMARY KEY,
+    shout_date TEXT NOT NULL,                   -- YYYY-MM-DD store-local (4am rollover)
+    member_name TEXT NOT NULL,                  -- who's being recognized (roster autosuggest)
+    value_tag TEXT,                             -- one of SHOUTOUT_VALUES, or NULL = untagged
+    message TEXT NOT NULL,
+    author TEXT,
+    created_at TEXT NOT NULL,
+    shared_at TEXT,                             -- NULL = kept in-app only (cross-post REQUESTED)
+    delivered_at TEXT                           -- set by the background post on Slack ok:true
+);
+CREATE INDEX IF NOT EXISTS idx_shoutouts_date ON shoutouts(shout_date, id);
 
 CREATE INDEX IF NOT EXISTS idx_run_items_run ON checklist_run_items(run_id);
 CREATE INDEX IF NOT EXISTS idx_lineup_date ON lineup_assignments(lineup_date, daypart);
@@ -437,6 +490,13 @@ def _migrate(conn) -> None:
     for col_def in ("contacted_at TEXT", "contacted_by TEXT", "contact_note TEXT"):
         if col_def.split()[0] not in cols:
             conn.execute(f"ALTER TABLE guest_recoveries ADD COLUMN {col_def}")
+    # Goals ride-along: optional tag to one leader, shown on their 1:1 page.
+    # ON DELETE SET NULL is restore-critical: import_json deletes leaders
+    # under foreign_keys=ON while old goals rows still exist.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(goals)")}
+    if "leader_id" not in cols:
+        conn.execute("ALTER TABLE goals ADD COLUMN leader_id INTEGER "
+                     "REFERENCES leaders(id) ON DELETE SET NULL")
 
 
 def _seed_base(conn) -> None:
@@ -663,12 +723,22 @@ def set_template_active(template_id: int, active: bool) -> None:
 # Goals
 # ---------------------------------------------------------------------------
 
-def goals_by_status(status: str = "active") -> list[dict]:
+def goals_by_status(status: str = "active", leader_id: int | None = None,
+                    store_only: bool = False) -> list[dict]:
+    """Goals with latest value + progress. leader_id filters to one
+    leader's personal goals (their 1:1 page); store_only keeps the Today
+    dashboard to store-wide goals. Defaults return everything."""
+    q = ("SELECT g.*, ld.name AS leader_name FROM goals g "
+         "LEFT JOIN leaders ld ON ld.id = g.leader_id WHERE g.status=?")
+    params: list = [status]
+    if leader_id is not None:
+        q += " AND g.leader_id=?"
+        params.append(leader_id)
+    elif store_only:
+        q += " AND g.leader_id IS NULL"
+    q += " ORDER BY g.created_at DESC, g.id DESC"
     with closing(connect()) as conn:
-        goals = [dict(g) for g in conn.execute(
-            "SELECT * FROM goals WHERE status=? ORDER BY created_at DESC, id DESC",
-            (status,),
-        ).fetchall()]
+        goals = [dict(g) for g in conn.execute(q, params).fetchall()]
         for g in goals:
             latest = conn.execute(
                 "SELECT value, recorded_at FROM goal_updates WHERE goal_id=? "
@@ -699,7 +769,10 @@ def goal_progress_pct(g: dict) -> int | None:
 
 def goal_with_updates(goal_id: int) -> tuple[dict | None, list[dict]]:
     with closing(connect()) as conn:
-        g = conn.execute("SELECT * FROM goals WHERE id=?", (goal_id,)).fetchone()
+        g = conn.execute(
+            "SELECT g.*, ld.name AS leader_name FROM goals g "
+            "LEFT JOIN leaders ld ON ld.id = g.leader_id WHERE g.id=?",
+            (goal_id,)).fetchone()
         if not g:
             return None, []
         updates = conn.execute(
@@ -714,14 +787,20 @@ def goal_with_updates(goal_id: int) -> tuple[dict | None, list[dict]]:
 
 
 def create_goal(title: str, why: str, metric: str, unit: str, target_value: float | None,
-                direction: str, period: str, due_date: str, created_by: str) -> int:
+                direction: str, period: str, due_date: str, created_by: str,
+                leader_id: int | None = None) -> int:
     with closing(connect()) as conn, conn:
+        # Re-validate the optional leader tag so a stale form select can't
+        # violate the FK — unknown leader means a store-wide goal.
+        if leader_id is not None and not conn.execute(
+                "SELECT 1 FROM leaders WHERE id=?", (leader_id,)).fetchone():
+            leader_id = None
         cur = conn.execute(
             "INSERT INTO goals (title, why, metric, unit, target_value, direction, "
-            "period, due_date, status, created_by, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,'active',?,?)",
+            "period, due_date, status, created_by, created_at, leader_id) "
+            "VALUES (?,?,?,?,?,?,?,?,'active',?,?,?)",
             (title, why, metric, unit, target_value, direction, period,
-             due_date or None, created_by, now_stamp()),
+             due_date or None, created_by, now_stamp(), leader_id),
         )
         return cur.lastrowid
 
@@ -1123,6 +1202,236 @@ def leader_task_summary() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# 1:1 meeting agendas
+# ---------------------------------------------------------------------------
+
+def _business_date(stamp: str) -> str:
+    """A now_stamp() value -> the 4am-rollover business date it belongs to."""
+    try:
+        return (datetime.strptime(stamp, "%Y-%m-%d %H:%M")
+                - timedelta(hours=4)).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return (stamp or "")[:10]
+
+
+def add_oneonone_topic(leader_id: int, topic: str, by: str) -> bool:
+    """Add a talking point to a leader's shared agenda. Returns False for
+    an empty topic or unknown leader."""
+    topic = " ".join((topic or "").split())
+    if not topic:
+        return False
+    with closing(connect()) as conn, conn:
+        if not conn.execute(
+            "SELECT 1 FROM leaders WHERE id=?", (leader_id,)
+        ).fetchone():
+            return False
+        conn.execute(
+            "INSERT INTO oneonone_topics (leader_id, topic, added_by, created_at) "
+            "VALUES (?,?,?,?)",
+            (leader_id, topic, by, now_stamp()),
+        )
+    return True
+
+
+def oneonone_for_leader(leader_id: int, meetings: int = 12) \
+        -> tuple[list[dict], list[dict]]:
+    """(agenda, history). agenda: undiscussed topics, longest-waiting first,
+    each flagged carried=True when it survived at least one past 1:1.
+    history: [{'date', 'topics'}] newest meeting first, capped at
+    `meetings` distinct dates. One transaction so a check-off landing
+    mid-read can't show a topic in both lists."""
+    with closing(connect()) as conn:
+        conn.execute("BEGIN")
+        agenda = [dict(r) for r in conn.execute(
+            "SELECT * FROM oneonone_topics WHERE leader_id=? "
+            "AND discussed_at IS NULL ORDER BY created_at, id",
+            (leader_id,),
+        ).fetchall()]
+        discussed = [dict(r) for r in conn.execute(
+            "SELECT * FROM oneonone_topics WHERE leader_id=? "
+            "AND discussed_at IS NOT NULL "
+            "ORDER BY discussed_on DESC, discussed_at, id",
+            (leader_id,),
+        ).fetchall()]
+        conn.commit()
+    last_met = max((t["discussed_on"] for t in discussed if t["discussed_on"]),
+                   default=None)
+    for t in agenda:
+        # Strictly before the last meeting's business date: a topic added on
+        # meeting day (before or after the sit-down) was never "carried".
+        t["carried"] = bool(last_met and _business_date(t["created_at"]) < last_met)
+    history: list[dict] = []
+    for t in discussed:
+        if not history or history[-1]["date"] != t["discussed_on"]:
+            if len(history) >= meetings:
+                break
+            history.append({"date": t["discussed_on"], "topics": []})
+        history[-1]["topics"].append(t)
+    return agenda, history
+
+
+def get_topic(topic_id: int) -> dict | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT * FROM oneonone_topics WHERE id=?", (topic_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def set_topic_discussed(topic_id: int, discussed: bool, note: str,
+                        by: str) -> bool:
+    """Check a topic off during the 1:1 (or reopen it). Guarded flip like
+    set_recovery_resolved: only rows in the opposite state change, so the
+    first stamp wins. Reopening clears all four columns."""
+    guard = "IS NULL" if discussed else "IS NOT NULL"
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE oneonone_topics SET discussed_at=?, discussed_by=?, "
+            f"discussed_on=?, outcome_note=? WHERE id=? AND discussed_at {guard}",
+            (now_stamp() if discussed else None,
+             by if discussed else None,
+             today_local() if discussed else None,
+             (" ".join((note or "").split()) or None) if discussed else None,
+             topic_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_topic(topic_id: int) -> bool:
+    """Remove an undiscussed topic. Discussed topics are meeting history
+    and can only leave via reopen — guarded at the SQL level."""
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "DELETE FROM oneonone_topics WHERE id=? AND discussed_at IS NULL",
+            (topic_id,),
+        )
+        return cur.rowcount > 0
+
+
+def oneonone_summary() -> list[dict]:
+    """Active leaders with open-agenda counts and last-meeting dates, for
+    the Operator's 1:1 index."""
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            """
+            SELECT ld.id, ld.name, ld.role,
+                   COUNT(CASE WHEN t.id IS NOT NULL AND t.discussed_at IS NULL
+                              THEN 1 END) AS open,
+                   MAX(t.discussed_on) AS last_met
+            FROM leaders ld
+            LEFT JOIN oneonone_topics t ON t.leader_id = ld.id
+            WHERE ld.active = 1
+            GROUP BY ld.id
+            ORDER BY ld.name COLLATE NOCASE
+            """
+        ).fetchall()]
+
+
+def open_topic_count(leader_id: int | None) -> int:
+    """Open-agenda badge for the More card; 0 for the Operator session."""
+    if leader_id is None:
+        return 0
+    with closing(connect()) as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM oneonone_topics "
+            "WHERE leader_id=? AND discussed_at IS NULL",
+            (leader_id,),
+        ).fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Shout-outs (recognition)
+# ---------------------------------------------------------------------------
+
+def add_shoutout(member_name: str, value_tag: str | None, message: str,
+                 by: str, share: bool = False) -> int | None:
+    """Post recognition for a team member. Returns the new row id, or None
+    when name or message is empty. share stamps that a Slack cross-post was
+    REQUESTED (delivery is best-effort, handled by the route)."""
+    member_name = " ".join((member_name or "").split())
+    message = (message or "").strip()
+    if not member_name or not message:
+        return None
+    stamp = now_stamp()
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "INSERT INTO shoutouts (shout_date, member_name, value_tag, "
+            "message, author, created_at, shared_at) VALUES (?,?,?,?,?,?,?)",
+            (today_local(), member_name,
+             value_tag if value_tag in SHOUTOUT_VALUES else None,
+             message, by, stamp, stamp if share else None),
+        )
+        return cur.lastrowid
+
+
+def shoutout_feed(limit: int = 100, value_tag: str | None = None) -> list[dict]:
+    q = "SELECT * FROM shoutouts "
+    params: list = []
+    if value_tag:
+        q += "WHERE value_tag=? "
+        params.append(value_tag)
+    q += "ORDER BY shout_date DESC, id DESC LIMIT ?"
+    params.append(limit)
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+def recent_shoutouts(days: int = 7, limit: int = 3) -> list[dict]:
+    """The Today-screen strip — fresh praise only, so it ages off the
+    dashboard by itself."""
+    since = (date.fromisoformat(today_local())
+             - timedelta(days=days - 1)).isoformat()
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM shoutouts WHERE shout_date>=? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            (since, limit),
+        ).fetchall()]
+
+
+def mark_shoutout_delivered(shoutout_id: int) -> None:
+    """Called by the background poster once Slack answers ok:true — the
+    feed's '📣 Slack' badge renders from this, not from the request."""
+    with closing(connect()) as conn, conn:
+        conn.execute("UPDATE shoutouts SET delivered_at=? WHERE id=?",
+                     (now_stamp(), shoutout_id))
+
+
+def get_shoutout(shoutout_id: int) -> dict | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT * FROM shoutouts WHERE id=?", (shoutout_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_shoutout(shoutout_id: int) -> None:
+    with closing(connect()) as conn, conn:
+        conn.execute("DELETE FROM shoutouts WHERE id=?", (shoutout_id,))
+
+
+def shoutout_counts(days: int = 28) -> dict:
+    """{'receivers': [{'name','count'}], 'givers': [...]}, biggest first —
+    the Operator's recognition radar (who earns praise, who gives it)."""
+    since = (date.fromisoformat(today_local())
+             - timedelta(days=days - 1)).isoformat()
+    with closing(connect()) as conn:
+        receivers = [dict(r) for r in conn.execute(
+            "SELECT member_name AS name, COUNT(*) AS count FROM shoutouts "
+            "WHERE shout_date>=? GROUP BY member_name COLLATE NOCASE "
+            "ORDER BY count DESC, name",
+            (since,),
+        ).fetchall()]
+        givers = [dict(r) for r in conn.execute(
+            "SELECT author AS name, COUNT(*) AS count FROM shoutouts "
+            "WHERE shout_date>=? AND author IS NOT NULL "
+            "GROUP BY author COLLATE NOCASE ORDER BY count DESC, name",
+            (since,),
+        ).fetchall()]
+    return {"receivers": receivers, "givers": givers}
+
+
+# ---------------------------------------------------------------------------
 # Guest recovery
 # ---------------------------------------------------------------------------
 
@@ -1203,6 +1512,15 @@ def recovery_feed(resolved_limit: int = 50) \
             (resolved_limit,),
         ).fetchall()]
         conn.commit()
+    # How long each contacted guest has been expected back — measured from
+    # the contact, not from when the issue was first logged.
+    today = date.fromisoformat(today_local())
+    for r in awaiting:
+        try:
+            r["waiting_days"] = max(0, (today - date.fromisoformat(
+                _business_date(r["contacted_at"]))).days)
+        except ValueError:
+            r["waiting_days"] = 0
     return open_recs, awaiting, resolved
 
 
@@ -1319,8 +1637,11 @@ def roster(include_inactive: bool = False) -> list[dict]:
         return [dict(r) for r in conn.execute(q).fetchall()]
 
 
-def add_member(name: str, role: str = "team") -> bool:
-    """Add (or reactivate) a roster name. Returns False on empty name."""
+def add_member(name: str, role: str = "team", touch_existing: bool = True) -> bool:
+    """Add (or, by default, reactivate) a roster name. touch_existing=False
+    leaves an existing row completely alone — the shout-out path uses it so
+    praising a departed team member can't silently resurrect them onto the
+    active roster or clobber their role."""
     name = " ".join(name.split())
     if not name:
         return False
@@ -1329,10 +1650,11 @@ def add_member(name: str, role: str = "team") -> bool:
             "SELECT id FROM team_members WHERE name=? COLLATE NOCASE", (name,)
         ).fetchone()
         if existing:
-            conn.execute(
-                "UPDATE team_members SET active=1, role=? WHERE id=?",
-                (role, existing["id"]),
-            )
+            if touch_existing:
+                conn.execute(
+                    "UPDATE team_members SET active=1, role=? WHERE id=?",
+                    (role, existing["id"]),
+                )
         else:
             conn.execute(
                 "INSERT INTO team_members (name, role, active, created_at) VALUES (?,?,1,?)",
@@ -1491,8 +1813,19 @@ EXPORT_TABLES = [
     "checklist_runs", "checklist_run_items", "goals", "goal_updates",
     "positions", "lineup_assignments", "shift_notes", "announcements",
     "announcement_reads", "course_lessons", "lesson_progress", "leader_tasks",
-    "guest_recoveries",
+    "guest_recoveries", "oneonone_topics", "shoutouts",
 ]
+
+
+def session_epoch() -> str:
+    """Changes on every backup restore; leader sessions minted under an
+    older epoch are invalidated (a restore can renumber leader ids, and a
+    stale 30-day cookie must never re-attach to a different leader)."""
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key='session_epoch'"
+        ).fetchone()
+    return row["value"] if row else ""
 
 
 def export_json() -> str:
@@ -1589,6 +1922,12 @@ def import_json(raw: str) -> str | None:
                             "VALUES ('course_seeded', ?)", (now_stamp(),))
                     else:
                         conn.execute("DELETE FROM meta WHERE key='course_seeded'")
+                    # A restore may renumber leader ids; bump the session
+                    # epoch so every leader's 30-day cookie must re-login
+                    # instead of silently attaching to a different leader.
+                    conn.execute(
+                        "INSERT OR REPLACE INTO meta (key, value) "
+                        "VALUES ('session_epoch', ?)", (secrets.token_hex(8),))
             except _RestoreError as e:
                 return str(e)
     except sqlite3.Error as e:

@@ -110,8 +110,23 @@
 <div class="empty">No active goals — set one under the 🎯 tab.</div>
 {% endfor %}
 {% if goals | length > 3 %}
-<a class="pill small ghost" href="{{ url_for('shift.goals') }}">All {{ goals | length }} goals →</a>
+<a class="pill small ghost" href="{{ url_for('shift.goals') }}">All goals →</a>
 {% endif %}
+
+<div class="section-label">🌟 Shout-outs</div>
+<a class="card tap" href="{{ url_for('shift.shoutouts') }}">
+  {% for s in shoutouts %}
+  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px; align-items:baseline;">
+    <span>🌟</span>
+    <span style="flex:1;"><strong>{{ s.member_name }}</strong>
+      {% if s.value_tag %}<span class="note-cat cat-win">{{ SHOUTOUT_VALUE_LABELS.get(s.value_tag, s.value_tag) }}</span>{% endif %}
+      — {{ s.message | truncate(60) }}</span>
+  </div>
+  {% else %}
+  <div style="font-size:14px; color:var(--soft);">Catch someone doing it right — give this week's first shout-out.</div>
+  {% endfor %}
+  <div class="progress-note">Tap to recognize a team member</div>
+</a>
 
 <div class="section-label">Today's notes</div>
 {% for n in notes %}

@@ -22,10 +22,12 @@
     <span style="flex:1; font-weight:700; font-size:14px; {% if not l.active %}color:var(--soft); text-decoration:line-through;{% endif %}">
       {{ l.name }} <span style="font-weight:400; color:var(--soft);">· {{ l.role }}</span>
     </span>
+    {% if shift_is_operator %}
     <form method="post" action="{{ url_for('shift.admin_leader_reset_pin', leader_id=l.id) }}" class="inline-form">
       <input type="text" name="pin" inputmode="numeric" placeholder="New PIN" style="width:90px; padding:7px;">
       <button class="pill small" type="submit">Reset</button>
     </form>
+    {% endif %}
     {# Static confirm text on purpose — a leader name interpolated into the
        inline JS string would break (or run) on quotes in the name. #}
     <form method="post" action="{{ url_for('shift.admin_leader_role', leader_id=l.id) }}"
@@ -88,6 +90,9 @@ env var.</div>
   <div class="progress-note">Assign tasks to leaders and track completion.</div>
 </a>
 
+{% if shift_is_operator %}
+{# Backups hold every leader's private 1:1 content, and PIN resets allow
+   impersonation — Operator master login only. #}
 <div class="section-label">Backup &amp; restore</div>
 <div class="card">
   <a class="pill primary" href="{{ url_for('shift.admin_export') }}">⬇ Download backup (JSON)</a>
@@ -107,4 +112,5 @@ env var.</div>
     </div>
   </form>
 </div>
+{% endif %}
 {% endblock %}

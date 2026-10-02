@@ -1,0 +1,88 @@
+{% extends "shift/base.html" %}
+{% block title %}Shout-outs{% endblock %}
+{% block content %}
+<h1 class="page">Shout-outs</h1>
+<div class="sub">Catch someone doing it right — 30 seconds, big smile.</div>
+
+<datalist id="roster-names">
+  {% for n in suggest %}<option value="{{ n }}">{% endfor %}
+</datalist>
+
+<details class="compose" open>
+  <summary>+ Give a shout-out</summary>
+  <form method="post" action="{{ url_for('shift.shoutout_create') }}" class="card">
+    <label class="field" for="s-name">Who crushed it?</label>
+    <input type="text" id="s-name" name="member_name" list="roster-names"
+           autocomplete="off" required placeholder="Team member's name">
+    <label class="field" for="s-value">For</label>
+    <select id="s-value" name="value_tag">
+      <option value="">— just awesome —</option>
+      {% for v in SHOUTOUT_VALUES %}<option value="{{ v }}">{{ SHOUTOUT_VALUE_LABELS[v] }}</option>{% endfor %}
+    </select>
+    <label class="field" for="s-msg">What happened</label>
+    <textarea id="s-msg" name="message" required style="min-height:70px;"
+      placeholder="e.g. Ran a guest's forgotten sauces out to the parking lot in the rain"></textarea>
+    {% if share_on %}
+    <label style="display:flex; gap:8px; align-items:center; margin-top:10px; font-size:14px;">
+      <input type="checkbox" name="share" value="1" checked style="width:auto; accent-color:var(--cfa-red);">
+      📣 Share to the team Slack
+    </label>
+    {% else %}
+    <div class="sub">Slack cross-posting isn't configured — shout-outs stay in-app.</div>
+    {% endif %}
+    <div style="margin-top:12px;">
+      <button class="pill primary" type="submit">Post it 🌟</button>
+    </div>
+  </form>
+</details>
+
+<div class="chiprow">
+  <a class="pill small {{ 'on' if not value }}" href="{{ url_for('shift.shoutouts') }}">All</a>
+  {% for v in SHOUTOUT_VALUES %}
+  <a class="pill small {{ 'on' if value == v }}" href="{{ url_for('shift.shoutouts', value=v) }}">{{ SHOUTOUT_VALUE_SHORT[v] }}</a>
+  {% endfor %}
+</div>
+
+{% if counts and (counts.receivers or counts.givers) %}
+<details style="margin-bottom:10px;">
+  <summary style="cursor:pointer;" class="section-label">📊 Recognition radar — last 28 days</summary>
+  <div class="card" style="display:flex; gap:16px;">
+    <div style="flex:1;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:4px;">Most recognized</div>
+      {% for r in counts.receivers[:6] %}
+      <div style="display:flex; justify-content:space-between; font-size:13px; padding:2px 0;">
+        <span>{{ r.name }}</span><strong>{{ r.count }}</strong></div>
+      {% endfor %}
+    </div>
+    <div style="flex:1;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:4px;">Top recognizers</div>
+      {% for g in counts.givers[:6] %}
+      <div style="display:flex; justify-content:space-between; font-size:13px; padding:2px 0;">
+        <span>{{ g.name }}</span><strong>{{ g.count }}</strong></div>
+      {% endfor %}
+    </div>
+  </div>
+</details>
+{% endif %}
+
+{% for s in feed %}
+<div class="card" id="shout-{{ s.id }}">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+    <span style="font-size:15px; font-weight:700;">🌟 {{ s.member_name }}</span>
+    {% if s.value_tag %}<span class="note-cat cat-win">{{ SHOUTOUT_VALUE_LABELS.get(s.value_tag, s.value_tag) }}</span>{% endif %}
+  </div>
+  <div style="font-size:14px; margin-top:6px; white-space:pre-line;">{{ s.message }}</div>
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+    <div class="progress-note" style="margin:0;">{{ s.author }} · {{ s.created_at }}{{ ' · 📣 Slack' if s.delivered_at }}</div>
+    {% if shift_is_admin or s.author == shift_name %}
+    <form method="post" action="{{ url_for('shift.shoutout_delete', shoutout_id=s.id) }}"
+          onsubmit="return confirm('Delete this shout-out? (If it reached Slack, that post stays.)');">
+      <button class="pill small ghost" type="submit">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="empty">No shout-outs yet — be the first to catch someone being great.</div>
+{% endfor %}
+{% endblock %}

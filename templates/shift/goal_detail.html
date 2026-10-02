@@ -2,7 +2,7 @@
 {% block title %}{{ goal.title }}{% endblock %}
 {% block content %}
 <h1 class="page">{{ goal.title }}</h1>
-<div class="sub">{{ goal.period }}{% if goal.due_date %} · due {{ goal.due_date }}{% endif %} · set by {{ goal.created_by }} · {{ goal.status }}</div>
+<div class="sub">{{ goal.period }}{% if goal.due_date %} · due {{ goal.due_date }}{% endif %}{% if goal.leader_name %} · 👤 for {{ goal.leader_name }}{% endif %} · set by {{ goal.created_by }} · {{ goal.status }}</div>
 
 {% if goal.why %}
 <div class="card" style="font-size:14px; white-space:pre-line;">{{ goal.why }}</div>

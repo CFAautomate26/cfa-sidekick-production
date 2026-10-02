@@ -22,11 +22,13 @@ the leadership team:
 - **Announcements** — Operator/admin posts; every leader taps **Got it**, and
   admins see exactly who has acknowledged.
 - **History** — any past day's checklists (who did what), lineups, and notes.
-- **Leader to-dos** — admins assign tasks to individual leaders (title,
-  details, due date); each leader's open to-dos appear on their Today
-  screen the moment they sign in, they check them off from their to-do
-  page (stamped who/when), and admins see open/overdue counts per leader
-  with a full completed history. When a leader completes a task, the
+- **Leader to-dos** — any leader assigns tasks to any leader (title,
+  details, due date; stamped with who assigned it); each leader's open
+  to-dos appear on their Today screen the moment they sign in, they check
+  them off from their to-do page (stamped who/when; only the assignee or
+  an admin can complete or reopen a task, and only admins delete), and
+  everyone sees open/overdue counts per leader with a full completed
+  history. When a leader completes a task, the
   Operator gets a **Slack ping** in a private channel (posted by the same
   Slack bot as the coverage flow, with an @-mention so the phone buzzes) —
   see "To-do completion pings" below. An email copy via FormSubmit is
@@ -39,14 +41,36 @@ the leadership team:
   (remade on the spot, refund, free entrée card, dessert/drink, catering
   credit…), plus whether the guest expects a call-back. Open recoveries
   sit on everyone's Today screen until someone resolves them (stamped
-  who/when, with a note on how it was closed); admins also get a 28-day
-  what-keeps-going-wrong breakdown. A middle state covers the common case
+  who/when, with a note on how it was closed); every leader sees the
+  28-day what-keeps-going-wrong breakdown. A middle state covers the common case
   of reaching the guest before they've been made whole: mark it
   **"Contacted — coming back"** (or tick "already talked to the guest"
   when logging) and it moves to a *Waiting to come back* list — every
   leader sees who to expect and hands over the replacement, then taps
   "They came back ✓". Guest name + contact only — never
   payment/card info; injury or damage claims go to the Operator directly.
+- **1:1 meetings** — a shared agenda between the Operator and each leader.
+  Both add talking points between meetings ("ask about Saturday lineup");
+  during the 1-on-1 each topic is checked off (who/when stamped) with an
+  optional outcome note, unchecked topics carry forward automatically, and
+  past meetings form a browsable thread. Action items drop straight onto
+  the leader's to-do list, and the page gathers their personal goals
+  (goals can be tagged to a leader; a tagged goal is private to that
+  leader + the Operator everywhere — the Goals tab, its detail page, and
+  the Today dashboard all hide it from everyone else) and course
+  progress — a one-screen sit-down. **Privacy:
+  each agenda is visible to that leader and the Operator master login
+  only — not to other leaders, and not to admin-role leaders either.**
+  Growth and operational topics only; conduct/discipline/wage/health
+  conversations never go in this app.
+- **Shout-outs** — any leader recognizes a team member in ~20 seconds:
+  name (roster autosuggest), an optional value tag (2nd-mile service,
+  speed, food safety, teamwork, hospitality, cleanliness), and what
+  happened. Fresh shout-outs show on everyone's Today screen for a week,
+  and by default cross-post to the team Slack channel through the same
+  bot as the coverage flow (uncheck the box to keep one in-app; delivery
+  is best-effort). Admins get a 28-day recognition radar — most
+  recognized and top recognizers.
 - **Leadership development** — the Operator's course (from the "Leadership
   Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,
   Leading Organization) tracked per leader. Admins see every leader's
@@ -71,6 +95,7 @@ GroupMe and Slack bots keep running untouched.
 | `SHIFT_TZ` | No | Store timezone; defaults to `America/Toronto`. |
 | `SHIFT_NOTIFY_SLACK_CHANNEL` | For completion pings | Slack channel ID the to-do completion pings post to. The CFA Sidekick Slack bot (`SLACK_BOT_TOKEN`) must be invited to it. Empty (default) disables the pings. Production: `C0C51833JAH` (#sidekick-alerts). |
 | `SHIFT_NOTIFY_SLACK_MENTION` | No | Slack user ID to @-mention in each ping so it triggers a phone notification. Production: `U05R80802EB` (the Operator). |
+| `SHIFT_SHOUTOUT_SLACK_CHANNEL` | For shout-out cross-posts | Slack channel ID where shout-outs post for the whole team (the CFA Sidekick bot must be invited to it). Empty (default) keeps shout-outs in-app. Production: `C0682FXBY3T` (#recognition-). |
 | `SHIFT_NOTIFY_EMAIL` | No | Opt-in email copy of completion notifications, via FormSubmit. Off by default — FormSubmit sits behind Cloudflare bot protection that challenges server-side posts, so email delivery is unreliable; Slack is the supported path. |
 
 ### To-do completion pings (Slack)
@@ -122,6 +147,9 @@ scale.
 
 ## Backups
 
+- Backups and leader PIN resets are **Operator-master-login only** (not
+  admin-role leaders): the backup JSON contains every leader's private
+  1:1 content, and a PIN reset would allow logging in as another leader.
 - **Manual**: Admin → *Download backup (JSON)* — everything except PINs.
   Backups now include guest recovery rows (guest names + contact info), so
   treat exported files with the same care as the database itself.
@@ -131,14 +159,18 @@ scale.
   other `/scheduled` endpoints. `SCHEDULE_SECRET` must be explicitly set on
   the service (the endpoint answers 401 without it — there is deliberately
   no default), and since the backup carries guest recovery contact info,
-  only store it with services you'd trust with the database itself.
+  only store it with services you'd trust with the database itself —
+  from this release that includes every leader's 1:1 agendas and notes.
 - **PII aging**: phone/email on recoveries resolved more than 90 days ago
   are cleared automatically (next time the recovery page loads), so guest
   contact info doesn't accumulate forever in the DB or in new backups.
 - **Restore**: Admin → *Restore from a backup file* (tick the confirmation
   box). Leader accounts come back with **locked PINs** (PIN hashes never
   leave the database) — reset each leader's PIN in the admin page after a
-  restore. Course progress and everything else comes back as it was.
+  restore. Every leader's signed-in session is also invalidated (a restore
+  can renumber leader accounts, and a stale cookie must never attach to a
+  different leader). Don't restore a new backup onto a rolled-back old
+  build — the old code wouldn't restore the newer tables it deleted. Course progress and everything else comes back as it was.
 
 ## Security model (know its limits)
 

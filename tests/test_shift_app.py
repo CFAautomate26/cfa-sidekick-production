@@ -46,7 +46,7 @@ def test_bots_unaffected(client):
 def test_requires_login(client):
     for path in ["/shift/", "/shift/checklists", "/shift/lineup", "/shift/goals",
                  "/shift/notes", "/shift/roster", "/shift/history", "/shift/more",
-                 "/shift/recovery"]:
+                 "/shift/recovery", "/shift/oneonone", "/shift/shoutouts"]:
         resp = client.get(path)
         assert resp.status_code == 302, path
         assert "/shift/login" in resp.headers["Location"]
@@ -506,12 +506,15 @@ def test_development_mark_complete_flow(client):
 
 # --- leader to-dos ---------------------------------------------------------
 
-def test_todo_assign_is_admin_only(client):
+def test_todo_self_assign_allowed(client):
+    # Assignment is open to every leader (Operator's call) — including
+    # adding a task to your own list.
     make_leader(client)
     leader = shift_db.leaders()[0]
     login_leader(client)
     client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Self-assigned"})
-    assert not shift_db.tasks_for_leader(leader["id"])[0]  # nothing created
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+    assert task["title"] == "Self-assigned" and task["assigned_by"] == "Maya"
 
 
 def test_todo_full_flow(client):
@@ -542,30 +545,394 @@ def test_todo_full_flow(client):
     assert b"Deep clean fryer 2" not in client.get("/shift/").data
 
 
-def test_todo_other_leader_blocked(client):
+def test_any_leader_assigns_but_only_assignee_completes(client):
     make_leader(client)
     make_leader(client, name="Devon", pin="8888")
-    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
     devon = next(l for l in shift_db.leaders() if l["name"] == "Devon")
-    login_operator(client)
-    client.post(f"/shift/todo/{devon['id']}/assign", data={"title": "Devon's task"})
-    client.post("/shift/logout")
 
-    login_leader(client)  # Maya
-    resp = client.get("/shift/todo", follow_redirects=False)
-    assert resp.headers["Location"].endswith(f"/shift/todo/{maya['id']}")
-    assert client.get(f"/shift/todo/{devon['id']}", follow_redirects=False).status_code == 302
+    login_leader(client)  # Maya, a plain lead
+    # The index is open to every leader, with their own row marked
+    page = client.get("/shift/todo")
+    assert page.status_code == 200
+    assert b"Maya (you)" in page.data and b"Devon" in page.data
 
+    # A lead can open another leader's list and assign to them
+    assert client.get(f"/shift/todo/{devon['id']}").status_code == 200
+    client.post(f"/shift/todo/{devon['id']}/assign", data={"title": "From Maya"})
     task = shift_db.tasks_for_leader(devon["id"])[0][0]
+    assert task["assigned_by"] == "Maya"
+
+    # ...but completing stays with the assignee (or an admin)
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
     assert not shift_db.tasks_for_leader(devon["id"])[1]  # still open
 
+    # ...and delete stays admin-only
     client.post(f"/shift/todo/task/{task['id']}/delete")
-    assert shift_db.get_task(task["id"])  # lead can't delete
+    assert shift_db.get_task(task["id"])
+
+    # The assignee can complete it
+    client.post("/shift/logout")
+    login_leader(client, name="Devon", pin="8888")
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    assert shift_db.tasks_for_leader(devon["id"])[1][0]["completed_by"] == "Devon"
 
     # Bogus ids are graceful
     assert client.post("/shift/todo/task/999999/toggle",
                        data={"done": "1"}).status_code == 302
+
+
+# --- 1:1 agendas -------------------------------------------------------------
+
+def test_oneonone_private_to_leader_and_operator(client):
+    make_leader(client)                                   # Maya, lead
+    make_leader(client, name="Devon", pin="8888")
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    devon = next(l for l in shift_db.leaders() if l["name"] == "Devon")
+    dana = next(l for l in shift_db.leaders() if l["name"] == "Dana")
+
+    login_leader(client)                                  # Maya
+    assert client.get(f"/shift/oneonone/{maya['id']}").status_code == 200
+    assert client.get(f"/shift/oneonone/{devon['id']}").status_code == 302
+    resp = client.get("/shift/oneonone", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/{maya['id']}")
+    client.post("/shift/logout")
+
+    # An ADMIN leader still sees only their own agenda — the all-agendas
+    # view belongs to the Operator master login alone.
+    login_leader(client, name="Dana", pin="5555")
+    assert client.get(f"/shift/oneonone/{dana['id']}").status_code == 200
+    assert client.get(f"/shift/oneonone/{maya['id']}").status_code == 302
+    resp = client.get("/shift/oneonone", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/{dana['id']}")
+    client.post("/shift/logout")
+
+    login_operator(client)
+    assert client.get("/shift/oneonone").status_code == 200
+    assert client.get(f"/shift/oneonone/{maya['id']}").status_code == 200
+    assert client.get(f"/shift/oneonone/{devon['id']}").status_code == 200
+
+
+def test_oneonone_topic_routes(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    login_operator(client)
+    client.post(f"/shift/oneonone/{maya['id']}/topics",
+                data={"topic": "Catering van keys"})
+    client.post("/shift/logout")
+
+    login_leader(client)
+    client.post(f"/shift/oneonone/{maya['id']}/topics",
+                data={"topic": "Saturday staffing"})
+    page = client.get(f"/shift/oneonone/{maya['id']}").data
+    assert b"Catering van keys" in page and b"Saturday staffing" in page
+
+    # Maya can't remove the Operator's topic, only her own
+    topics = shift_db.oneonone_for_leader(maya["id"])[0]
+    operator_topic = next(t for t in topics if t["added_by"] == "Operator")
+    own_topic = next(t for t in topics if t["added_by"] == "Maya")
+    client.post(f"/shift/oneonone/topic/{operator_topic['id']}/delete")
+    assert shift_db.get_topic(operator_topic["id"])
+    client.post(f"/shift/oneonone/topic/{own_topic['id']}/delete")
+    assert shift_db.get_topic(own_topic["id"]) is None
+
+    # Discuss with a note during the meeting; race flashes; reopen
+    resp = client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
+                       data={"discussed": "1", "note": "fixed the lockbox"})
+    assert resp.headers["Location"].endswith("#agenda")   # keeps the meeting flowing
+    assert b"Past 1:1s" in client.get(f"/shift/oneonone/{maya['id']}").data
+    resp = client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
+                       data={"discussed": "1"}, follow_redirects=True)
+    assert b"Already marked discussed by Maya" in resp.data
+    client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
+                data={"discussed": "0"})
+    assert shift_db.get_topic(operator_topic["id"])["discussed_at"] is None
+
+    # Another leader can't touch Maya's topics at all
+    make_leader(client, name="Devon", pin="8888")
+    client.post("/shift/logout")
+    login_leader(client, name="Devon", pin="8888")
+    resp = client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
+                       data={"discussed": "1"})
+    assert resp.status_code == 302
+    assert shift_db.get_topic(operator_topic["id"])["discussed_at"] is None
+
+
+def test_oneonone_action_creates_todo(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    login_leader(client)
+    client.post(f"/shift/oneonone/{maya['id']}/action",
+                data={"title": "Shadow a breakfast open", "due_date": "2026-11-01"})
+    task = shift_db.tasks_for_leader(maya["id"])[0][0]
+    assert task["title"] == "Shadow a breakfast open"
+    assert task["assigned_by"] == "Maya" and task["due_date"] == "2026-11-01"
+    # ...and it shows on the 1:1 page's open to-dos card
+    assert b"Shadow a breakfast open" in client.get(f"/shift/oneonone/{maya['id']}").data
+
+
+def test_more_badge_shows_my_agenda_count(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    login_leader(client)
+    assert b"on your agenda" not in client.get("/shift/more").data
+    client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "A"})
+    client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "B"})
+    assert "● 2 on your agenda".encode() in client.get("/shift/more").data
+
+
+def test_goal_leader_tag_via_route(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    login_operator(client)
+    client.post("/shift/goals", data={"title": "Solo breakfast open",
+                                      "period": "monthly",
+                                      "leader_id": str(maya["id"])})
+    client.post("/shift/goals", data={"title": "Store goal", "period": "weekly",
+                                      "leader_id": "not-a-number"})
+    tagged = shift_db.goals_by_status("active", leader_id=maya["id"])
+    assert [g["title"] for g in tagged] == ["Solo breakfast open"]
+    # Tagged goals stay off the Today dashboard but show on the 1:1 page
+    assert b"Solo breakfast open" not in client.get("/shift/").data
+    assert b"Store goal" in client.get("/shift/").data
+    assert b"Solo breakfast open" in client.get(f"/shift/oneonone/{maya['id']}").data
+
+
+def test_tagged_goals_private_to_leader_and_operator(client):
+    make_leader(client)
+    make_leader(client, name="Devon", pin="8888")
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    login_operator(client)
+    client.post("/shift/goals", data={"title": "Confidence on window",
+                                      "period": "monthly",
+                                      "leader_id": str(maya["id"])})
+    gid = shift_db.goals_by_status("active", leader_id=maya["id"])[0]["id"]
+    client.post("/shift/logout")
+
+    # Another lead — and even an admin-role leader — can't see or touch it
+    for name, pin in [("Devon", "8888"), ("Dana", "5555")]:
+        login_leader(client, name=name, pin=pin)
+        assert b"Confidence on window" not in client.get("/shift/goals").data
+        assert client.get(f"/shift/goals/{gid}",
+                          follow_redirects=False).status_code == 302
+        client.post(f"/shift/goals/{gid}/status", data={"status": "archived"})
+        assert shift_db.goal_with_updates(gid)[0]["status"] == "active"
+        client.post(f"/shift/goals/{gid}/update", data={"note": "snooping"})
+        assert not shift_db.goal_with_updates(gid)[1]
+        # A lead can't tag a goal to someone else — it lands store-wide
+        client.post("/shift/goals", data={"title": f"Planted by {name}",
+                                          "period": "weekly",
+                                          "leader_id": str(maya["id"])})
+        planted = [g for g in shift_db.goals_by_status("active")
+                   if g["title"] == f"Planted by {name}"]
+        assert planted[0]["leader_id"] is None
+        client.post("/shift/logout")
+
+    # Maya herself sees and updates it
+    login_leader(client)
+    assert b"Confidence on window" in client.get("/shift/goals").data
+    assert client.get(f"/shift/goals/{gid}").status_code == 200
+    client.post(f"/shift/goals/{gid}/update", data={"note": "getting there"})
+    assert shift_db.goal_with_updates(gid)[1][0]["note"] == "getting there"
+
+
+def test_backups_and_pin_resets_are_operator_only(client):
+    make_leader(client)
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    login_operator(client)
+    client.post(f"/shift/oneonone/{maya['id']}/topics",
+                data={"topic": "private growth topic"})
+    client.post("/shift/logout")
+
+    # Dana is an admin, but backups carry 1:1 content and PIN resets allow
+    # impersonation — both bounce her to the admin page.
+    login_leader(client, name="Dana", pin="5555")
+    assert client.get("/shift/admin").status_code == 200
+    resp = client.get("/shift/admin/export", follow_redirects=False)
+    assert resp.status_code == 302
+    resp = client.post("/shift/admin/import", data={"confirm": "1"},
+                       follow_redirects=False)
+    assert resp.status_code == 302
+    client.post(f"/shift/admin/leaders/{maya['id']}/reset-pin",
+                data={"pin": "9876"})
+    client.post("/shift/logout")
+    assert login_leader(client).status_code == 302     # Maya's PIN unchanged
+    client.post("/shift/logout")
+
+    login_operator(client)
+    assert b"private growth topic" in client.get("/shift/admin/export").data
+
+
+def test_restore_invalidates_leader_sessions(client):
+    make_leader(client)
+    login_operator(client)
+    raw = client.get("/shift/admin/export").data
+    client.post("/shift/logout")
+
+    login_leader(client)
+    assert client.get("/shift/").status_code == 200
+    assert shift_db.import_json(raw.decode()) is None
+    # Her 30-day cookie predates the restore: next request re-logs-in
+    resp = client.get("/shift/", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "/shift/login" in resp.headers["Location"]
+
+
+# --- shout-outs ---------------------------------------------------------------
+
+@pytest.fixture()
+def slack_shares(monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "C123TEAM")
+    calls = []
+    monkeypatch.setattr("shift_app.send_shoutout_slack",
+                        lambda shoutout: calls.append(shoutout))
+    return calls
+
+
+def test_shoutout_posts_and_crossposts(client, slack_shares):
+    make_leader(client)
+    login_leader(client)
+    resp = client.post("/shift/shoutouts", data={
+        "member_name": "Avery P", "value_tag": "speed",
+        "message": "Flew through the lunch rush", "share": "1",
+    })
+    assert resp.status_code == 302 and "#shout-" in resp.headers["Location"]
+    assert len(slack_shares) == 1
+    assert slack_shares[0]["member_name"] == "Avery P"
+    shout = shift_db.shoutout_feed()[0]
+    assert shout["shared_at"] and shout["author"] == "Maya"
+    # The roster learned the new name for next time's autosuggest
+    assert any(m["name"] == "Avery P" for m in shift_db.roster())
+    # Feed + Today strip render it
+    assert b"Flew through the lunch rush" in client.get("/shift/shoutouts").data
+    assert b"Avery P" in client.get("/shift/").data
+
+
+def test_shoutout_without_checkbox_stays_in_app(client, slack_shares):
+    login_operator(client)
+    client.post("/shift/shoutouts", data={
+        "member_name": "Sam", "message": "Covered a double",
+    })
+    assert not slack_shares
+    assert shift_db.shoutout_feed()[0]["shared_at"] is None
+
+
+def test_shoutout_unconfigured_slack_is_honest(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "")
+    login_operator(client)
+    resp = client.post("/shift/shoutouts", data={
+        "member_name": "Sam", "message": "Great hustle", "share": "1",
+    }, follow_redirects=True)
+    assert b"Posted" in resp.data
+    assert shift_db.shoutout_feed()[0]["shared_at"] is None   # never stamped
+
+
+def test_shoutout_validation_and_delete_rules(client, slack_shares):
+    make_leader(client)
+    make_leader(client, name="Devon", pin="8888")
+    login_leader(client)
+    resp = client.post("/shift/shoutouts", data={"member_name": "  ",
+                                                 "message": "hi"},
+                       follow_redirects=True)
+    assert b"needs a name and a message" in resp.data
+    client.post("/shift/shoutouts", data={"member_name": "Avery",
+                                          "message": "Nice save"})
+    shout = shift_db.shoutout_feed()[0]
+    client.post("/shift/logout")
+
+    login_leader(client, name="Devon", pin="8888")
+    client.post(f"/shift/shoutouts/{shout['id']}/delete")
+    assert shift_db.get_shoutout(shout["id"])          # not Devon's to delete
+    client.post("/shift/logout")
+    login_operator(client)
+    client.post(f"/shift/shoutouts/{shout['id']}/delete")
+    assert shift_db.get_shoutout(shout["id"]) is None
+
+
+def test_shoutout_slack_payload(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "C123TEAM")
+    posted = {}
+
+    def fake_post(url, **kwargs):
+        posted["url"] = url
+        posted.update(kwargs)
+
+        class R:
+            status_code = 200
+            text = '{"ok": true}'
+
+            def json(self):
+                return {"ok": True}
+        return R()
+
+    monkeypatch.setattr(shift_app.requests, "post", fake_post)
+    sid = shift_db.add_shoutout("Avery <&> P", "speed",
+                                "Tell <!channel> nothing", "Maya", share=True)
+    shift_app.send_shoutout_slack(shift_db.get_shoutout(sid))
+    assert posted["url"] == "https://slack.com/api/chat.postMessage"
+    assert posted["headers"]["Authorization"] == "Bearer xoxb-test"
+    body = posted["json"]
+    assert body["channel"] == "C123TEAM"
+    assert "SHOUT-OUT: Avery &lt;&amp;&gt; P" in body["text"]
+    assert "⚡ Speed of service" in body["text"]
+    assert "<!channel>" not in body["text"]            # mrkdwn injection escaped
+    # ok:true marks real delivery — that's what the 📣 badge renders from
+    assert shift_db.get_shoutout(sid)["delivered_at"]
+
+
+def test_shoutout_badge_honest_on_failed_delivery(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "C123TEAM")
+
+    def fake_post(url, **kwargs):
+        class R:
+            status_code = 200
+            text = '{"ok": false, "error": "not_in_channel"}'
+
+            def json(self):
+                return {"ok": False, "error": "not_in_channel"}
+        return R()
+
+    monkeypatch.setattr(shift_app.requests, "post", fake_post)
+    login_operator(client)
+    client.post("/shift/shoutouts", data={"member_name": "Sam",
+                                          "message": "Clutch", "share": "1"})
+    shout = shift_db.shoutout_feed()[0]
+    assert shout["shared_at"] and shout["delivered_at"] is None
+    assert "📣 Slack".encode() not in client.get("/shift/shoutouts").data
+
+
+def test_shoutout_never_resurrects_departed_member(client, slack_shares):
+    login_operator(client)
+    shift_db.add_member("Sam Kennedy", role="leader")
+    sam = next(m for m in shift_db.roster() if m["name"] == "Sam Kennedy")
+    shift_db.set_member_active(sam["id"], False)
+    client.post("/shift/shoutouts", data={
+        "member_name": "Sam Kennedy", "message": "Thanks for the years!",
+    })
+    kept = next(m for m in shift_db.roster(include_inactive=True)
+                if m["name"] == "Sam Kennedy")
+    assert kept["active"] == 0 and kept["role"] == "leader"
+    assert shift_db.shoutout_feed()[0]["member_name"] == "Sam Kennedy"
+
+
+def test_shoutout_slack_failure_never_breaks_post(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "C123TEAM")
+
+    def boom(*a, **k):
+        raise RuntimeError("db hiccup")
+    monkeypatch.setattr(shift_db, "get_shoutout", boom)  # prepare path blows up
+    login_operator(client)
+    resp = client.post("/shift/shoutouts", data={
+        "member_name": "Sam", "message": "Clutch", "share": "1",
+    })
+    assert resp.status_code == 302                     # the post still lands
+    assert shift_db.shoutout_feed()[0]["member_name"] == "Sam"
 
 
 # --- guest recovery ---------------------------------------------------------
@@ -788,14 +1155,11 @@ def test_demote_last_admin_blocked_without_pin(client, monkeypatch):
     assert shift_db.get_leader(dana["id"])["role"] == "lead"
 
 
-def test_recovery_admin_sees_issue_radar(client):
+def test_recovery_issue_radar_visible_to_all_leaders(client):
     make_leader(client)
     login_leader(client)
     client.post("/shift/recovery", data={"guest_name": "G1",
                                          "issue": "order-error", "remedy": "refund"})
-    assert b"Last 28 days" not in client.get("/shift/recovery").data
-    client.post("/shift/logout")
-    login_operator(client)
     assert b"Last 28 days" in client.get("/shift/recovery").data
 
 

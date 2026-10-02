@@ -1,0 +1,19 @@
+{% extends "shift/base.html" %}
+{% block title %}1:1 meetings{% endblock %}
+{% block content %}
+<h1 class="page">1:1 meetings</h1>
+<div class="sub">Shared agendas — add topics all week, check them off together.
+Each agenda is between that leader and you.</div>
+
+{% for l in leaders %}
+<a class="card tap" href="{{ url_for('shift.oneonone_leader', leader_id=l.id) }}">
+  <h2>{{ l.name }} <span style="font-weight:400; color:var(--soft);">· {{ l.role }}</span>
+    {% if l.open %}<span class="critical-flag">● {{ l.open }} waiting</span>{% endif %}</h2>
+  <div class="progress-note">
+    {% if l.last_met %}last 1:1 {{ l.last_met }}{% else %}no 1:1 logged yet{% endif %}
+  </div>
+</a>
+{% else %}
+<div class="empty">No leader logins yet — add your leaders under Admin first.</div>
+{% endfor %}
+{% endblock %}

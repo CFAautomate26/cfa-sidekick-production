@@ -541,6 +541,178 @@ def test_course_progress_survives_export_import(isolated_db):
     assert shift_db.leader_course_summary()[0]["done"] == 1
 
 
+# --- 1:1 agendas -----------------------------------------------------------
+
+def test_oneonone_topic_lifecycle(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]
+
+    assert not shift_db.add_oneonone_topic(maya["id"], "   ", "Maya")
+    assert not shift_db.add_oneonone_topic(999999, "Ghost", "Maya")
+    assert shift_db.add_oneonone_topic(maya["id"], "  Saturday   staffing ", "Maya")
+    assert shift_db.add_oneonone_topic(maya["id"], "Catering van", "Operator")
+
+    agenda, history = shift_db.oneonone_for_leader(maya["id"])
+    assert [t["topic"] for t in agenda] == ["Saturday staffing", "Catering van"]
+    assert not history and not agenda[0]["carried"]
+
+    # Discuss one with a note: stamps who/when/date, grouped into history
+    t1 = agenda[0]
+    assert shift_db.set_topic_discussed(t1["id"], True, " hire two ", "Operator")
+    agenda, history = shift_db.oneonone_for_leader(maya["id"])
+    assert [t["topic"] for t in agenda] == ["Catering van"]
+    assert history[0]["date"] == shift_db.today_local()
+    assert history[0]["topics"][0]["outcome_note"] == "hire two"
+    assert history[0]["topics"][0]["discussed_by"] == "Operator"
+    # Added the same business day as the meeting → NOT carried (the badge
+    # means "survived a previous 1:1", not "existed on meeting day")...
+    assert not agenda[0]["carried"]
+    # ...but a topic created before the last meeting day is carried.
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE oneonone_topics SET created_at=? WHERE id=?",
+                     ("2020-01-01 10:00", agenda[0]["id"]))
+    agenda, _ = shift_db.oneonone_for_leader(maya["id"])
+    assert agenda[0]["carried"]
+
+    # Guarded flip: a second discuss is a no-op keeping the first stamp
+    assert not shift_db.set_topic_discussed(t1["id"], True, "other", "Maya")
+    assert shift_db.get_topic(t1["id"])["discussed_by"] == "Operator"
+
+    # Reopen clears all four stamp columns; reopen-again is a no-op
+    assert shift_db.set_topic_discussed(t1["id"], False, "", "Maya")
+    fresh = shift_db.get_topic(t1["id"])
+    assert fresh["discussed_at"] is None and fresh["discussed_by"] is None \
+        and fresh["discussed_on"] is None and fresh["outcome_note"] is None
+    assert not shift_db.set_topic_discussed(t1["id"], False, "", "Maya")
+
+    # Delete is SQL-guarded to undiscussed topics
+    assert shift_db.set_topic_discussed(t1["id"], True, "", "Operator")
+    assert not shift_db.delete_topic(t1["id"])          # history now
+    t2 = shift_db.oneonone_for_leader(maya["id"])[0][0]
+    assert shift_db.delete_topic(t2["id"])
+    assert shift_db.get_topic(t2["id"]) is None
+
+
+def test_oneonone_summary_and_badge(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    shift_db.add_leader("Devon", "8888")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    shift_db.add_oneonone_topic(maya["id"], "Topic A", "Maya")
+    shift_db.add_oneonone_topic(maya["id"], "Topic B", "Operator")
+
+    rows = {r["name"]: r for r in shift_db.oneonone_summary()}
+    assert rows["Maya"]["open"] == 2 and rows["Maya"]["last_met"] is None
+    assert rows["Devon"]["open"] == 0                   # LEFT-JOIN null row safe
+    assert shift_db.open_topic_count(maya["id"]) == 2
+    assert shift_db.open_topic_count(None) == 0         # Operator session
+
+
+def test_goals_leader_tag_filters(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]
+    store = shift_db.create_goal("DT under 4", "", "DT", "sec", 240, "down",
+                                 "weekly", "", "Operator")
+    personal = shift_db.create_goal("Solo breakfast open", "", "", "", None,
+                                    "up", "monthly", "", "Operator",
+                                    leader_id=maya["id"])
+    bogus = shift_db.create_goal("Ghost-tagged", "", "", "", None, "up",
+                                 "weekly", "", "Operator", leader_id=999999)
+
+    all_ids = {g["id"] for g in shift_db.goals_by_status("active")}
+    assert all_ids == {store, personal, bogus}
+    store_ids = {g["id"] for g in shift_db.goals_by_status("active", store_only=True)}
+    assert store_ids == {store, bogus}                  # bogus tag stored as NULL
+    maya_goals = shift_db.goals_by_status("active", leader_id=maya["id"])
+    assert [g["id"] for g in maya_goals] == [personal]
+    assert maya_goals[0]["leader_name"] == "Maya"
+    g, _ = shift_db.goal_with_updates(personal)
+    assert g["leader_name"] == "Maya"
+
+
+def test_migration_adds_goals_leader_id(tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "old.db"))
+    conn = sqlite3.connect(shift_db.DB_PATH)
+    conn.executescript("""
+        CREATE TABLE goals (
+            id INTEGER PRIMARY KEY, title TEXT NOT NULL, why TEXT,
+            metric TEXT, unit TEXT, target_value REAL,
+            direction TEXT NOT NULL DEFAULT 'up',
+            period TEXT NOT NULL DEFAULT 'weekly', due_date TEXT,
+            status TEXT NOT NULL DEFAULT 'active', created_by TEXT,
+            created_at TEXT NOT NULL);
+        INSERT INTO goals (title, created_at) VALUES ('Pre-upgrade', '2026-10-01 09:00');
+    """)
+    conn.commit()
+    conn.close()
+    shift_db.init_db()
+    shift_db.init_db()   # idempotent
+    goals = shift_db.goals_by_status("active")
+    assert goals[0]["title"] == "Pre-upgrade" and goals[0]["leader_id"] is None
+
+
+def test_oneonone_and_shoutouts_survive_export_import(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]
+    shift_db.add_oneonone_topic(maya["id"], "Carry me", "Maya")
+    gid = shift_db.create_goal("Personal", "", "", "", None, "up", "weekly",
+                               "", "Operator", leader_id=maya["id"])
+    sid = shift_db.add_shoutout("Avery", "speed", "Flew through the rush",
+                                "Maya", share=True)
+    raw = shift_db.export_json()
+
+    shift_db.delete_topic(shift_db.oneonone_for_leader(maya["id"])[0][0]["id"])
+    shift_db.delete_shoutout(sid)
+    shift_db.set_goal_status(gid, "archived")
+    # The restore's DELETE FROM leaders must not abort on the tagged goal
+    assert shift_db.import_json(raw) is None
+
+    agenda, _ = shift_db.oneonone_for_leader(maya["id"])
+    assert agenda[0]["topic"] == "Carry me"
+    assert shift_db.shoutout_feed()[0]["member_name"] == "Avery"
+    assert shift_db.goals_by_status("active",
+                                    leader_id=maya["id"])[0]["id"] == gid
+
+
+# --- shout-outs --------------------------------------------------------------
+
+def test_shoutout_lifecycle(isolated_db):
+    assert shift_db.add_shoutout("  ", "speed", "msg", "Maya") is None
+    assert shift_db.add_shoutout("Avery", "speed", "  ", "Maya") is None
+    sid = shift_db.add_shoutout(" Avery  P ", "not-a-tag", " Great save ",
+                                "Maya", share=True)
+    rec = shift_db.get_shoutout(sid)
+    assert rec["member_name"] == "Avery P" and rec["message"] == "Great save"
+    assert rec["value_tag"] is None                     # bad tag coerced
+    assert rec["shared_at"]
+
+    quiet = shift_db.add_shoutout("Sam", "teamwork", "Covered a break", "Neha")
+    assert shift_db.get_shoutout(quiet)["shared_at"] is None
+
+    assert [s["id"] for s in shift_db.shoutout_feed()] == [quiet, sid]
+    assert [s["id"] for s in shift_db.shoutout_feed(value_tag="teamwork")] == [quiet]
+    assert len(shift_db.recent_shoutouts(limit=1)) == 1
+
+    counts = shift_db.shoutout_counts()
+    assert {"name": "Avery P", "count": 1} in counts["receivers"]
+    assert {"name": "Maya", "count": 1} in counts["givers"]
+
+    shift_db.delete_shoutout(sid)
+    assert shift_db.get_shoutout(sid) is None
+
+
+def test_recent_shoutouts_window(isolated_db):
+    from datetime import date, timedelta
+    old = shift_db.add_shoutout("Old", None, "ancient praise", "Maya")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE shoutouts SET shout_date=? WHERE id=?",
+                     ((date.fromisoformat(shift_db.today_local())
+                       - timedelta(days=7)).isoformat(), old))
+    fresh = shift_db.add_shoutout("Fresh", None, "today praise", "Maya")
+    recent = shift_db.recent_shoutouts(days=7)
+    assert [s["id"] for s in recent] == [fresh]
+
+
 # --- guest recovery --------------------------------------------------------
 
 def test_recovery_lifecycle(isolated_db):
