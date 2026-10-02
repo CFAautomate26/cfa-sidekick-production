@@ -45,6 +45,15 @@ try:
     from shift_app import shift_bp
 
     shift_db.init_db()
+    try:
+        import shift_roster_seed
+
+        seeded = shift_db.apply_roster_snapshot(shift_roster_seed.PEOPLE)
+        if seeded:
+            print(f"Shift roster seeded from the Slack #general snapshot: "
+                  f"added {len(seeded['added'])}")
+    except Exception as e:  # a seed problem must never take down /shift
+        print(f"WARNING: shift roster snapshot seed failed: {e!r}")
     app.register_blueprint(shift_bp)
     print("Shift leading app registered at /shift")
 except Exception as e:  # pragma: no cover - defensive boot guard

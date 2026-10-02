@@ -16,7 +16,7 @@
 <a class="card tap" href="{{ url_for('shift.oneonone') }}">
   <h2>🤝 1:1 meetings
     {% if my_open_topics %}<span class="critical-flag">● {{ my_open_topics }} on your agenda</span>{% endif %}</h2>
-  <div class="progress-note">{{ 'Leader agendas + private 1:1s with anyone on the roster' if shift_is_operator else 'Your shared agenda with the Operator' }}</div>
+  <div class="progress-note">{{ 'Leader agendas + 1:1s with anyone on the roster' if shift_is_operator else 'Your agenda with the Operator + 1:1s with your team' }}</div>
 </a>
 <a class="card tap" href="{{ url_for('shift.recovery') }}">
   <h2>💛 Guest recovery

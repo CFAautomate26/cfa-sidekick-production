@@ -733,8 +733,14 @@ def test_member_topics_fk_is_cascade(isolated_db):
     with shift_db.closing(shift_db.connect()) as conn:
         fks = [dict(r) for r in conn.execute(
             "PRAGMA foreign_key_list(oneonone_member_topics)")]
-    assert len(fks) == 1
-    assert fks[0]["table"] == "team_members" and fks[0]["on_delete"] == "CASCADE"
+    by_col = {fk["from"]: fk for fk in fks}
+    assert set(by_col) == {"member_id", "holder_leader_id"}
+    assert by_col["member_id"]["table"] == "team_members"
+    assert by_col["member_id"]["on_delete"] == "CASCADE"
+    # SET NULL, not NO ACTION: the restore's DELETE FROM leaders must not
+    # abort while leader-held threads exist.
+    assert by_col["holder_leader_id"]["table"] == "leaders"
+    assert by_col["holder_leader_id"]["on_delete"] == "SET NULL"
 
 
 def test_member_oneonone_lifecycle(isolated_db):
@@ -893,6 +899,73 @@ def test_old_backup_without_member_section_restores(isolated_db):
     assert shift_db.oneonone_for_member(_member_id("Avery")) == ([], [])
 
 
+def test_migration_adds_member_topic_holder(tmp_path, monkeypatch):
+    monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "pre_holder.db"))
+    shift_db.init_db()
+    shift_db.add_member("Avery")
+    av = _member_id("Avery")
+    shift_db.add_member_topic(av, "Operator's existing note", "Operator")
+    # Simulate the production table from before leader-held threads
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.executescript("""
+            DROP INDEX IF EXISTS idx_oneonone_member_holder;
+            CREATE TABLE omt_old AS SELECT id, member_id, topic, added_by,
+                created_at, discussed_at, discussed_by, discussed_on, outcome_note
+                FROM oneonone_member_topics;
+            DROP TABLE oneonone_member_topics;
+            ALTER TABLE omt_old RENAME TO oneonone_member_topics;
+        """)
+    shift_db.init_db()
+    shift_db.init_db()   # idempotent
+    agenda, _ = shift_db.oneonone_for_member(av)          # still the Operator's
+    assert [t["topic"] for t in agenda] == ["Operator's existing note"]
+    assert agenda[0]["holder_leader_id"] is None
+    with shift_db.closing(shift_db.connect()) as conn:
+        idx = [r["name"] for r in conn.execute(
+            "PRAGMA index_list(oneonone_member_topics)")]
+    assert "idx_oneonone_member_holder" in idx
+
+
+def test_member_threads_isolated_per_holder(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    shift_db.add_leader("Devon", "8888")
+    maya, devon = (next(l for l in shift_db.leaders() if l["name"] == n)
+                   for n in ("Maya", "Devon"))
+    shift_db.add_member("Avery")
+    av = _member_id("Avery")
+    assert shift_db.add_member_topic(av, "Op topic", "Operator")
+    assert shift_db.add_member_topic(av, "Maya topic", "Maya", holder_id=maya["id"])
+    assert not shift_db.add_member_topic(av, "Ghost", "X", holder_id=999999)
+
+    assert [t["topic"] for t in shift_db.oneonone_for_member(av)[0]] == ["Op topic"]
+    assert [t["topic"] for t in shift_db.oneonone_for_member(av, maya["id"])[0]] == ["Maya topic"]
+    assert shift_db.oneonone_for_member(av, devon["id"]) == ([], [])
+
+    op_idx = shift_db.member_oneonone_index()
+    maya_idx = shift_db.member_oneonone_index(holder_id=maya["id"])
+    devon_idx = shift_db.member_oneonone_index(holder_id=devon["id"])
+    assert op_idx["threads"][0]["open"] == 1
+    assert maya_idx["threads"][0]["open"] == 1
+    assert devon_idx["threads"] == [] and len(devon_idx["everyone"]) == 1
+
+    assert shift_db.open_member_topic_count(maya["id"]) == 1
+    assert shift_db.open_member_topic_count(devon["id"]) == 0
+    assert shift_db.open_member_topic_count(None) == 0
+    overview = shift_db.leader_member_threads()
+    assert [(t["member_name"], t["holder_name"], t["open"]) for t in overview] == [
+        ("Avery", "Maya", 1)]                               # Operator's own excluded
+
+    # Restore with leader-held threads: DELETE FROM leaders must not abort
+    raw = shift_db.export_json()
+    assert shift_db.import_json(raw) is None
+    assert [t["topic"] for t in shift_db.oneonone_for_member(av, maya["id"])[0]] == ["Maya topic"]
+    payload = json.loads(raw)
+    for row in payload["oneonone_member_topics"]:
+        del row["holder_leader_id"]                         # pre-release backup
+    assert shift_db.import_json(json.dumps(payload)) is None
+    assert len(shift_db.oneonone_for_member(av)[0]) == 2    # all back to the Operator
+
+
 # --- roster pull from Slack #general -----------------------------------------
 
 def _slack_person(uid, name, display=""):
@@ -1007,6 +1080,45 @@ def test_slack_ids_survive_export_import(isolated_db):
         del row["slack_id"]                                 # pre-release backup
     assert shift_db.import_json(json.dumps(payload)) is None
     assert shift_db.roster()[0]["slack_id"] is None
+
+
+def test_roster_snapshot_seed(isolated_db):
+    import shift_roster_seed
+    for i, n in enumerate(["Aron", "Avery", "Chloe", "Grace", "Jubina", "Neha",
+                           "Pru", "Riya", "Samira", "Sammy", "Sarath"]):
+        shift_db.add_leader(n, f"{4000 + i}")
+    shift_db.add_member("Calla")                          # typed in a lineup
+    out = shift_db.apply_roster_snapshot(shift_roster_seed.PEOPLE)
+    assert len(out["leaders"]) == 11 and not out["ambiguous"]
+    assert len(out["added"]) == 26 and out["linked"] == ["Calla"]
+    team = [p for p in shift_db.oneonone_people() if p["kind"] == "member"]
+    assert len(team) == 27                                # the whole team, once
+    assert not any("Huesser" in p["name"] for p in team)  # Operator left out
+    # Seed, not a live pull: no "updated" stamp, no daily auto-refresh
+    assert shift_db.slack_roster_synced_at() is None
+    assert not shift_db.claim_slack_roster_autosync()
+    # Once only — removing someone afterwards sticks
+    shift_db.set_member_active(_member_id("Mason"), False)
+    assert shift_db.apply_roster_snapshot(shift_roster_seed.PEOPLE) is None
+    assert not next(r for r in shift_db.roster(include_inactive=True)
+                    if r["name"] == "Mason")["active"]
+
+
+def test_roster_snapshot_skipped_after_live_pull(isolated_db):
+    import shift_roster_seed
+    shift_db.sync_roster_from_slack([_slack_person("U1", "Avery Sharpe")])
+    assert shift_db.apply_roster_snapshot(shift_roster_seed.PEOPLE) is None
+    assert [r["name"] for r in shift_db.roster()] == ["Avery Sharpe"]
+
+
+def test_roster_snapshot_data_is_names_only():
+    import shift_roster_seed
+    ids = [p["slack_id"] for p in shift_roster_seed.PEOPLE]
+    assert len(ids) == len(set(ids))
+    for p in shift_roster_seed.PEOPLE:
+        assert set(p) == {"slack_id", "name", "display"}
+        assert "@" not in p["name"] + p["display"]          # never emails
+        assert p["name"] == p["name"].strip() and p["name"]
 
 
 # --- shout-outs --------------------------------------------------------------

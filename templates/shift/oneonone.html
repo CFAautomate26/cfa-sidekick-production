@@ -2,8 +2,8 @@
 {% block title %}1:1 meetings{% endblock %}
 {% block content %}
 <h1 class="page">1:1 meetings</h1>
-<div class="sub">Shared agendas with your leaders, plus private 1:1s with
-anyone on the team roster.</div>
+<div class="sub">Shared agendas with your leaders, private 1:1s with anyone
+on the team roster, and every leader's 1:1s with the team.</div>
 
 {% set picker_leaders = people | selectattr('kind', 'equalto', 'leader') | list %}
 {% set picker_team = people | selectattr('kind', 'equalto', 'member') | list %}
@@ -57,7 +57,7 @@ window.addEventListener('pageshow', function () {
 <div class="empty">No leader logins yet — add your leaders under Admin first.</div>
 {% endfor %}
 
-<div class="section-label" id="team">🔒 Team members · only you see these</div>
+<div class="section-label" id="team">🔒 Your team 1:1s · only you see these</div>
 {% if team.threads %}
 <div class="card" style="padding: 4px 14px;">
   {% for m in team.threads %}
@@ -108,7 +108,26 @@ window.addEventListener('pageshow', function () {
 </details>
 {% endif %}
 
-<div class="sub">Team-member 1:1s are visible to you (the Operator) only —
-team members have no login, and leaders (admins included) never see them.
-Growth &amp; coaching only.</div>
+<div class="section-label" id="leader-team">Leaders' 1:1s with the team</div>
+{% if leader_threads %}
+<div class="card" style="padding: 4px 14px;">
+  {% for t in leader_threads %}
+  <a href="{{ url_for('shift.oneonone_member', member_id=t.member_id, holder_id=t.holder_id) }}"
+     style="display:block; padding:10px 0; text-decoration:none; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
+    <div style="font-weight:700; font-size:15px;">{{ t.member_name }}
+      <span style="font-weight:400; color:var(--soft);">· with {{ t.holder_name }}</span>
+      {% if t.open %}<span class="critical-flag">● {{ t.open }} waiting</span>{% endif %}</div>
+    <div class="progress-note" style="margin-top:2px;">
+      {% if t.last_met %}last 1:1 {{ t.last_met }}{% else %}no 1:1 logged yet{% endif %}
+      {% if not t.member_active %}· not on the active roster{% endif %}</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No leader has started a 1:1 with a team member yet.</div>
+{% endif %}
+
+<div class="sub">Your own team-member 1:1s are visible to you only. Each
+leader's 1:1s with the team are visible to that leader and you — never to
+other leaders (admins included). Growth &amp; coaching only.</div>
 {% endblock %}

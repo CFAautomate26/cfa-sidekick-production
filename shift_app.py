@@ -646,7 +646,8 @@ def more():
         "shift/more.html",
         open_recoveries=len(open_recs),
         awaiting_recoveries=len(awaiting_recs),
-        my_open_topics=shift_db.open_topic_count(session.get("shift_leader_id")),
+        my_open_topics=(shift_db.open_topic_count(session.get("shift_leader_id"))
+                        + shift_db.open_member_topic_count(session.get("shift_leader_id"))),
     )
 
 
@@ -1066,30 +1067,51 @@ def _oneonone_url(kind: str, subject_id: int) -> str:
     return url_for("shift.oneonone_member", member_id=subject_id)
 
 
+def _picker_choice() -> tuple[str, int] | None:
+    """The 1:1 dropdown posts "leader:<id>" or "member:<id>". ASCII digits
+    only, and short: str.isdigit() also passes "²", and ids past SQLite's
+    int64 range crash the target route's lookup. The target route
+    re-checks existence and access, so a stale or hand-edited value just
+    lands on that route's own handling."""
+    kind, _, subject_id = request.args.get("who", "").partition(":")
+    if kind in ("leader", "member") and re.fullmatch(r"[0-9]{1,9}", subject_id):
+        return kind, int(subject_id)
+    return None
+
+
 @shift_bp.route("/oneonone")
 def oneonone():
+    choice = _picker_choice()
     if _is_operator():
-        # The picker posts "leader:<id>" or "member:<id>"; the target route
-        # re-checks existence and access, so a stale or hand-edited value
-        # just lands on that route's own "doesn't exist" flash.
-        kind, _, subject_id = request.args.get("who", "").partition(":")
-        # ASCII digits only, and short: str.isdigit() also passes "²", and
-        # ids past SQLite's int64 range crash the target route's lookup.
-        if kind in ("leader", "member") and re.fullmatch(r"[0-9]{1,9}", subject_id):
-            return redirect(_oneonone_url(kind, int(subject_id)))
+        if choice:
+            return redirect(_oneonone_url(*choice))
         _maybe_autosync_roster()
         return render_template("shift/oneonone.html",
                                leaders=shift_db.oneonone_summary(),
                                team=shift_db.member_oneonone_index(),
                                people=shift_db.oneonone_people(),
+                               leader_threads=shift_db.leader_member_threads(),
                                slack_synced_at=shift_db.slack_roster_synced_at())
-    # Leaders never see the picker or any lookup — straight to their own
-    # agenda, so ?who= reveals nothing about who exists.
     leader_id = session.get("shift_leader_id")
     if not leader_id:
         flash("Your login isn't linked to a leader profile — ask the Operator.")
         return redirect(url_for("shift.today"))
-    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
+    # A leader's picker only ever opens their OWN threads: a team member
+    # (their 1:1 with that person) or their own agenda with the Operator —
+    # never another leader's agenda, whatever id the URL carries.
+    if choice and choice[0] == "member":
+        return redirect(url_for("shift.oneonone_member", member_id=choice[1]))
+    if choice:
+        return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
+    _, history = shift_db.oneonone_for_leader(leader_id)
+    return render_template(
+        "shift/oneonone_mine.html",
+        me=shift_db.get_leader(leader_id),
+        my_open=shift_db.open_topic_count(leader_id),
+        my_last_met=history[0]["date"] if history else None,
+        team=shift_db.member_oneonone_index(holder_id=leader_id),
+        people=[p for p in shift_db.oneonone_people() if p["kind"] == "member"],
+    )
 
 
 @shift_bp.route("/oneonone/<int:leader_id>")
@@ -1186,57 +1208,127 @@ def oneonone_action(leader_id):
                     + "#actions")
 
 
-# Team-member 1:1s — the Operator master login's alone. Team members have
-# no login, and leaders (admin-role included) never reach these routes:
-# operator_required runs before any lookup. Separate table and URL prefix,
-# so a member topic id can never be acted on through the leader routes.
+# Team-member 1:1s. Each thread is (member, holder): the Operator master
+# login's own (holder None — Operator-only) or one leader's (that leader +
+# the Operator; never other leaders, admin-role included). Team members
+# have no login. Separate table and URL prefix, so a member topic id can
+# never be acted on through the leader-agenda routes.
 
-@shift_bp.route("/oneonone/member/<int:member_id>")
-@operator_required
-def oneonone_member(member_id):
+_MEMBER_PRIVATE = ("Team-member 1:1s are private to the leader who holds "
+                   "them and the Operator.")
+
+
+def _member_thread_holder(url_holder_id: int | None) -> tuple[bool, int | None]:
+    """(allowed, holder) for a thread URL. The plain URL is the viewer's
+    own thread (the Operator's, or this leader's); /by/<leader> is a
+    leader's thread, open to that leader and the Operator only."""
+    if _is_operator():
+        return True, url_holder_id
+    me = session.get("shift_leader_id")
+    if me and url_holder_id in (None, me):
+        return True, me
+    return False, None
+
+
+def _can_touch_member_thread(holder_id: int | None) -> bool:
+    return _is_operator() or (holder_id is not None
+                              and session.get("shift_leader_id") == holder_id)
+
+
+def _member_thread_url(member_id: int, holder_id: int | None,
+                       endpoint: str = "shift.oneonone_member") -> str:
+    # The Operator reaches a leader's thread via /by/<leader>; everyone's
+    # own thread is the plain URL.
+    if holder_id is not None and _is_operator():
+        return url_for(endpoint, member_id=member_id, holder_id=holder_id)
+    return url_for(endpoint, member_id=member_id)
+
+
+def _member_thread_context(member_id: int, url_holder_id: int | None):
+    """Shared checks for a thread's page and its add-topic form. Returns
+    (member, holder_id, holder_leader) or a redirect response."""
+    allowed, holder = _member_thread_holder(url_holder_id)
+    if not allowed:
+        flash(_MEMBER_PRIVATE)
+        return redirect(url_for("shift.oneonone"))
+    holder_leader = None
+    if holder is not None:
+        holder_leader = shift_db.get_leader(holder)
+        if not holder_leader:
+            flash("That leader doesn't exist.")
+            return redirect(url_for("shift.oneonone"))
     member = shift_db.get_member(member_id)
     if not member:
         flash("That team member isn't on the roster.")
         return redirect(url_for("shift.oneonone") + "#team")
-    agenda, history = shift_db.oneonone_for_member(member_id)
+    return member, holder, holder_leader
+
+
+@shift_bp.route("/oneonone/member/<int:member_id>", defaults={"holder_id": None})
+@shift_bp.route("/oneonone/member/<int:member_id>/by/<int:holder_id>")
+def oneonone_member(member_id, holder_id):
+    ctx = _member_thread_context(member_id, holder_id)
+    if not isinstance(ctx, tuple):
+        return ctx
+    member, holder, holder_leader = ctx
+    agenda, history = shift_db.oneonone_for_member(member_id, holder)
     leader = shift_db.active_leader_named(member["name"])
     if leader and not agenda and not history:
         # One thread per person: someone with a leader login has a shared
-        # agenda already.
-        return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
-    return render_template("shift/oneonone_member.html", member=member,
-                           agenda=agenda, history=history, leader=leader)
+        # agenda with the Operator already.
+        if holder is None:
+            return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
+        flash(f"{leader['name']} has a leader login — 1:1s with leaders go "
+              "through the Operator.")
+        return redirect(url_for("shift.oneonone"))
+    return render_template(
+        "shift/oneonone_member.html", member=member, agenda=agenda,
+        history=history, leader=leader, holder=holder_leader,
+        topics_url=_member_thread_url(member_id, holder,
+                                      "shift.oneonone_member_topic_add"))
 
 
-@shift_bp.route("/oneonone/member/<int:member_id>/topics", methods=["POST"])
-@operator_required
-def oneonone_member_topic_add(member_id):
-    member = shift_db.get_member(member_id)
-    if not member:
-        flash("That team member isn't on the roster.")
-        return redirect(url_for("shift.oneonone") + "#team")
+@shift_bp.route("/oneonone/member/<int:member_id>/topics", methods=["POST"],
+                defaults={"holder_id": None})
+@shift_bp.route("/oneonone/member/<int:member_id>/by/<int:holder_id>/topics",
+                methods=["POST"])
+def oneonone_member_topic_add(member_id, holder_id):
+    ctx = _member_thread_context(member_id, holder_id)
+    if not isinstance(ctx, tuple):
+        return ctx
+    member, holder, _ = ctx
     leader = shift_db.active_leader_named(member["name"])
     if leader:
-        # A leader's 1:1 is shared with them — an Operator-only shadow file
-        # on the same person would go around that.
-        flash(f"{leader['name']} has a leader login — add it to your shared 1:1 instead.")
-        return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
+        # A leader's 1:1 is shared with them — a shadow file on the same
+        # person would go around that.
+        if holder is None:
+            flash(f"{leader['name']} has a leader login — add it to your shared 1:1 instead.")
+            return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
+        flash(f"{leader['name']} has a leader login — 1:1s with leaders go "
+              "through the Operator.")
+        return redirect(url_for("shift.oneonone"))
     if not shift_db.add_member_topic(member_id, request.form.get("topic", ""),
-                                     current_name()):
+                                     current_name(), holder_id=holder):
         flash("A talking point needs some words.")
-        return redirect(url_for("shift.oneonone_member", member_id=member_id))
-    return redirect(url_for("shift.oneonone_member", member_id=member_id)
-                    + "#agenda")
+        return redirect(_member_thread_url(member_id, holder))
+    return redirect(_member_thread_url(member_id, holder) + "#agenda")
+
+
+def _member_topic_for_viewer(topic_id: int) -> dict | None:
+    # holder and member come from the row, never the form.
+    topic = shift_db.get_member_topic(topic_id)
+    if not topic or not _can_touch_member_thread(topic["holder_leader_id"]):
+        flash("That topic doesn't exist or isn't on your agenda.")
+        return None
+    return topic
 
 
 @shift_bp.route("/oneonone/member/topic/<int:topic_id>/toggle", methods=["POST"])
-@operator_required
 def oneonone_member_topic_toggle(topic_id):
-    # member_id comes from the row, never the form.
-    topic = shift_db.get_member_topic(topic_id)
+    topic = _member_topic_for_viewer(topic_id)
     if not topic:
-        flash("That topic doesn't exist any more.")
-        return redirect(url_for("shift.oneonone") + "#team")
+        return redirect(url_for("shift.oneonone"))
+    back = _member_thread_url(topic["member_id"], topic["holder_leader_id"])
     discussed = request.form.get("discussed") == "1"
     ok = shift_db.set_member_topic_discussed(
         topic_id, discussed, request.form.get("note", ""), current_name())
@@ -1248,23 +1340,21 @@ def oneonone_member_topic_toggle(topic_id):
                   else "Already back on the agenda — nothing changed.")
         else:
             flash("That topic doesn't exist any more.")
-            return redirect(url_for("shift.oneonone_member",
-                                    member_id=topic["member_id"]))
+            return redirect(back)
     anchor = "#agenda" if discussed else f"#topic-{topic_id}"
-    return redirect(url_for("shift.oneonone_member",
-                            member_id=topic["member_id"]) + anchor)
+    return redirect(back + anchor)
 
 
 @shift_bp.route("/oneonone/member/topic/<int:topic_id>/delete", methods=["POST"])
-@operator_required
 def oneonone_member_topic_delete(topic_id):
-    topic = shift_db.get_member_topic(topic_id)
+    topic = _member_topic_for_viewer(topic_id)
     if not topic:
-        flash("That topic doesn't exist any more.")
-        return redirect(url_for("shift.oneonone") + "#team")
-    if not shift_db.delete_member_topic(topic_id):
+        return redirect(url_for("shift.oneonone"))
+    if not (_is_operator() or topic["added_by"] == current_name()):
+        flash("Only whoever added a topic (or the Operator) can remove it.")
+    elif not shift_db.delete_member_topic(topic_id):
         flash("That topic was already discussed — it's part of meeting history now.")
-    return redirect(url_for("shift.oneonone_member", member_id=topic["member_id"]))
+    return redirect(_member_thread_url(topic["member_id"], topic["holder_leader_id"]))
 
 
 # ---------------------------------------------------------------------------

@@ -340,11 +340,12 @@ CREATE TABLE IF NOT EXISTS oneonone_topics (
 CREATE INDEX IF NOT EXISTS idx_oneonone_topics
     ON oneonone_topics(leader_id, discussed_at);
 
--- Operator-only 1:1 threads with roster team members (they have no login).
--- Same shape and semantics as oneonone_topics, but visible to the Operator
--- master login ONLY: never leaders, never admin-role leaders. A separate
--- table so the live oneonone_topics table is never rebuilt and no
--- leader-facing query or route can ever select these rows.
+-- 1:1 threads with roster team members (they have no login). Same shape
+-- and semantics as oneonone_topics. Each thread belongs to whoever holds
+-- it: the Operator master login (holder NULL — Operator-only) or one
+-- leader (that leader + the Operator; never other leaders, admin-role
+-- included). A separate table so the live oneonone_topics table is never
+-- rebuilt and the leader-agenda queries and routes never touch these rows.
 -- ON DELETE CASCADE is restore-critical: import_json runs DELETE FROM
 -- team_members under foreign_keys=ON before re-inserting these rows
 -- (NO ACTION would abort restores; SET NULL violates NOT NULL). The roster
@@ -354,6 +355,11 @@ CREATE INDEX IF NOT EXISTS idx_oneonone_topics
 CREATE TABLE IF NOT EXISTS oneonone_member_topics (
     id INTEGER PRIMARY KEY,
     member_id INTEGER NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
+    -- Who holds this 1:1: a leader login, or NULL for the Operator master
+    -- login. A thread is (member_id, holder); each is private to its holder
+    -- + the Operator. SET NULL (not NO ACTION) so import_json's DELETE FROM
+    -- leaders can't abort a restore.
+    holder_leader_id INTEGER REFERENCES leaders(id) ON DELETE SET NULL,
     topic TEXT NOT NULL,
     added_by TEXT,
     created_at TEXT NOT NULL,
@@ -532,6 +538,16 @@ def _migrate(conn) -> None:
         conn.execute("ALTER TABLE team_members ADD COLUMN slack_id TEXT")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_team_members_slack "
                  "ON team_members(slack_id) WHERE slack_id IS NOT NULL")
+    # Team-member 1:1s gained a holder: existing rows stay NULL = the
+    # Operator's own (Operator-only), exactly as before.
+    cols = {r["name"] for r in conn.execute(
+        "PRAGMA table_info(oneonone_member_topics)")}
+    if "holder_leader_id" not in cols:
+        conn.execute("ALTER TABLE oneonone_member_topics ADD COLUMN "
+                     "holder_leader_id INTEGER REFERENCES leaders(id) "
+                     "ON DELETE SET NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_oneonone_member_holder "
+                 "ON oneonone_member_topics(holder_leader_id, member_id, discussed_at)")
 
 
 def _seed_base(conn) -> None:
@@ -1266,9 +1282,18 @@ _ONEONONE_KINDS = {
 }
 
 
-def _add_topic(kind: str, owner_id: int, topic: str, by: str) -> bool:
-    """Add a talking point to an agenda. Returns False for an empty topic
-    or an unknown owner."""
+def _thread_where(kind: str, holder: int | None) -> tuple[str, tuple]:
+    """Member threads are per holder (NULL = the Operator's own); leader
+    agendas have one thread per leader. `IS ?` matches NULL safely."""
+    if kind == "member":
+        return " AND holder_leader_id IS ?", (holder,)
+    return "", ()
+
+
+def _add_topic(kind: str, owner_id: int, topic: str, by: str,
+               holder: int | None = None) -> bool:
+    """Add a talking point to an agenda. Returns False for an empty topic,
+    an unknown owner, or (member threads) an unknown holder."""
     table, col, owner = _ONEONONE_KINDS[kind]
     topic = " ".join((topic or "").split())
     if not topic:
@@ -1278,15 +1303,27 @@ def _add_topic(kind: str, owner_id: int, topic: str, by: str) -> bool:
             f"SELECT 1 FROM {owner} WHERE id=?", (owner_id,)
         ).fetchone():
             return False
-        conn.execute(
-            f"INSERT INTO {table} ({col}, topic, added_by, created_at) "
-            "VALUES (?,?,?,?)",
-            (owner_id, topic, by, now_stamp()),
-        )
+        if kind == "member":
+            if holder is not None and not conn.execute(
+                "SELECT 1 FROM leaders WHERE id=?", (holder,)
+            ).fetchone():
+                return False
+            conn.execute(
+                f"INSERT INTO {table} ({col}, holder_leader_id, topic, added_by, "
+                "created_at) VALUES (?,?,?,?,?)",
+                (owner_id, holder, topic, by, now_stamp()),
+            )
+        else:
+            conn.execute(
+                f"INSERT INTO {table} ({col}, topic, added_by, created_at) "
+                "VALUES (?,?,?,?)",
+                (owner_id, topic, by, now_stamp()),
+            )
     return True
 
 
-def _topics_for(kind: str, owner_id: int, meetings: int = 12) \
+def _topics_for(kind: str, owner_id: int, meetings: int = 12,
+                holder: int | None = None) \
         -> tuple[list[dict], list[dict]]:
     """(agenda, history). agenda: undiscussed topics, longest-waiting first,
     each flagged carried=True when it survived at least one past 1:1.
@@ -1294,18 +1331,19 @@ def _topics_for(kind: str, owner_id: int, meetings: int = 12) \
     `meetings` distinct dates. One transaction so a check-off landing
     mid-read can't show a topic in both lists."""
     table, col, _ = _ONEONONE_KINDS[kind]
+    where, params = _thread_where(kind, holder)
     with closing(connect()) as conn:
         conn.execute("BEGIN")
         agenda = [dict(r) for r in conn.execute(
-            f"SELECT * FROM {table} WHERE {col}=? "
+            f"SELECT * FROM {table} WHERE {col}=?{where} "
             "AND discussed_at IS NULL ORDER BY created_at, id",
-            (owner_id,),
+            (owner_id, *params),
         ).fetchall()]
         discussed = [dict(r) for r in conn.execute(
-            f"SELECT * FROM {table} WHERE {col}=? "
+            f"SELECT * FROM {table} WHERE {col}=?{where} "
             "AND discussed_at IS NOT NULL "
             "ORDER BY discussed_on DESC, discussed_at, id",
-            (owner_id,),
+            (owner_id, *params),
         ).fetchall()]
         conn.commit()
     last_met = max((t["discussed_on"] for t in discussed if t["discussed_on"]),
@@ -1389,15 +1427,16 @@ def delete_topic(topic_id: int) -> bool:
     return _delete_topic("leader", topic_id)
 
 
-# Team-member threads — the Operator master login's alone.
+# Team-member threads — per holder: the Operator (holder None) or a leader.
 
-def add_member_topic(member_id: int, topic: str, by: str) -> bool:
-    return _add_topic("member", member_id, topic, by)
+def add_member_topic(member_id: int, topic: str, by: str,
+                     holder_id: int | None = None) -> bool:
+    return _add_topic("member", member_id, topic, by, holder=holder_id)
 
 
-def oneonone_for_member(member_id: int, meetings: int = 12) \
-        -> tuple[list[dict], list[dict]]:
-    return _topics_for("member", member_id, meetings)
+def oneonone_for_member(member_id: int, holder_id: int | None = None,
+                        meetings: int = 12) -> tuple[list[dict], list[dict]]:
+    return _topics_for("member", member_id, meetings, holder=holder_id)
 
 
 def get_member_topic(topic_id: int) -> dict | None:
@@ -1455,8 +1494,10 @@ def oneonone_people() -> list[dict]:
         ).fetchall()]
 
 
-def member_oneonone_index() -> dict:
-    """The Operator's team-member section: {'threads', 'everyone', 'former'}.
+def member_oneonone_index(holder_id: int | None = None) -> dict:
+    """One holder's team-member section: {'threads', 'everyone', 'former'}
+    — the Operator's own threads (holder None) or one leader's. Never
+    counts anyone else's topics.
     threads: active members with any 1:1 topic, open agendas first then
     longest since a 1:1. everyone: every active member (A–Z, with an
     `initial` for letter dividers). former: deactivated members who still
@@ -1473,11 +1514,12 @@ def member_oneonone_index() -> dict:
                    (SELECT ld.id FROM leaders ld WHERE ld.active=1
                     AND ld.name = m.name COLLATE NOCASE) AS leader_id
             FROM team_members m
-            LEFT JOIN oneonone_member_topics t ON t.member_id = m.id
+            LEFT JOIN oneonone_member_topics t
+                   ON t.member_id = m.id AND t.holder_leader_id IS ?
             GROUP BY m.id
             HAVING m.active = 1 OR COUNT(t.id) > 0
             ORDER BY m.name COLLATE NOCASE
-            """
+            """, (holder_id,)
         ).fetchall()]
     threads, everyone, former = [], [], []
     for r in rows:
@@ -1494,6 +1536,38 @@ def member_oneonone_index() -> dict:
     threads.sort(key=lambda r: (r["open"] == 0, r["last_met"] or "",
                                 r["name"].casefold()))
     return {"threads": threads, "everyone": everyone, "former": former}
+
+
+def leader_member_threads() -> list[dict]:
+    """Every leader-held team-member 1:1, for the Operator's overview (the
+    Operator sees all agendas): one row per (leader, member) thread, open
+    agendas first."""
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            """
+            SELECT t.member_id, m.name AS member_name, m.active AS member_active,
+                   t.holder_leader_id AS holder_id, ld.name AS holder_name,
+                   COUNT(CASE WHEN t.discussed_at IS NULL THEN 1 END) AS open,
+                   MAX(t.discussed_on) AS last_met
+            FROM oneonone_member_topics t
+            JOIN team_members m ON m.id = t.member_id
+            JOIN leaders ld ON ld.id = t.holder_leader_id
+            GROUP BY t.holder_leader_id, t.member_id
+            ORDER BY ld.name COLLATE NOCASE, open = 0,
+                     m.name COLLATE NOCASE
+            """
+        ).fetchall()]
+
+
+def open_member_topic_count(leader_id: int | None) -> int:
+    """Open topics across one leader's own team-member 1:1s."""
+    if leader_id is None:
+        return 0
+    with closing(connect()) as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM oneonone_member_topics "
+            "WHERE holder_leader_id=? AND discussed_at IS NULL", (leader_id,)
+        ).fetchone()[0]
 
 
 def oneonone_summary() -> list[dict]:
@@ -1856,7 +1930,7 @@ def _first_word(name: str) -> str:
     return words[0].casefold() if words else ""
 
 
-def sync_roster_from_slack(people: list[dict]) -> dict:
+def sync_roster_from_slack(people: list[dict], record_sync: bool = True) -> dict:
     """Merge Slack #general members into the roster. `people` is
     [{'slack_id', 'name', 'display'}] — real, active, full workspace members
     with cleaned names (shift_app.fetch_slack_roster does the filtering).
@@ -1941,12 +2015,34 @@ def sync_roster_from_slack(people: list[dict]) -> dict:
                        "slack_id": p["slack_id"]}
                 by_slack[p["slack_id"]] = by_name[p["name"].casefold()] = row
                 out["added"].append(p["name"])
-            conn.execute("INSERT OR REPLACE INTO meta (key, value) "
-                         "VALUES ('slack_roster_synced_at', ?)", (stamp,))
+            if record_sync:
+                conn.execute("INSERT OR REPLACE INTO meta (key, value) "
+                             "VALUES ('slack_roster_synced_at', ?)", (stamp,))
             conn.commit()
         except BaseException:
             conn.rollback()
             raise
+    return out
+
+
+def apply_roster_snapshot(people: list[dict]) -> dict | None:
+    """Seed the roster ONCE from the pinned Slack #general snapshot
+    (shift_roster_seed.py), so the 1:1 picker lists the whole team on the
+    first boot after upgrade — before the bot can pull live. Same merge
+    rules as a live pull. Skipped once applied, or once a live pull has
+    run. Doesn't count as a live pull (no 'updated' stamp, no daily
+    auto-refresh). Returns the summary, or None when skipped."""
+    with closing(connect()) as conn:
+        done = conn.execute(
+            "SELECT 1 FROM meta WHERE key IN "
+            "('roster_snapshot_applied', 'slack_roster_synced_at')"
+        ).fetchone()
+    if done:
+        return None
+    out = sync_roster_from_slack([dict(p) for p in people], record_sync=False)
+    with closing(connect()) as conn, conn:
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES "
+                     "('roster_snapshot_applied', ?)", (now_stamp(),))
     return out
 
 

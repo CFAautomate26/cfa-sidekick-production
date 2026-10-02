@@ -63,21 +63,25 @@ the leadership team:
   only — not to other leaders, and not to admin-role leaders either.**
   Growth and operational topics only; conduct/discipline/wage/health
   conversations never go in this app.
-  **Team members too:** the Operator's 1:1 page has a dropdown of everyone
-  (leaders first, then the active team roster — pick a name and the 1:1
-  opens, no typing) plus a browsable roster list, so a 1:1 can be opened
-  with anyone on the team roster, not just leaders. A
-  team-member 1:1 works the same way — talking points between meetings,
-  check-offs with outcome notes, carried topics, past-meeting history —
-  minus goals, course, and to-dos (those are leader features). **These are
-  visible to the Operator master login only**: team members have no
-  login, and leaders (admin-role included) never see them. Someone with a
-  leader login appears once, under Leaders, and opens the shared leader
-  agenda (one thread per person). Each roster member also gets a 🤝 1:1 shortcut on
-  the Team roster page (Operator only). Growth and coaching only —
-  conduct, attendance, discipline, wage, medical, and accommodation
-  matters stay in the `docs/legal-counsel/` process. Two people with the
-  same name need distinct roster entries (e.g. "Sam K." and "Sam T.").
+  **Team members too:** every leader — not just the Operator — can hold
+  1:1s with anyone on the team roster. More → 1:1 meetings has a dropdown
+  of the team (pick a name and the 1:1 opens, no typing); a leader's page
+  also links their own agenda with the Operator, and the Operator's
+  dropdown lists leaders first, then the team. A team-member 1:1 works
+  the same way — talking points between meetings, check-offs with outcome
+  notes, carried topics, past-meeting history — minus goals, course, and
+  to-dos (those are leader features). **Privacy: each team-member 1:1
+  belongs to whoever holds it.** A leader's 1:1s with team members are
+  visible to that leader and the Operator only — never to other leaders,
+  admin-role included; the Operator's own are Operator-only; and the
+  Operator's page has a "Leaders' 1:1s with the team" overview of every
+  leader's. Team members have no login. Someone with a leader login
+  appears once, under Leaders (1:1s with leaders go through the
+  Operator's shared agenda). Each roster member also gets a 🤝 1:1
+  shortcut on the Team roster page. Growth and coaching only — conduct,
+  attendance, discipline, wage, medical, and accommodation matters stay
+  in the `docs/legal-counsel/` process. Two people with the same name
+  need distinct roster entries (e.g. "Sam K." and "Sam T.").
 - **Shout-outs** — any leader recognizes a team member in ~20 seconds:
   name (roster autosuggest), an optional value tag (2nd-mile service,
   speed, food safety, teamwork, hospitality, cleanliness), and what
@@ -151,6 +155,11 @@ in the 1:1 dropdown (and lineup autosuggest):
   never emails or anything else from Slack.
 - After the first pull, it refreshes itself once a day in the background
   when the Operator opens the 1:1 page, so new hires appear on their own.
+
+The first boot after this feature shipped also seeded the roster once
+from a pinned snapshot of #general (`shift_roster_seed.py`, names + Slack
+user IDs only, same merge rules), so the dropdown was full before the
+Slack setup below. It never runs again, and never after a live pull.
 
 One-time Slack setup (the bot can only post until you do this):
 

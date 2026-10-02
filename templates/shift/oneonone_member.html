@@ -3,29 +3,43 @@
 {% block title %}{{ member.name }} — 1:1{% endblock %}
 {% block content %}
 <h1 class="page">{{ member.name }} — 1:1</h1>
-<div class="sub">Team member · {{ agenda | length }} on the agenda · last 1:1
+<div class="sub">Team member{% if holder and shift_is_operator %} · held by {{ holder.name }}{% endif %}
+  · {{ agenda | length }} on the agenda · last 1:1
   {{ history[0].date if history else 'never' }}</div>
-<div class="sub">🔒 Only you (the Operator) can see this page — {{ member.name }}
-has no login, and leaders (admins included) never see team-member 1:1s.</div>
+<div class="sub">🔒
+  {% if not holder %}Only you (the Operator) can see this page — {{ member.name }}
+  has no login, and leaders (admins included) never see your team-member 1:1s.
+  {% elif shift_is_operator %}{{ holder.name }}'s 1:1 with {{ member.name }} —
+  visible to {{ holder.name }} and you only.
+  {% else %}Only you and the Operator can see this 1:1 — {{ member.name }} has
+  no login, and other leaders (admins included) never see it.{% endif %}</div>
 <div class="sub">Growth &amp; coaching topics only — conduct, discipline,
 attendance, wage, and health conversations never go in this app.</div>
 
 {% if not member.active %}
-<div class="flash">{{ member.name }} isn't on the active roster. Restore them
-under <a href="{{ url_for('shift.roster') }}">Team roster</a> to show them in
-the picker again.</div>
+<div class="flash">{{ member.name }} isn't on the active roster.{% if shift_is_operator %}
+Restore them under <a href="{{ url_for('shift.roster') }}">Team roster</a> to
+show them in the picker again.{% endif %}</div>
 {% endif %}
 
 {% if leader %}
+{% if shift_is_operator and not holder %}
 <a class="card tap" href="{{ url_for('shift.oneonone_leader', leader_id=leader.id) }}">
   <h2>{{ leader.name }} has a leader login →</h2>
   <div class="progress-note">New topics go on your shared 1:1. This page keeps
   the private history from before.</div>
 </a>
 {% else %}
+<div class="card">
+  <h2>{{ leader.name }} has a leader login</h2>
+  <div class="progress-note">1:1s with leaders go through the Operator. This
+  page keeps the history from before.</div>
+</div>
+{% endif %}
+{% else %}
 <details class="compose" {{ 'open' if not agenda }}>
   <summary>+ Add a talking point</summary>
-  <form method="post" action="{{ url_for('shift.oneonone_member_topic_add', member_id=member.id) }}" class="card">
+  <form method="post" action="{{ topics_url }}" class="card">
     <label class="field" for="t-topic">Topic</label>
     <input type="text" id="t-topic" name="topic" required
            placeholder="e.g. Wants to learn breading">
@@ -36,7 +50,7 @@ the picker again.</div>
 </details>
 {% endif %}
 
-{{ agenda_list(agenda, 'shift.oneonone_member_topic_toggle', 'shift.oneonone_member_topic_delete', delete_any=True) }}
+{{ agenda_list(agenda, 'shift.oneonone_member_topic_toggle', 'shift.oneonone_member_topic_delete') }}
 
 {{ history_list(history, 'shift.oneonone_member_topic_toggle') }}
 
