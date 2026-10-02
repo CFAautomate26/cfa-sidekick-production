@@ -49,6 +49,25 @@ the leadership team:
   leader sees who to expect and hands over the replacement, then taps
   "They came back ✓". Guest name + contact only — never
   payment/card info; injury or damage claims go to the Operator directly.
+- **1:1 meetings** — a shared agenda between the Operator and each leader.
+  Both add talking points between meetings ("ask about Saturday lineup");
+  during the 1-on-1 each topic is checked off (who/when stamped) with an
+  optional outcome note, unchecked topics carry forward automatically, and
+  past meetings form a browsable thread. Action items drop straight onto
+  the leader's to-do list, and the page gathers their personal goals
+  (goals can be tagged to a leader; tagged goals stay off the Today
+  dashboard) and course progress — a one-screen sit-down. **Privacy:
+  each agenda is visible to that leader and the Operator master login
+  only — not to other leaders, and not to admin-role leaders either.**
+  Growth and operational topics only; conduct/discipline/wage/health
+  conversations never go in this app.
+- **Shout-outs** — any leader recognizes a team member in ~20 seconds:
+  name (roster autosuggest), an optional value tag (2nd-mile service,
+  speed, food safety, teamwork, hospitality, cleanliness), and what
+  happened. Fresh shout-outs show on everyone's Today screen for a week,
+  and by default cross-post to the team GroupMe through the existing bot
+  (uncheck the box to keep one in-app; delivery is best-effort). Admins
+  get a 28-day recognition radar — most recognized and top recognizers.
 - **Leadership development** — the Operator's course (from the "Leadership
   Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,
   Leading Organization) tracked per leader. Admins see every leader's

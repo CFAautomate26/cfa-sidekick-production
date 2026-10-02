@@ -22,7 +22,11 @@ Canada.
 - `shift_app.py` + `shift_db.py` — the shift leading app at `/shift`
   (Huddle-style: daily checklists with who-did-what stamps, position
   lineups, goals, shift notes, announcements with read receipts,
-  per-leader assigned to-dos under `/shift/todo`, a guest recovery log
+  per-leader assigned to-dos under `/shift/todo` (any leader assigns),
+  1:1 meeting agendas under `/shift/oneonone` (private to each leader +
+  the Operator master login — not other admins), team-member shout-outs
+  under `/shift/shoutouts` (optional GroupMe cross-post via
+  `GROUPME_BOT_ID`), a guest recovery log
   under `/shift/recovery` (guest + issue + make-it-right remedy; states
   open → contacted/coming-back → resolved, surfaced on the Today screen
   until closed; guest name/contact only — never payment info), and

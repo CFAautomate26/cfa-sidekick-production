@@ -46,7 +46,7 @@ def test_bots_unaffected(client):
 def test_requires_login(client):
     for path in ["/shift/", "/shift/checklists", "/shift/lineup", "/shift/goals",
                  "/shift/notes", "/shift/roster", "/shift/history", "/shift/more",
-                 "/shift/recovery"]:
+                 "/shift/recovery", "/shift/oneonone", "/shift/shoutouts"]:
         resp = client.get(path)
         assert resp.status_code == 302, path
         assert "/shift/login" in resp.headers["Location"]
@@ -579,6 +579,233 @@ def test_any_leader_assigns_but_only_assignee_completes(client):
     # Bogus ids are graceful
     assert client.post("/shift/todo/task/999999/toggle",
                        data={"done": "1"}).status_code == 302
+
+
+# --- 1:1 agendas -------------------------------------------------------------
+
+def test_oneonone_private_to_leader_and_operator(client):
+    make_leader(client)                                   # Maya, lead
+    make_leader(client, name="Devon", pin="8888")
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    devon = next(l for l in shift_db.leaders() if l["name"] == "Devon")
+    dana = next(l for l in shift_db.leaders() if l["name"] == "Dana")
+
+    login_leader(client)                                  # Maya
+    assert client.get(f"/shift/oneonone/{maya['id']}").status_code == 200
+    assert client.get(f"/shift/oneonone/{devon['id']}").status_code == 302
+    resp = client.get("/shift/oneonone", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/{maya['id']}")
+    client.post("/shift/logout")
+
+    # An ADMIN leader still sees only their own agenda — the all-agendas
+    # view belongs to the Operator master login alone.
+    login_leader(client, name="Dana", pin="5555")
+    assert client.get(f"/shift/oneonone/{dana['id']}").status_code == 200
+    assert client.get(f"/shift/oneonone/{maya['id']}").status_code == 302
+    resp = client.get("/shift/oneonone", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/{dana['id']}")
+    client.post("/shift/logout")
+
+    login_operator(client)
+    assert client.get("/shift/oneonone").status_code == 200
+    assert client.get(f"/shift/oneonone/{maya['id']}").status_code == 200
+    assert client.get(f"/shift/oneonone/{devon['id']}").status_code == 200
+
+
+def test_oneonone_topic_routes(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    login_operator(client)
+    client.post(f"/shift/oneonone/{maya['id']}/topics",
+                data={"topic": "Catering van keys"})
+    client.post("/shift/logout")
+
+    login_leader(client)
+    client.post(f"/shift/oneonone/{maya['id']}/topics",
+                data={"topic": "Saturday staffing"})
+    page = client.get(f"/shift/oneonone/{maya['id']}").data
+    assert b"Catering van keys" in page and b"Saturday staffing" in page
+
+    # Maya can't remove the Operator's topic, only her own
+    topics = shift_db.oneonone_for_leader(maya["id"])[0]
+    operator_topic = next(t for t in topics if t["added_by"] == "Operator")
+    own_topic = next(t for t in topics if t["added_by"] == "Maya")
+    client.post(f"/shift/oneonone/topic/{operator_topic['id']}/delete")
+    assert shift_db.get_topic(operator_topic["id"])
+    client.post(f"/shift/oneonone/topic/{own_topic['id']}/delete")
+    assert shift_db.get_topic(own_topic["id"]) is None
+
+    # Discuss with a note during the meeting; race flashes; reopen
+    resp = client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
+                       data={"discussed": "1", "note": "fixed the lockbox"})
+    assert resp.headers["Location"].endswith(f"#topic-{operator_topic['id']}")
+    assert b"Past 1:1s" in client.get(f"/shift/oneonone/{maya['id']}").data
+    resp = client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
+                       data={"discussed": "1"}, follow_redirects=True)
+    assert b"Already marked discussed by Maya" in resp.data
+    client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
+                data={"discussed": "0"})
+    assert shift_db.get_topic(operator_topic["id"])["discussed_at"] is None
+
+    # Another leader can't touch Maya's topics at all
+    make_leader(client, name="Devon", pin="8888")
+    client.post("/shift/logout")
+    login_leader(client, name="Devon", pin="8888")
+    resp = client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
+                       data={"discussed": "1"})
+    assert resp.status_code == 302
+    assert shift_db.get_topic(operator_topic["id"])["discussed_at"] is None
+
+
+def test_oneonone_action_creates_todo(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    login_leader(client)
+    client.post(f"/shift/oneonone/{maya['id']}/action",
+                data={"title": "Shadow a breakfast open", "due_date": "2026-11-01"})
+    task = shift_db.tasks_for_leader(maya["id"])[0][0]
+    assert task["title"] == "Shadow a breakfast open"
+    assert task["assigned_by"] == "Maya" and task["due_date"] == "2026-11-01"
+    # ...and it shows on the 1:1 page's open to-dos card
+    assert b"Shadow a breakfast open" in client.get(f"/shift/oneonone/{maya['id']}").data
+
+
+def test_more_badge_shows_my_agenda_count(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    login_leader(client)
+    assert b"on your agenda" not in client.get("/shift/more").data
+    client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "A"})
+    client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "B"})
+    assert "● 2 on your agenda".encode() in client.get("/shift/more").data
+
+
+def test_goal_leader_tag_via_route(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    login_operator(client)
+    client.post("/shift/goals", data={"title": "Solo breakfast open",
+                                      "period": "monthly",
+                                      "leader_id": str(maya["id"])})
+    client.post("/shift/goals", data={"title": "Store goal", "period": "weekly",
+                                      "leader_id": "not-a-number"})
+    tagged = shift_db.goals_by_status("active", leader_id=maya["id"])
+    assert [g["title"] for g in tagged] == ["Solo breakfast open"]
+    # Tagged goals stay off the Today dashboard but show on the 1:1 page
+    assert b"Solo breakfast open" not in client.get("/shift/").data
+    assert b"Store goal" in client.get("/shift/").data
+    assert b"Solo breakfast open" in client.get(f"/shift/oneonone/{maya['id']}").data
+
+
+# --- shout-outs ---------------------------------------------------------------
+
+@pytest.fixture()
+def groupme_posts(monkeypatch):
+    monkeypatch.setattr(shift_app, "GROUPME_BOT_ID", "test-bot-id")
+    calls = []
+    monkeypatch.setattr("shift_app.send_shoutout_groupme",
+                        lambda shoutout: calls.append(shoutout))
+    return calls
+
+
+def test_shoutout_posts_and_crossposts(client, groupme_posts):
+    make_leader(client)
+    login_leader(client)
+    resp = client.post("/shift/shoutouts", data={
+        "member_name": "Avery P", "value_tag": "speed",
+        "message": "Flew through the lunch rush", "groupme": "1",
+    })
+    assert resp.status_code == 302 and "#shout-" in resp.headers["Location"]
+    assert len(groupme_posts) == 1
+    assert groupme_posts[0]["member_name"] == "Avery P"
+    shout = shift_db.shoutout_feed()[0]
+    assert shout["groupme_at"] and shout["author"] == "Maya"
+    # The roster learned the new name for next time's autosuggest
+    assert any(m["name"] == "Avery P" for m in shift_db.roster())
+    # Feed + Today strip render it
+    assert b"Flew through the lunch rush" in client.get("/shift/shoutouts").data
+    assert b"Avery P" in client.get("/shift/").data
+
+
+def test_shoutout_without_checkbox_stays_in_app(client, groupme_posts):
+    login_operator(client)
+    client.post("/shift/shoutouts", data={
+        "member_name": "Sam", "message": "Covered a double",
+    })
+    assert not groupme_posts
+    assert shift_db.shoutout_feed()[0]["groupme_at"] is None
+
+
+def test_shoutout_unconfigured_groupme_is_honest(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "GROUPME_BOT_ID", "")
+    login_operator(client)
+    resp = client.post("/shift/shoutouts", data={
+        "member_name": "Sam", "message": "Great hustle", "groupme": "1",
+    }, follow_redirects=True)
+    assert b"Posted" in resp.data
+    assert shift_db.shoutout_feed()[0]["groupme_at"] is None   # never stamped
+
+
+def test_shoutout_validation_and_delete_rules(client, groupme_posts):
+    make_leader(client)
+    make_leader(client, name="Devon", pin="8888")
+    login_leader(client)
+    resp = client.post("/shift/shoutouts", data={"member_name": "  ",
+                                                 "message": "hi"},
+                       follow_redirects=True)
+    assert b"needs a name and a message" in resp.data
+    client.post("/shift/shoutouts", data={"member_name": "Avery",
+                                          "message": "Nice save"})
+    shout = shift_db.shoutout_feed()[0]
+    client.post("/shift/logout")
+
+    login_leader(client, name="Devon", pin="8888")
+    client.post(f"/shift/shoutouts/{shout['id']}/delete")
+    assert shift_db.get_shoutout(shout["id"])          # not Devon's to delete
+    client.post("/shift/logout")
+    login_operator(client)
+    client.post(f"/shift/shoutouts/{shout['id']}/delete")
+    assert shift_db.get_shoutout(shout["id"]) is None
+
+
+def test_shoutout_groupme_payload(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "GROUPME_BOT_ID", "test-bot-id")
+    posted = {}
+
+    def fake_post(url, **kwargs):
+        posted["url"] = url
+        posted.update(kwargs)
+
+        class R:
+            status_code = 202
+            text = "{}"
+        return R()
+
+    monkeypatch.setattr(shift_app.requests, "post", fake_post)
+    shift_app.send_shoutout_groupme({
+        "member_name": "Avery", "value_tag": "speed",
+        "message": "x" * 2000, "author": "Maya",
+    })
+    assert posted["url"] == "https://api.groupme.com/v3/bots/post"
+    assert posted["json"]["bot_id"] == "test-bot-id"
+    assert len(posted["json"]["text"]) <= 995          # GroupMe cap
+    assert "SHOUT-OUT: Avery" in posted["json"]["text"]
+    assert "⚡ Speed of service" in posted["json"]["text"]
+
+
+def test_shoutout_groupme_failure_never_breaks_post(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "GROUPME_BOT_ID", "test-bot-id")
+
+    def boom(*a, **k):
+        raise RuntimeError("db hiccup")
+    monkeypatch.setattr(shift_db, "get_shoutout", boom)  # prepare path blows up
+    login_operator(client)
+    resp = client.post("/shift/shoutouts", data={
+        "member_name": "Sam", "message": "Clutch", "groupme": "1",
+    })
+    assert resp.status_code == 302                     # the post still lands
+    assert shift_db.shoutout_feed()[0]["member_name"] == "Sam"
 
 
 # --- guest recovery ---------------------------------------------------------

@@ -50,6 +50,9 @@ SHIFT_NOTIFY_EMAIL = os.getenv("SHIFT_NOTIFY_EMAIL", "").strip()
 SHIFT_NOTIFY_SLACK_CHANNEL = os.getenv("SHIFT_NOTIFY_SLACK_CHANNEL", "").strip()
 SHIFT_NOTIFY_SLACK_MENTION = os.getenv("SHIFT_NOTIFY_SLACK_MENTION", "").strip()
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
+# Shout-out cross-posts reuse the team GroupMe bot's id. Read here, not from
+# app.py — this blueprint must never import the bot module (fault isolation).
+GROUPME_BOT_ID = os.getenv("GROUPME_BOT_ID", "").strip()
 
 # In-process login throttle: 5 wrong PINs locks that name for 10 minutes.
 # Resets on redeploy and is per-worker — fine for one small gunicorn service.
@@ -129,6 +132,7 @@ def inject_shift_globals():
     return {
         "shift_name": current_name(),
         "shift_is_admin": is_admin(),
+        "shift_is_operator": is_admin() and not session.get("shift_leader_id"),
         "shift_today": shift_db.today_local(),
         "shift_daypart": shift_db.current_daypart(),
         "DAYPARTS": shift_db.DAYPARTS,
@@ -176,6 +180,13 @@ def _valid_date(value: str | None) -> str:
 def _valid_daypart(value: str | None) -> str:
     value = (value or "").strip().lower()
     return value if value in shift_db.DAYPARTS else shift_db.current_daypart()
+
+
+def _optional_int(value: str | None) -> int | None:
+    try:
+        return int(value) if value else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _optional_date(value: str | None) -> str:
@@ -276,13 +287,15 @@ def today():
         announcements=announcements,
         lineup=shift_db.lineup_for(day, daypart),
         positions=shift_db.active_positions(),
-        goals=shift_db.goals_by_status("active"),
+        goals=shift_db.goals_by_status("active", store_only=True),
         notes=shift_db.notes_for_date(day)[:3],
         my_tasks=shift_db.open_tasks_for_leader(leader_id) if leader_id else [],
         my_leader_id=leader_id,
         open_recoveries=open_recs,
         awaiting_recoveries=awaiting_recs,
         RECOVERY_ISSUE_LABELS=shift_db.RECOVERY_ISSUE_LABELS,
+        shoutouts=shift_db.recent_shoutouts(),
+        SHOUTOUT_VALUE_LABELS=shift_db.SHOUTOUT_VALUE_LABELS,
     )
 
 
@@ -412,7 +425,8 @@ def goals():
         status = "active"
     return render_template("shift/goals.html", status=status,
                            goals=shift_db.goals_by_status(status),
-                           periods=shift_db.GOAL_PERIODS)
+                           periods=shift_db.GOAL_PERIODS,
+                           leaders=shift_db.leaders())
 
 
 @shift_bp.route("/goals", methods=["POST"])
@@ -440,6 +454,7 @@ def goal_create():
         period=period,
         due_date=_optional_date(request.form.get("due_date")),
         created_by=current_name(),
+        leader_id=_optional_int(request.form.get("leader_id")),
     )
     return redirect(url_for("shift.goal_detail", goal_id=goal_id))
 
@@ -592,9 +607,12 @@ def roster_toggle(member_id):
 @shift_bp.route("/more")
 def more():
     open_recs, awaiting_recs, _ = shift_db.recovery_feed(resolved_limit=0)
-    return render_template("shift/more.html",
-                           open_recoveries=len(open_recs),
-                           awaiting_recoveries=len(awaiting_recs))
+    return render_template(
+        "shift/more.html",
+        open_recoveries=len(open_recs),
+        awaiting_recoveries=len(awaiting_recs),
+        my_open_topics=shift_db.open_topic_count(session.get("shift_leader_id")),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -603,6 +621,17 @@ def more():
 
 def _can_view_development(leader_id: int) -> bool:
     return is_admin() or session.get("shift_leader_id") == leader_id
+
+
+def _is_operator() -> bool:
+    """The master-PIN login: admin role with no leader row behind it."""
+    return is_admin() and not session.get("shift_leader_id")
+
+
+def _can_view_oneonone(leader_id: int) -> bool:
+    """1:1 agendas are private between each leader and the Operator — even
+    admin-role leaders see only their own (the Operator's explicit call)."""
+    return _is_operator() or session.get("shift_leader_id") == leader_id
 
 
 @shift_bp.route("/development")
@@ -816,6 +845,207 @@ def todo_delete(task_id):
         shift_db.delete_task(task_id)
     return redirect(url_for("shift.todo_leader", leader_id=task["leader_id"])
                     if task else url_for("shift.todo"))
+
+
+# ---------------------------------------------------------------------------
+# 1:1 meeting agendas — private between each leader and the Operator
+# ---------------------------------------------------------------------------
+
+@shift_bp.route("/oneonone")
+def oneonone():
+    if _is_operator():
+        return render_template("shift/oneonone.html",
+                               leaders=shift_db.oneonone_summary())
+    leader_id = session.get("shift_leader_id")
+    if not leader_id:
+        flash("Your login isn't linked to a leader profile — ask the Operator.")
+        return redirect(url_for("shift.today"))
+    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
+
+
+@shift_bp.route("/oneonone/<int:leader_id>")
+def oneonone_leader(leader_id):
+    if not _can_view_oneonone(leader_id):
+        flash("1:1 agendas are between each leader and the Operator.")
+        return redirect(url_for("shift.today"))
+    leader = shift_db.get_leader(leader_id)
+    if not leader:
+        flash("That leader doesn't exist.")
+        return redirect(url_for("shift.oneonone"))
+    agenda, history = shift_db.oneonone_for_leader(leader_id)
+    modules = shift_db.course_overview(leader_id)
+    return render_template(
+        "shift/oneonone_leader.html",
+        leader=leader, agenda=agenda, history=history,
+        goals=shift_db.goals_by_status("active", leader_id=leader_id),
+        course_done=sum(m["done"] for m in modules),
+        course_total=sum(m["total"] for m in modules),
+        open_tasks=shift_db.tasks_for_leader(leader_id)[0],
+    )
+
+
+@shift_bp.route("/oneonone/<int:leader_id>/topics", methods=["POST"])
+def oneonone_topic_add(leader_id):
+    if not _can_view_oneonone(leader_id):
+        flash("1:1 agendas are between each leader and the Operator.")
+        return redirect(url_for("shift.today"))
+    if not shift_db.add_oneonone_topic(leader_id, request.form.get("topic", ""),
+                                       current_name()):
+        flash("A talking point needs some words.")
+        return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
+    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id)
+                    + "#agenda")
+
+
+@shift_bp.route("/oneonone/topic/<int:topic_id>/toggle", methods=["POST"])
+def oneonone_topic_toggle(topic_id):
+    # leader_id comes from the row, never the form.
+    topic = shift_db.get_topic(topic_id)
+    if not topic or not _can_view_oneonone(topic["leader_id"]):
+        flash("That topic doesn't exist or isn't on your agenda.")
+        return redirect(url_for("shift.today"))
+    discussed = request.form.get("discussed") == "1"
+    ok = shift_db.set_topic_discussed(
+        topic_id, discussed, request.form.get("note", ""), current_name())
+    if not ok:
+        fresh = shift_db.get_topic(topic_id)
+        if fresh:
+            flash(f"Already marked discussed by {fresh['discussed_by'] or 'someone'} "
+                  "— nothing changed." if fresh["discussed_at"]
+                  else "Already back on the agenda — nothing changed.")
+        else:
+            flash("That topic doesn't exist any more.")
+            return redirect(url_for("shift.oneonone_leader",
+                                    leader_id=topic["leader_id"]))
+    return redirect(url_for("shift.oneonone_leader",
+                            leader_id=topic["leader_id"]) + f"#topic-{topic_id}")
+
+
+@shift_bp.route("/oneonone/topic/<int:topic_id>/delete", methods=["POST"])
+def oneonone_topic_delete(topic_id):
+    topic = shift_db.get_topic(topic_id)
+    if not topic or not _can_view_oneonone(topic["leader_id"]):
+        flash("That topic doesn't exist or isn't on your agenda.")
+        return redirect(url_for("shift.today"))
+    if not (_is_operator() or topic["added_by"] == current_name()):
+        flash("Only whoever added a topic (or the Operator) can remove it.")
+    elif not shift_db.delete_topic(topic_id):
+        flash("That topic was already discussed — it's part of meeting history now.")
+    return redirect(url_for("shift.oneonone_leader",
+                            leader_id=topic["leader_id"]))
+
+
+@shift_bp.route("/oneonone/<int:leader_id>/action", methods=["POST"])
+def oneonone_action(leader_id):
+    if not _can_view_oneonone(leader_id):
+        flash("1:1 agendas are between each leader and the Operator.")
+        return redirect(url_for("shift.today"))
+    ok = shift_db.add_task(
+        leader_id,
+        title=request.form.get("title", ""),
+        details=request.form.get("details", ""),
+        due_date=_optional_date(request.form.get("due_date")),
+        assigned_by=current_name(),
+    )
+    if not ok:
+        flash("A to-do needs a title (and a leader who still exists).")
+    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id)
+                    + "#actions")
+
+
+# ---------------------------------------------------------------------------
+# Shout-outs (recognition)
+# ---------------------------------------------------------------------------
+
+def send_shoutout_groupme(shoutout: dict) -> None:
+    """Cross-post a shout-out to the team GroupMe. Best-effort: failures
+    are logged and never surface to the person posting."""
+    if not GROUPME_BOT_ID:
+        print("ERROR: GROUPME_BOT_ID is missing, cannot cross-post the shout-out.")
+        return
+    lines = [f"🌟 SHOUT-OUT: {shoutout['member_name']} 🌟"]
+    if shoutout.get("value_tag"):
+        lines.append(shift_db.SHOUTOUT_VALUE_LABELS.get(
+            shoutout["value_tag"], shoutout["value_tag"]))
+    lines.append(f"“{shoutout['message']}”")
+    lines.append(f"— {shoutout['author']}")
+    try:
+        resp = requests.post(
+            "https://api.groupme.com/v3/bots/post",
+            json={"bot_id": GROUPME_BOT_ID, "text": "\n".join(lines)[:995]},
+            timeout=15,
+        )
+        print(f"Shout-out GroupMe status: {resp.status_code}, "
+              f"body: {resp.text[:300]}")
+    except Exception as e:
+        print(f"Error cross-posting shout-out to GroupMe: {e}")
+
+
+def _notify_shoutout(shoutout_id: int) -> None:
+    """Fire the GroupMe cross-post in the background — best-effort end to
+    end, same shape as _notify_completion."""
+    try:
+        if not GROUPME_BOT_ID:
+            return
+        shoutout = shift_db.get_shoutout(shoutout_id)
+        if not shoutout or not shoutout["groupme_at"]:
+            return
+        thread = threading.Thread(target=send_shoutout_groupme,
+                                  args=(shoutout,), daemon=True)
+        thread.start()
+        if current_app.config.get("TESTING"):
+            thread.join(timeout=5)
+    except Exception as e:
+        print(f"Error preparing shout-out cross-post: {e}")
+
+
+@shift_bp.route("/shoutouts")
+def shoutouts():
+    tag = request.args.get("value")
+    if tag not in shift_db.SHOUTOUT_VALUES:
+        tag = None
+    suggest = sorted({m["name"] for m in shift_db.roster()}
+                     | set(shift_db.recent_lineup_names()), key=str.lower)
+    return render_template(
+        "shift/shoutouts.html",
+        feed=shift_db.shoutout_feed(value_tag=tag),
+        value=tag,
+        suggest=suggest,
+        groupme_on=bool(GROUPME_BOT_ID),
+        counts=shift_db.shoutout_counts() if is_admin() else None,
+        SHOUTOUT_VALUES=shift_db.SHOUTOUT_VALUES,
+        SHOUTOUT_VALUE_LABELS=shift_db.SHOUTOUT_VALUE_LABELS,
+    )
+
+
+@shift_bp.route("/shoutouts", methods=["POST"])
+def shoutout_create():
+    value = request.form.get("value_tag")
+    if value not in shift_db.SHOUTOUT_VALUES:
+        value = None
+    groupme = request.form.get("groupme") == "1" and bool(GROUPME_BOT_ID)
+    member_name = request.form.get("member_name", "")
+    sid = shift_db.add_shoutout(member_name, value,
+                                request.form.get("message", ""),
+                                current_name(), groupme=groupme)
+    if sid is None:
+        flash("A shout-out needs a name and a message.")
+        return redirect(url_for("shift.shoutouts"))
+    shift_db.add_member(member_name)   # autosuggest learns new names
+    if groupme:
+        _notify_shoutout(sid)
+    flash("Posted 🎉")
+    return redirect(url_for("shift.shoutouts") + f"#shout-{sid}")
+
+
+@shift_bp.route("/shoutouts/<int:shoutout_id>/delete", methods=["POST"])
+def shoutout_delete(shoutout_id):
+    shout = shift_db.get_shoutout(shoutout_id)
+    if shout and (is_admin() or shout["author"] == current_name()):
+        shift_db.delete_shoutout(shoutout_id)
+    elif shout:
+        flash("Only the author or an admin can delete a shout-out.")
+    return redirect(url_for("shift.shoutouts"))
 
 
 # ---------------------------------------------------------------------------

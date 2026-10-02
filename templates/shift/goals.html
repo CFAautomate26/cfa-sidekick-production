@@ -4,7 +4,7 @@
 <h1 class="page">Goals</h1>
 <div class="sub">Set a target, log progress on it every shift, celebrate when it's hit.</div>
 
-<details class="compose" {{ 'open' if request.args.get('new') }}>
+<details class="compose" {{ 'open' if request.args.get('new') or request.args.get('leader_id') }}>
   <summary>+ New goal</summary>
   <form method="post" action="{{ url_for('shift.goal_create') }}" class="card">
     <label class="field" for="g-title">Goal</label>
@@ -46,6 +46,11 @@
         <input type="date" id="g-due" name="due_date">
       </div>
     </div>
+    <label class="field" for="g-leader">For a leader (optional — shows on their 1:1 page)</label>
+    <select id="g-leader" name="leader_id">
+      <option value="">— whole store —</option>
+      {% for l in leaders %}<option value="{{ l.id }}" {{ 'selected' if request.args.get('leader_id') == l.id|string }}>{{ l.name }}</option>{% endfor %}
+    </select>
     <div style="margin-top:14px;">
       <button class="pill primary" type="submit" style="width:100%; padding:12px;">Create goal</button>
     </div>
@@ -60,7 +65,7 @@
 
 {% for g in goals %}
 <a class="card tap" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}">
-  <h2>{{ g.title }}</h2>
+  <h2>{{ g.title }}{% if g.leader_name %} <span class="note-cat">👤 {{ g.leader_name }}</span>{% endif %}</h2>
   {% if g.progress_pct is not none %}
   <div class="bar {{ 'full' if g.progress_pct >= 100 }}"><span style="width: {{ g.progress_pct }}%"></span></div>
   <div class="progress-note">{{ g.latest_value | num }} {{ g.unit }} → target {{ g.target_value | num }} {{ g.unit }} ({{ '↓ lower' if g.direction == 'down' else '↑ higher' }} is better) · {{ g.progress_pct }}%</div>

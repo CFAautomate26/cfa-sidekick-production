@@ -13,11 +13,20 @@
   <h2>✅ To-dos</h2>
   <div class="progress-note">Assign and track tasks per leader</div>
 </a>
+<a class="card tap" href="{{ url_for('shift.oneonone') }}">
+  <h2>🤝 1:1 meetings
+    {% if my_open_topics %}<span class="critical-flag">● {{ my_open_topics }} on your agenda</span>{% endif %}</h2>
+  <div class="progress-note">{{ 'Agendas, goals and history for every leader' if shift_is_operator else 'Your shared agenda with the Operator' }}</div>
+</a>
 <a class="card tap" href="{{ url_for('shift.recovery') }}">
   <h2>💛 Guest recovery
     {% if open_recoveries %}<span class="critical-flag">● {{ open_recoveries }} open</span>{% endif %}
     {% if awaiting_recoveries %}<span style="font-size:13px; font-weight:400; color:var(--soft);">📞 {{ awaiting_recoveries }} coming back</span>{% endif %}</h2>
   <div class="progress-note">Log a guest issue + what we're providing to make it right</div>
+</a>
+<a class="card tap" href="{{ url_for('shift.shoutouts') }}">
+  <h2>🌟 Shout-outs</h2>
+  <div class="progress-note">Recognize a team member — optionally posts to the team GroupMe</div>
 </a>
 <a class="card tap" href="{{ url_for('shift.development') }}">
   <h2>🎓 Leadership development</h2>
