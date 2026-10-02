@@ -77,8 +77,6 @@ wage, and health conversations never go in this app.</div>
 
 {{ history_list(history, 'shift.oneonone_topic_toggle') }}
 
-{% if shift_is_operator %}
 <a class="pill small ghost" style="margin-top:12px; display:inline-block;" href="{{ url_for('shift.oneonone') }}">← All 1:1s</a>
-{% endif %}
 <div class="sub">This page is visible to {{ leader.name }} and the Operator only.</div>
 {% endblock %}

@@ -592,11 +592,20 @@ def test_oneonone_private_to_leader_and_operator(client):
     devon = next(l for l in shift_db.leaders() if l["name"] == "Devon")
     dana = next(l for l in shift_db.leaders() if l["name"] == "Dana")
 
+    def own_index_only(me, others):
+        page = client.get("/shift/oneonone").data.decode()
+        assert f'href="/shift/oneonone/{me["id"]}"' in page
+        for other in others:
+            assert f'href="/shift/oneonone/{other["id"]}"' not in page
+        # ?who=leader:<someone else> only ever lands on your own agenda
+        for other in others:
+            resp = client.get(f"/shift/oneonone?who=leader:{other['id']}")
+            assert resp.headers["Location"].endswith(f"/shift/oneonone/{me['id']}")
+
     login_leader(client)                                  # Maya
     assert client.get(f"/shift/oneonone/{maya['id']}").status_code == 200
     assert client.get(f"/shift/oneonone/{devon['id']}").status_code == 302
-    resp = client.get("/shift/oneonone", follow_redirects=False)
-    assert resp.headers["Location"].endswith(f"/shift/oneonone/{maya['id']}")
+    own_index_only(maya, [devon, dana])
     client.post("/shift/logout")
 
     # An ADMIN leader still sees only their own agenda — the all-agendas
@@ -604,8 +613,7 @@ def test_oneonone_private_to_leader_and_operator(client):
     login_leader(client, name="Dana", pin="5555")
     assert client.get(f"/shift/oneonone/{dana['id']}").status_code == 200
     assert client.get(f"/shift/oneonone/{maya['id']}").status_code == 302
-    resp = client.get("/shift/oneonone", follow_redirects=False)
-    assert resp.headers["Location"].endswith(f"/shift/oneonone/{dana['id']}")
+    own_index_only(dana, [maya, devon])
     client.post("/shift/logout")
 
     login_operator(client)
@@ -832,51 +840,118 @@ def _roster_id(name):
                 if m["name"] == name)
 
 
-def test_member_oneonone_operator_only(client):
+def test_member_threads_private_per_holder(client):
     make_leader(client)                                   # Maya, lead
+    make_leader(client, name="Devon", pin="8888")
     make_leader(client, name="Dana", pin="5555", role="admin")
     maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    dana = next(l for l in shift_db.leaders() if l["name"] == "Dana")
     shift_db.add_member("Avery")
     av = _roster_id("Avery")
-    assert av == maya["id"]                               # same numeric id
+    assert av == maya["id"]                               # ids collide on purpose
+
     login_operator(client)
-    client.post(f"/shift/oneonone/member/{av}/topics",
-                data={"topic": "Cross-train breading"})
-    tid = shift_db.oneonone_for_member(av)[0][0]["id"]
+    client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "OPERATOR-NOTE"})
+    client.post("/shift/logout")
+    login_leader(client)                                  # Maya holds her own
+    resp = client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "MAYA-NOTE"})
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/member/{av}#agenda")
+    page = client.get(f"/shift/oneonone/member/{av}").data
+    assert b"MAYA-NOTE" in page and b"OPERATOR-NOTE" not in page
+    assert b"Only you and the Operator" in page
+    client.post("/shift/logout")
+    op_tid = shift_db.oneonone_for_member(av)[0][0]["id"]
+    maya_tid = shift_db.oneonone_for_member(av, maya["id"])[0][0]["id"]
+
+    # Devon (lead) and Dana (admin) each get only their OWN empty thread
+    for name, pin in [("Devon", "8888"), ("Dana", "5555")]:
+        login_leader(client, name=name, pin=pin)
+        page = client.get(f"/shift/oneonone/member/{av}").data
+        assert b"MAYA-NOTE" not in page and b"OPERATOR-NOTE" not in page, name
+        resp = client.get(f"/shift/oneonone/member/{av}/by/{maya['id']}")
+        assert resp.status_code == 302, name               # Maya's thread: no
+        followed = client.get(f"/shift/oneonone/member/{av}/by/{maya['id']}",
+                              follow_redirects=True).data
+        assert b"MAYA-NOTE" not in followed
+        assert client.post(f"/shift/oneonone/member/{av}/by/{maya['id']}/topics",
+                           data={"topic": "SNEAKY"}).status_code == 302
+        for tid in (op_tid, maya_tid):
+            client.post(f"/shift/oneonone/member/topic/{tid}/toggle", data={"discussed": "1"})
+            client.post(f"/shift/oneonone/member/topic/{tid}/delete")
+            # leader-agenda routes never touch member rows
+            client.post(f"/shift/oneonone/topic/{tid}/toggle", data={"discussed": "1"})
+        index = client.get("/shift/oneonone").data
+        assert b"MAYA-NOTE" not in index and b"OPERATOR-NOTE" not in index
+        for path in ["/shift/", "/shift/more", "/shift/roster"]:
+            assert b"MAYA-NOTE" not in client.get(path).data, (name, path)
+        client.post("/shift/logout")
+    assert [t["topic"] for t in shift_db.oneonone_for_member(av)[0]] == ["OPERATOR-NOTE"]
+    assert [t["topic"] for t in shift_db.oneonone_for_member(av, maya["id"])[0]] == ["MAYA-NOTE"]
+    assert not any("SNEAKY" in t["topic"] for t in
+                   shift_db.oneonone_for_member(av, maya["id"])[0])
+
+    # Maya can't reach the Operator's thread either
+    login_leader(client)
+    client.post(f"/shift/oneonone/member/topic/{op_tid}/toggle", data={"discussed": "1"})
+    assert shift_db.get_member_topic(op_tid)["discussed_at"] is None
     client.post("/shift/logout")
 
-    for name, pin in [("Maya", "4721"), ("Dana", "5555")]:
-        login_leader(client, name=name, pin=pin)
-        resp = client.get(f"/shift/oneonone/member/{av}", follow_redirects=False)
-        assert resp.status_code == 302, name
-        assert b"Cross-train" not in client.get(
-            f"/shift/oneonone/member/{av}", follow_redirects=True).data
-        for url, data in [
-            (f"/shift/oneonone/member/{av}/topics", {"topic": "sneaky"}),
-            (f"/shift/oneonone/member/topic/{tid}/toggle", {"discussed": "1"}),
-            (f"/shift/oneonone/member/topic/{tid}/delete", {}),
-            # The leader route with a member topic id only ever touches
-            # oneonone_topics.
-            (f"/shift/oneonone/topic/{tid}/toggle", {"discussed": "1"}),
-            (f"/shift/oneonone/topic/{tid}/delete", {}),
-        ]:
-            assert client.post(url, data=data).status_code == 302, (name, url)
-        agenda, history = shift_db.oneonone_for_member(av)
-        assert [t["topic"] for t in agenda] == ["Cross-train breading"] \
-            and not history, name
-        # ?who= on the index never routes a leader anywhere but their own agenda
-        resp = client.get(f"/shift/oneonone?who=member:{av}", follow_redirects=False)
-        own = next(l for l in shift_db.leaders() if l["name"] == name)
-        assert resp.headers["Location"].endswith(f"/shift/oneonone/{own['id']}")
-        page = client.get(f"/shift/oneonone?who=member:{av}",
-                          follow_redirects=True).data
-        assert b"Avery" not in page and b"Cross-train" not in page
-        assert b'name="who"' not in page                  # no picker for leaders
-        for path in ["/shift/", "/shift/more", "/shift/roster"]:
-            page = client.get(path).data
-            assert b"Cross-train" not in page, (name, path)
-        assert b"/shift/oneonone/member/" not in client.get("/shift/roster").data
-        client.post("/shift/logout")
+    # The Operator sees every agenda: own thread + Maya's via the overview
+    login_operator(client)
+    index = client.get("/shift/oneonone").data.decode()
+    overview = index[index.index('id="leader-team"'):]
+    assert "Avery" in overview and "with Maya" in overview
+    assert f"/shift/oneonone/member/{av}/by/{maya['id']}" in overview
+    page = client.get(f"/shift/oneonone/member/{av}/by/{maya['id']}").data
+    assert b"MAYA-NOTE" in page and b"OPERATOR-NOTE" not in page
+    assert b"held by Maya" in page
+    resp = client.post(f"/shift/oneonone/member/topic/{maya_tid}/toggle",
+                       data={"discussed": "1", "note": "op closed"})
+    assert resp.headers["Location"].endswith(
+        f"/shift/oneonone/member/{av}/by/{maya['id']}#agenda")
+    assert client.get(f"/shift/oneonone/member/{av}/by/999999",
+                      follow_redirects=True).status_code == 200
+
+
+def test_leader_picks_any_team_member(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    for n in ["Avery", "Blake", "Maya"]:
+        shift_db.add_member(n)
+    login_leader(client)
+    page = client.get("/shift/oneonone").data.decode()
+    picker = page[page.index('<select name="who"'):page.index("</select>")]
+    assert f'value="member:{_roster_id("Avery")}"' in picker
+    assert f'value="member:{_roster_id("Blake")}"' in picker
+    assert ">Maya</option>" not in picker                 # herself / leaders: no
+    assert "leader:" not in picker
+    assert "Your 1:1 with the Operator" in page
+    resp = client.get(f"/shift/oneonone?who=member:{_roster_id('Blake')}")
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/member/{_roster_id('Blake')}")
+    client.post(f"/shift/oneonone/member/{_roster_id('Blake')}/topics",
+                data={"topic": "Wants more drive-thru shifts"})
+    page = client.get("/shift/oneonone").data.decode()
+    mine = page[page.index('id="team"'):]
+    assert "Blake" in mine and "● 1 waiting" in mine
+    # A roster row with a leader's name isn't a team 1:1
+    resp = client.post(f"/shift/oneonone/member/{_roster_id('Maya')}/topics",
+                       data={"topic": "x"}, follow_redirects=True)
+    assert b"has a leader login" in resp.data
+    assert shift_db.oneonone_for_member(_roster_id("Maya"), maya["id"]) == ([], [])
+    # Removing a topic: only whoever added it (or the Operator)
+    tid = shift_db.oneonone_for_member(_roster_id("Blake"), maya["id"])[0][0]["id"]
+    client.post("/shift/logout")
+    login_operator(client)
+    client.post(f"/shift/oneonone/member/{_roster_id('Blake')}/by/{maya['id']}/topics",
+                data={"topic": "From the Operator"})
+    client.post("/shift/logout")
+    login_leader(client)
+    op_tid = next(t["id"] for t in shift_db.oneonone_for_member(_roster_id("Blake"), maya["id"])[0]
+                  if t["added_by"] == "Operator")
+    resp = client.post(f"/shift/oneonone/member/topic/{op_tid}/delete", follow_redirects=True)
+    assert b"Only whoever added a topic" in resp.data
+    client.post(f"/shift/oneonone/member/topic/{tid}/delete")
+    assert shift_db.get_member_topic(tid) is None
 
 
 def test_member_topic_routes(client):
@@ -1019,14 +1094,14 @@ def test_member_page_content(client):
     assert b"active roster" in page
 
 
-def test_roster_1on1_link_operator_only(client):
+def test_roster_1on1_link_for_every_leader(client):
     make_leader(client)
     shift_db.add_member("Avery")
-    login_operator(client)
-    assert b"/shift/oneonone/member/" in client.get("/shift/roster").data
-    client.post("/shift/logout")
-    login_leader(client)
-    assert b"/shift/oneonone/member/" not in client.get("/shift/roster").data
+    av = _roster_id("Avery")
+    for login in (login_operator, login_leader):
+        login(client)
+        assert f"/shift/oneonone/member/{av}".encode() in client.get("/shift/roster").data
+        client.post("/shift/logout")
 
 
 def test_leader_more_badge_ignores_member_topics(client):
@@ -1041,6 +1116,236 @@ def test_leader_more_badge_ignores_member_topics(client):
     login_leader(client)
     assert b"on your agenda" not in client.get("/shift/more").data
     assert shift_db.open_topic_count(maya["id"]) == 0
+
+
+# --- roster pull from Slack #general -----------------------------------------
+
+SLACK_USERS = [
+    {"id": "UOWNER", "is_primary_owner": True,
+     "profile": {"real_name": "Joshua Huesser", "display_name": "Joshua Huesser"}},
+    {"id": "URIYA", "profile": {"real_name": "Riya Ronny Thomas", "display_name": "Riya"}},
+    {"id": "UCALLA", "profile": {"real_name": "Calla Jonkman", "display_name": ""}},
+    {"id": "UGRACE", "profile": {"real_name": "grace   fraser", "display_name": ""}},
+    {"id": "UTUSH", "profile": {"real_name": "", "display_name": "tushar"}},
+    {"id": "UBOT", "is_bot": True, "profile": {"real_name": "Workflow Bot"}},
+    {"id": "UGONE", "deleted": True, "profile": {"real_name": "Left Long Ago"}},
+    {"id": "UGUEST", "is_restricted": True, "profile": {"real_name": "Vendor Guest"}},
+    {"id": "USLACKBOT", "profile": {"real_name": "Slackbot"}},
+    {"id": "UOTHER", "profile": {"real_name": "Not In General"}},
+]
+GENERAL_MEMBERS = ["UOWNER", "URIYA", "UCALLA", "UGRACE", "UTUSH", "UBOT",
+                   "UGONE", "UGUEST", "USLACKBOT"]
+
+
+@pytest.fixture()
+def fake_slack(monkeypatch):
+    """A stand-in Slack Web API: two pages of members and users, a
+    non-general channel listed first, and an `errors` hook per method."""
+    state = {"calls": [], "errors": {}, "users": list(SLACK_USERS),
+             "members": list(GENERAL_MEMBERS)}
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_ROSTER_SLACK_CHANNEL", "")
+
+    def page(items, params, size):
+        start = int(params.get("cursor") or 0)
+        nxt = start + size
+        return items[start:nxt], (str(nxt) if nxt < len(items) else "")
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        method = url.rsplit("/", 1)[-1]
+        params = dict(params or {})
+        state["calls"].append((method, params))
+        assert headers["Authorization"] == "Bearer xoxb-test"
+
+        class R:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        if method in state["errors"]:
+            return R({"ok": False, "error": state["errors"][method],
+                      "needed": "channels:read"})
+        if method == "conversations.list":
+            return R({"ok": True, "channels": [
+                {"id": "CRANDOM", "is_general": False},
+                {"id": "CGENERAL", "is_general": True}]})
+        if method == "conversations.members":
+            assert params["channel"] in ("CGENERAL", "COVERRIDE")
+            items, nxt = page(state["members"], params, 5)
+            return R({"ok": True, "members": items,
+                      "response_metadata": {"next_cursor": nxt}})
+        if method == "users.list":
+            items, nxt = page(state["users"], params, 4)
+            return R({"ok": True, "members": items,
+                      "response_metadata": {"next_cursor": nxt}})
+        raise AssertionError(f"unexpected Slack call {method}")
+
+    monkeypatch.setattr(shift_app.requests, "get", fake_get)
+    return state
+
+
+def test_fetch_slack_roster_filters_and_pages(client, fake_slack):
+    people = shift_app.fetch_slack_roster()
+    assert [(p["slack_id"], p["name"]) for p in people] == [
+        ("URIYA", "Riya Ronny Thomas"), ("UCALLA", "Calla Jonkman"),
+        ("UGRACE", "Grace Fraser"), ("UTUSH", "Tushar")]
+    assert people[0]["display"] == "Riya"
+    methods = [m for m, _ in fake_slack["calls"]]
+    assert methods.count("conversations.members") == 2      # followed the cursor
+    assert methods.count("users.list") == 3
+
+
+def test_fetch_slack_roster_channel_override(client, fake_slack, monkeypatch):
+    monkeypatch.setattr(shift_app, "SHIFT_ROSTER_SLACK_CHANNEL", "COVERRIDE")
+    shift_app.fetch_slack_roster()
+    methods = [m for m, _ in fake_slack["calls"]]
+    assert "conversations.list" not in methods
+
+
+def test_fetch_slack_roster_errors(client, fake_slack, monkeypatch):
+    fake_slack["errors"]["conversations.list"] = "missing_scope"
+    with pytest.raises(shift_app.SlackRosterError) as e:
+        shift_app.fetch_slack_roster()
+    assert "channels:read" in str(e.value) and "users:read" in str(e.value)
+    fake_slack["errors"] = {"users.list": "invalid_auth"}
+    with pytest.raises(shift_app.SlackRosterError, match="SLACK_BOT_TOKEN"):
+        shift_app.fetch_slack_roster()
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "")
+    with pytest.raises(shift_app.SlackRosterError, match="isn't set"):
+        shift_app.fetch_slack_roster()
+
+
+def test_roster_slack_sync_route(client, fake_slack):
+    make_leader(client, name="Riya", pin="1111", role="admin")
+    shift_db.add_member("Calla")
+    login_operator(client)
+    resp = client.post("/shift/roster/slack-sync", data={"back": "oneonone"})
+    # No fragment: the result message must stay on screen on a phone
+    assert resp.headers["Location"].endswith("/shift/oneonone")
+    page = client.get("/shift/oneonone").data.decode()
+    assert "Added 2: Grace Fraser, Tushar." in page
+    assert "1 already on the roster." in page
+    assert "Matched to existing roster names: Calla → Calla Jonkman." in page
+    assert "1 have leader logins" in page
+    picker = page[page.index('<select name="who"'):page.index("</select>")]
+    team = picker[picker.index('label="Team members"'):]
+    for name in ["Calla", "Grace Fraser", "Tushar"]:
+        assert f">{name}</option>" in team
+    assert "Riya Ronny Thomas" not in picker and "Joshua" not in picker
+    assert "updated" in page and "Update team from Slack" in page
+    resp = client.post("/shift/roster/slack-sync")
+    assert resp.headers["Location"].endswith("/shift/roster")
+
+
+def test_promoting_a_pulled_member_flashes_the_match(client, fake_slack):
+    login_operator(client)
+    client.post("/shift/roster/slack-sync")                # Calla Jonkman pulled
+    resp = client.post("/shift/admin/leaders/add",
+                       data={"name": "Calla", "pin": "4444"}, follow_redirects=True)
+    assert "Calla → Calla Jonkman".encode() in resp.data
+    page = client.get("/shift/oneonone").data.decode()
+    picker = page[page.index('<select name="who"'):page.index("</select>")]
+    assert ">Calla</option>" in picker and "Calla Jonkman" not in picker
+
+
+def test_former_member_threads_show_what_is_waiting(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    shift_db.add_member("Avery")
+    av = _roster_id("Avery")
+    login_leader(client)
+    client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "Check in"})
+    shift_db.set_member_active(av, False)                 # Avery left the roster
+    assert "● 1 on your agenda".encode() in client.get("/shift/more").data
+    page = client.get("/shift/oneonone").data.decode()
+    assert "No 1:1s with team members yet" not in page    # badge and page agree
+    former = page[page.index("Former team members with 1:1 history"):]
+    assert "● 1 waiting" in former
+    assert "<details style=\"margin-bottom:12px;\" open>" in page
+    # Leaders can get back to their 1:1 page from their agenda
+    agenda = client.get(f"/shift/oneonone/{maya['id']}").data.decode()
+    assert 'href="/shift/oneonone">← All 1:1s' in agenda
+
+
+def test_oversized_ids_never_500(client):
+    make_leader(client)
+    huge = "9" * 25
+    for login in (login_leader, login_operator):
+        login(client)
+        for method, url in [
+            ("get", f"/shift/oneonone/member/{huge}"),
+            ("get", f"/shift/oneonone/member/1/by/{huge}"),
+            ("post", f"/shift/oneonone/member/{huge}/topics"),
+            ("post", f"/shift/oneonone/member/topic/{huge}/toggle"),
+            ("post", f"/shift/oneonone/member/topic/{huge}/delete"),
+            ("post", f"/shift/oneonone/topic/{huge}/toggle"),
+            ("get", f"/shift/goals/{huge}"),
+        ]:
+            resp = getattr(client, method)(url, follow_redirects=True)
+            assert resp.status_code == 200, (login.__name__, url)
+        client.post("/shift/logout")
+
+
+def test_roster_slack_sync_route_is_operator_only(client, fake_slack):
+    make_leader(client)                                    # Maya, lead
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    for name, pin in [("Maya", "4721"), ("Dana", "5555")]:
+        login_leader(client, name=name, pin=pin)
+        assert client.post("/shift/roster/slack-sync").status_code == 302
+        assert b"Pull team from Slack" not in client.get("/shift/roster").data
+        client.post("/shift/logout")
+    assert fake_slack["calls"] == [] and shift_db.roster() == []
+    login_operator(client)
+    assert b"Pull team from Slack" in client.get("/shift/roster").data
+
+
+def test_roster_slack_sync_route_failures_never_500(client, fake_slack, monkeypatch):
+    login_operator(client)
+    fake_slack["errors"]["conversations.list"] = "missing_scope"
+    resp = client.post("/shift/roster/slack-sync", follow_redirects=True)
+    assert resp.status_code == 200 and b"users:read" in resp.data
+
+    def boom(*a, **k):
+        raise shift_app.requests.ConnectionError("no route to slack.com")
+    monkeypatch.setattr(shift_app.requests, "get", boom)
+    resp = client.post("/shift/roster/slack-sync", follow_redirects=True)
+    assert resp.status_code == 200 and b"reach Slack" in resp.data
+    assert shift_db.roster() == [] and shift_db.slack_roster_synced_at() is None
+
+
+def test_roster_autosync_daily_after_first_pull(client, fake_slack):
+    login_operator(client)
+    client.get("/shift/oneonone")                          # never pulled
+    assert fake_slack["calls"] == []
+    client.post("/shift/roster/slack-sync")
+    pulled = len(fake_slack["calls"])
+    client.get("/shift/oneonone")                          # pulled just now
+    assert len(fake_slack["calls"]) == pulled
+
+    # A day later a new hire appears in #general
+    fake_slack["users"].append({"id": "UNEW", "profile": {"real_name": "Mason Reed"}})
+    fake_slack["members"].append("UNEW")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE meta SET value='2020-01-01 09:00' "
+                     "WHERE key IN ('slack_roster_synced_at', 'slack_roster_attempted_at')")
+    client.get("/shift/oneonone")                          # background refresh
+    assert any(r["name"] == "Mason Reed" for r in shift_db.roster())
+    calls = len(fake_slack["calls"])
+    client.get("/shift/oneonone")                          # once per day only
+    assert len(fake_slack["calls"]) == calls
+    # Leaders' 1:1 visits never trigger it
+    client.post("/shift/logout")
+    make_leader(client)
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE meta SET value='2020-01-01 09:00' "
+                     "WHERE key IN ('slack_roster_synced_at', 'slack_roster_attempted_at')")
+    login_leader(client)
+    client.get("/shift/oneonone", follow_redirects=True)
+    assert len(fake_slack["calls"]) == calls
 
 
 # --- shout-outs ---------------------------------------------------------------

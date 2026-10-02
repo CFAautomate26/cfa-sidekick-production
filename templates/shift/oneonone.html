@@ -2,8 +2,8 @@
 {% block title %}1:1 meetings{% endblock %}
 {% block content %}
 <h1 class="page">1:1 meetings</h1>
-<div class="sub">Shared agendas with your leaders, plus private 1:1s with
-anyone on the team roster.</div>
+<div class="sub">Shared agendas with your leaders, private 1:1s with anyone
+on the team roster, and every leader's 1:1s with the team.</div>
 
 {% set picker_leaders = people | selectattr('kind', 'equalto', 'leader') | list %}
 {% set picker_team = people | selectattr('kind', 'equalto', 'member') | list %}
@@ -32,10 +32,17 @@ window.addEventListener('pageshow', function () {
   if (who) who.value = '';
 });
 </script>
-{% if not picker_team %}
-<div class="progress-note" style="margin:-4px 0 12px;">Team members show up here once
-they're on the <a href="{{ url_for('shift.roster') }}">Team roster</a>.</div>
-{% endif %}
+<form method="post" action="{{ url_for('shift.roster_slack_sync') }}"
+      style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:-4px 0 12px;">
+  <input type="hidden" name="back" value="oneonone">
+  <button class="pill small {{ 'ghost' if slack_synced_at else 'primary' }}" type="submit">
+    ↻ {{ 'Update team from Slack' if slack_synced_at else 'Pull team from Slack #general' }}</button>
+  <span class="progress-note" style="margin:0;">
+    {% if slack_synced_at %}Team list from Slack #general · updated {{ slack_synced_at }}
+    {% elif not picker_team %}Team members show up here once they're on the
+    <a href="{{ url_for('shift.roster') }}">Team roster</a> — or pull everyone from Slack.
+    {% else %}Adds everyone in #general who isn't on the roster yet.{% endif %}</span>
+</form>
 
 <div class="section-label" id="leaders">Leaders · shared agendas</div>
 {% for l in leaders %}
@@ -50,7 +57,7 @@ they're on the <a href="{{ url_for('shift.roster') }}">Team roster</a>.</div>
 <div class="empty">No leader logins yet — add your leaders under Admin first.</div>
 {% endfor %}
 
-<div class="section-label" id="team">🔒 Team members · only you see these</div>
+<div class="section-label" id="team">🔒 Your team 1:1s · only you see these</div>
 {% if team.threads %}
 <div class="card" style="padding: 4px 14px;">
   {% for m in team.threads %}
@@ -64,7 +71,7 @@ they're on the <a href="{{ url_for('shift.roster') }}">Team roster</a>.</div>
   </a>
   {% endfor %}
 </div>
-{% else %}
+{% elif not team.former %}
 <div class="empty">No team-member 1:1s yet — pick someone from the list above to start one.</div>
 {% endif %}
 
@@ -87,13 +94,14 @@ they're on the <a href="{{ url_for('shift.roster') }}">Team roster</a>.</div>
 {% endif %}
 
 {% if team.former %}
-<details style="margin-bottom:12px;">
+<details style="margin-bottom:12px;" {{ 'open' if team.former | selectattr('open') | list }}>
   <summary style="font-size:13px; color:var(--soft); cursor:pointer; padding:6px 0;">Former team members with 1:1 history ({{ team.former | length }})</summary>
   <div class="card" style="padding: 4px 14px; margin-top:8px;">
     {% for m in team.former %}
     <a href="{{ url_for('shift.oneonone_member', member_id=m.id) }}"
        style="display:flex; align-items:center; min-height:44px; text-decoration:none; color:var(--soft); {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
       <span style="flex:1; font-size:14px;">{{ m.name }}</span>
+      {% if m.open %}<span class="critical-flag" style="margin-right:6px;">● {{ m.open }} waiting</span>{% endif %}
       <span class="progress-note" style="margin:0;">{% if m.last_met %}last 1:1 {{ m.last_met }}{% endif %}</span>
     </a>
     {% endfor %}
@@ -101,7 +109,26 @@ they're on the <a href="{{ url_for('shift.roster') }}">Team roster</a>.</div>
 </details>
 {% endif %}
 
-<div class="sub">Team-member 1:1s are visible to you (the Operator) only —
-team members have no login, and leaders (admins included) never see them.
-Growth &amp; coaching only.</div>
+<div class="section-label" id="leader-team">Leaders' 1:1s with the team</div>
+{% if leader_threads %}
+<div class="card" style="padding: 4px 14px;">
+  {% for t in leader_threads %}
+  <a href="{{ url_for('shift.oneonone_member', member_id=t.member_id, holder_id=t.holder_id) }}"
+     style="display:block; padding:10px 0; text-decoration:none; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
+    <div style="font-weight:700; font-size:15px;">{{ t.member_name }}
+      <span style="font-weight:400; color:var(--soft);">· with {{ t.holder_name }}</span>
+      {% if t.open %}<span class="critical-flag">● {{ t.open }} waiting</span>{% endif %}</div>
+    <div class="progress-note" style="margin-top:2px;">
+      {% if t.last_met %}last 1:1 {{ t.last_met }}{% else %}no 1:1 logged yet{% endif %}
+      {% if not t.member_active %}· not on the active roster{% endif %}</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No leader has started a 1:1 with a team member yet.</div>
+{% endif %}
+
+<div class="sub">Your own team-member 1:1s are visible to you only. Each
+leader's 1:1s with the team are visible to that leader and you — never to
+other leaders (admins included). Growth &amp; coaching only.</div>
 {% endblock %}

@@ -24,10 +24,12 @@ Canada.
   lineups, goals, shift notes, announcements with read receipts,
   per-leader assigned to-dos under `/shift/todo` (any leader assigns),
   1:1 meeting agendas under `/shift/oneonone` (private to each leader +
-  the Operator master login — not other admins; plus Operator-only 1:1
-  threads with any team-roster member under `/shift/oneonone/member/<id>`,
-  table `oneonone_member_topics`, never visible to leaders or admin-role
-  leaders), team-member shout-outs
+  the Operator master login — not other admins; plus 1:1 threads with any
+  team-roster member under `/shift/oneonone/member/<id>`, table
+  `oneonone_member_topics`, one thread per (member, holder): each leader's
+  are private to that leader + the Operator, the Operator's own are
+  Operator-only, never visible to other leaders or admin-role leaders;
+  roster seeded once from `shift_roster_seed.py`), team-member shout-outs
   under `/shift/shoutouts` (optional cross-post to the team Slack channel
   via `SLACK_BOT_TOKEN` + `SHIFT_SHOUTOUT_SLACK_CHANNEL`), a guest
   recovery log
@@ -50,7 +52,9 @@ Canada.
   completion pings to a private Slack channel via `SLACK_BOT_TOKEN`;
   empty channel disables), `SHIFT_NOTIFY_EMAIL` (opt-in email copy via
   FormSubmit — unreliable, Cloudflare bot-challenges server-side posts;
-  off by default). Never store
+  off by default), `SHIFT_ROSTER_SLACK_CHANNEL` (Operator-only "Pull team
+  from Slack" roster sync; empty = #general; bot needs `channels:read` +
+  `users:read`; stores names + Slack user IDs only). Never store
   HR/discipline/wage/medical content in it. The office QR poster in
   `assets/shift-qr/` points at the live `/shift` URL;
   `scripts/generate_shift_qr.py` regenerates it (pass a different URL as

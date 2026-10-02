@@ -132,7 +132,8 @@ CREATE TABLE IF NOT EXISTS team_members (
     name TEXT NOT NULL COLLATE NOCASE UNIQUE,
     role TEXT NOT NULL DEFAULT 'team',          -- team | leader
     active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    slack_id TEXT                               -- set by the Slack #general sync
 );
 
 -- NOTE: COLLATE NOCASE case-folds ASCII only, so "José" and "josé" count as
@@ -147,7 +148,8 @@ CREATE TABLE IF NOT EXISTS leaders (
     pin_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'lead',          -- lead | admin
     active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    slack_id TEXT                               -- remembered by the Slack roster pull
 );
 
 CREATE TABLE IF NOT EXISTS checklist_templates (
@@ -339,11 +341,12 @@ CREATE TABLE IF NOT EXISTS oneonone_topics (
 CREATE INDEX IF NOT EXISTS idx_oneonone_topics
     ON oneonone_topics(leader_id, discussed_at);
 
--- Operator-only 1:1 threads with roster team members (they have no login).
--- Same shape and semantics as oneonone_topics, but visible to the Operator
--- master login ONLY: never leaders, never admin-role leaders. A separate
--- table so the live oneonone_topics table is never rebuilt and no
--- leader-facing query or route can ever select these rows.
+-- 1:1 threads with roster team members (they have no login). Same shape
+-- and semantics as oneonone_topics. Each thread belongs to whoever holds
+-- it: the Operator master login (holder NULL — Operator-only) or one
+-- leader (that leader + the Operator; never other leaders, admin-role
+-- included). A separate table so the live oneonone_topics table is never
+-- rebuilt and the leader-agenda queries and routes never touch these rows.
 -- ON DELETE CASCADE is restore-critical: import_json runs DELETE FROM
 -- team_members under foreign_keys=ON before re-inserting these rows
 -- (NO ACTION would abort restores; SET NULL violates NOT NULL). The roster
@@ -353,6 +356,11 @@ CREATE INDEX IF NOT EXISTS idx_oneonone_topics
 CREATE TABLE IF NOT EXISTS oneonone_member_topics (
     id INTEGER PRIMARY KEY,
     member_id INTEGER NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
+    -- Who holds this 1:1: a leader login, or NULL for the Operator master
+    -- login. A thread is (member_id, holder); each is private to its holder
+    -- + the Operator. SET NULL (not NO ACTION) so import_json's DELETE FROM
+    -- leaders can't abort a restore.
+    holder_leader_id INTEGER REFERENCES leaders(id) ON DELETE SET NULL,
     topic TEXT NOT NULL,
     added_by TEXT,
     created_at TEXT NOT NULL,
@@ -524,6 +532,30 @@ def _migrate(conn) -> None:
     if "leader_id" not in cols:
         conn.execute("ALTER TABLE goals ADD COLUMN leader_id INTEGER "
                      "REFERENCES leaders(id) ON DELETE SET NULL")
+    # Roster ride-along: the Slack user a roster row was pulled from or
+    # linked to, so re-syncing never duplicates anyone.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(team_members)")}
+    if "slack_id" not in cols:
+        conn.execute("ALTER TABLE team_members ADD COLUMN slack_id TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_team_members_slack "
+                 "ON team_members(slack_id) WHERE slack_id IS NOT NULL")
+    # The pull remembers which Slack account is which leader login, so a
+    # promoted team member's roster row drops out of the 1:1 picker.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(leaders)")}
+    if "slack_id" not in cols:
+        conn.execute("ALTER TABLE leaders ADD COLUMN slack_id TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_leaders_slack "
+                 "ON leaders(slack_id) WHERE slack_id IS NOT NULL")
+    # Team-member 1:1s gained a holder: existing rows stay NULL = the
+    # Operator's own (Operator-only), exactly as before.
+    cols = {r["name"] for r in conn.execute(
+        "PRAGMA table_info(oneonone_member_topics)")}
+    if "holder_leader_id" not in cols:
+        conn.execute("ALTER TABLE oneonone_member_topics ADD COLUMN "
+                     "holder_leader_id INTEGER REFERENCES leaders(id) "
+                     "ON DELETE SET NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_oneonone_member_holder "
+                 "ON oneonone_member_topics(holder_leader_id, member_id, discussed_at)")
 
 
 def _seed_base(conn) -> None:
@@ -943,7 +975,7 @@ def recent_lineup_names(days: int = 14) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def leaders(include_inactive: bool = False) -> list[dict]:
-    q = "SELECT id, name, role, active, created_at FROM leaders "
+    q = "SELECT id, name, role, active, created_at, slack_id FROM leaders "
     if not include_inactive:
         q += "WHERE active=1 "
     q += "ORDER BY name COLLATE NOCASE"
@@ -1258,9 +1290,18 @@ _ONEONONE_KINDS = {
 }
 
 
-def _add_topic(kind: str, owner_id: int, topic: str, by: str) -> bool:
-    """Add a talking point to an agenda. Returns False for an empty topic
-    or an unknown owner."""
+def _thread_where(kind: str, holder: int | None) -> tuple[str, tuple]:
+    """Member threads are per holder (NULL = the Operator's own); leader
+    agendas have one thread per leader. `IS ?` matches NULL safely."""
+    if kind == "member":
+        return " AND holder_leader_id IS ?", (holder,)
+    return "", ()
+
+
+def _add_topic(kind: str, owner_id: int, topic: str, by: str,
+               holder: int | None = None) -> bool:
+    """Add a talking point to an agenda. Returns False for an empty topic,
+    an unknown owner, or (member threads) an unknown holder."""
     table, col, owner = _ONEONONE_KINDS[kind]
     topic = " ".join((topic or "").split())
     if not topic:
@@ -1270,15 +1311,27 @@ def _add_topic(kind: str, owner_id: int, topic: str, by: str) -> bool:
             f"SELECT 1 FROM {owner} WHERE id=?", (owner_id,)
         ).fetchone():
             return False
-        conn.execute(
-            f"INSERT INTO {table} ({col}, topic, added_by, created_at) "
-            "VALUES (?,?,?,?)",
-            (owner_id, topic, by, now_stamp()),
-        )
+        if kind == "member":
+            if holder is not None and not conn.execute(
+                "SELECT 1 FROM leaders WHERE id=?", (holder,)
+            ).fetchone():
+                return False
+            conn.execute(
+                f"INSERT INTO {table} ({col}, holder_leader_id, topic, added_by, "
+                "created_at) VALUES (?,?,?,?,?)",
+                (owner_id, holder, topic, by, now_stamp()),
+            )
+        else:
+            conn.execute(
+                f"INSERT INTO {table} ({col}, topic, added_by, created_at) "
+                "VALUES (?,?,?,?)",
+                (owner_id, topic, by, now_stamp()),
+            )
     return True
 
 
-def _topics_for(kind: str, owner_id: int, meetings: int = 12) \
+def _topics_for(kind: str, owner_id: int, meetings: int = 12,
+                holder: int | None = None) \
         -> tuple[list[dict], list[dict]]:
     """(agenda, history). agenda: undiscussed topics, longest-waiting first,
     each flagged carried=True when it survived at least one past 1:1.
@@ -1286,18 +1339,19 @@ def _topics_for(kind: str, owner_id: int, meetings: int = 12) \
     `meetings` distinct dates. One transaction so a check-off landing
     mid-read can't show a topic in both lists."""
     table, col, _ = _ONEONONE_KINDS[kind]
+    where, params = _thread_where(kind, holder)
     with closing(connect()) as conn:
         conn.execute("BEGIN")
         agenda = [dict(r) for r in conn.execute(
-            f"SELECT * FROM {table} WHERE {col}=? "
+            f"SELECT * FROM {table} WHERE {col}=?{where} "
             "AND discussed_at IS NULL ORDER BY created_at, id",
-            (owner_id,),
+            (owner_id, *params),
         ).fetchall()]
         discussed = [dict(r) for r in conn.execute(
-            f"SELECT * FROM {table} WHERE {col}=? "
+            f"SELECT * FROM {table} WHERE {col}=?{where} "
             "AND discussed_at IS NOT NULL "
             "ORDER BY discussed_on DESC, discussed_at, id",
-            (owner_id,),
+            (owner_id, *params),
         ).fetchall()]
         conn.commit()
     last_met = max((t["discussed_on"] for t in discussed if t["discussed_on"]),
@@ -1381,15 +1435,16 @@ def delete_topic(topic_id: int) -> bool:
     return _delete_topic("leader", topic_id)
 
 
-# Team-member threads — the Operator master login's alone.
+# Team-member threads — per holder: the Operator (holder None) or a leader.
 
-def add_member_topic(member_id: int, topic: str, by: str) -> bool:
-    return _add_topic("member", member_id, topic, by)
+def add_member_topic(member_id: int, topic: str, by: str,
+                     holder_id: int | None = None) -> bool:
+    return _add_topic("member", member_id, topic, by, holder=holder_id)
 
 
-def oneonone_for_member(member_id: int, meetings: int = 12) \
-        -> tuple[list[dict], list[dict]]:
-    return _topics_for("member", member_id, meetings)
+def oneonone_for_member(member_id: int, holder_id: int | None = None,
+                        meetings: int = 12) -> tuple[list[dict], list[dict]]:
+    return _topics_for("member", member_id, meetings, holder=holder_id)
 
 
 def get_member_topic(topic_id: int) -> dict | None:
@@ -1408,7 +1463,7 @@ def delete_member_topic(topic_id: int) -> bool:
 def get_member(member_id: int) -> dict | None:
     with closing(connect()) as conn:
         row = conn.execute(
-            "SELECT id, name, role, active, created_at FROM team_members "
+            "SELECT id, name, role, active, created_at, slack_id FROM team_members "
             "WHERE id=?", (member_id,)
         ).fetchone()
     return dict(row) if row else None
@@ -1429,6 +1484,20 @@ def active_leader_named(name: str) -> dict | None:
     return dict(row) if row else None
 
 
+def active_leader_for_member(member: dict) -> dict | None:
+    """The active leader login this roster row is — same name, or the
+    Slack account the pull matched to that login."""
+    leader = active_leader_named(member.get("name") or "")
+    if leader or not member.get("slack_id"):
+        return leader
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT id, name, role FROM leaders WHERE active=1 AND slack_id=?",
+            (member["slack_id"],)
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def oneonone_people() -> list[dict]:
     """Everyone the Operator can open a 1:1 with, for the picker: active
     leader logins (kind 'leader') plus active roster members who aren't
@@ -1441,14 +1510,17 @@ def oneonone_people() -> list[dict]:
             SELECT 'member', m.id, m.name FROM team_members m
             WHERE m.active=1 AND NOT EXISTS (
                 SELECT 1 FROM leaders ld
-                WHERE ld.active=1 AND ld.name = m.name COLLATE NOCASE)
+                WHERE ld.active=1 AND (ld.name = m.name COLLATE NOCASE
+                                       OR ld.slack_id = m.slack_id))
             ORDER BY name COLLATE NOCASE
             """
         ).fetchall()]
 
 
-def member_oneonone_index() -> dict:
-    """The Operator's team-member section: {'threads', 'everyone', 'former'}.
+def member_oneonone_index(holder_id: int | None = None) -> dict:
+    """One holder's team-member section: {'threads', 'everyone', 'former'}
+    — the Operator's own threads (holder None) or one leader's. Never
+    counts anyone else's topics.
     threads: active members with any 1:1 topic, open agendas first then
     longest since a 1:1. everyone: every active member (A–Z, with an
     `initial` for letter dividers). former: deactivated members who still
@@ -1463,13 +1535,15 @@ def member_oneonone_index() -> dict:
                               THEN 1 END) AS open,
                    MAX(t.discussed_on) AS last_met,
                    (SELECT ld.id FROM leaders ld WHERE ld.active=1
-                    AND ld.name = m.name COLLATE NOCASE) AS leader_id
+                    AND (ld.name = m.name COLLATE NOCASE OR ld.slack_id = m.slack_id)
+                    LIMIT 1) AS leader_id
             FROM team_members m
-            LEFT JOIN oneonone_member_topics t ON t.member_id = m.id
+            LEFT JOIN oneonone_member_topics t
+                   ON t.member_id = m.id AND t.holder_leader_id IS ?
             GROUP BY m.id
             HAVING m.active = 1 OR COUNT(t.id) > 0
             ORDER BY m.name COLLATE NOCASE
-            """
+            """, (holder_id,)
         ).fetchall()]
     threads, everyone, former = [], [], []
     for r in rows:
@@ -1486,6 +1560,38 @@ def member_oneonone_index() -> dict:
     threads.sort(key=lambda r: (r["open"] == 0, r["last_met"] or "",
                                 r["name"].casefold()))
     return {"threads": threads, "everyone": everyone, "former": former}
+
+
+def leader_member_threads() -> list[dict]:
+    """Every leader-held team-member 1:1, for the Operator's overview (the
+    Operator sees all agendas): one row per (leader, member) thread, open
+    agendas first."""
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            """
+            SELECT t.member_id, m.name AS member_name, m.active AS member_active,
+                   t.holder_leader_id AS holder_id, ld.name AS holder_name,
+                   COUNT(CASE WHEN t.discussed_at IS NULL THEN 1 END) AS open,
+                   MAX(t.discussed_on) AS last_met
+            FROM oneonone_member_topics t
+            JOIN team_members m ON m.id = t.member_id
+            JOIN leaders ld ON ld.id = t.holder_leader_id
+            GROUP BY t.holder_leader_id, t.member_id
+            ORDER BY ld.name COLLATE NOCASE, open = 0,
+                     m.name COLLATE NOCASE
+            """
+        ).fetchall()]
+
+
+def open_member_topic_count(leader_id: int | None) -> int:
+    """Open topics across one leader's own team-member 1:1s."""
+    if leader_id is None:
+        return 0
+    with closing(connect()) as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM oneonone_member_topics "
+            "WHERE holder_leader_id=? AND discussed_at IS NULL", (leader_id,)
+        ).fetchone()[0]
 
 
 def oneonone_summary() -> list[dict]:
@@ -1843,6 +1949,311 @@ def add_member(name: str, role: str = "team", touch_existing: bool = True) -> bo
     return True
 
 
+def _first_word(name: str) -> str:
+    words = (name or "").split()
+    return words[0].casefold() if words else ""
+
+
+def _slack_keys(people: list[dict]) -> list[dict]:
+    people = [dict(p) for p in people]
+    for p in people:
+        p["_exact"] = {p["name"].casefold(), (p.get("display") or "").casefold()} - {""}
+        p["_first"] = {_first_word(p["name"]), _first_word(p.get("display") or "")} - {""}
+    return people
+
+
+def _match_leaders(leaders: list[dict], people: list[dict]) -> dict[str, tuple]:
+    """Which Slack person is which leader login, recomputed on every pull:
+    {slack_id: (leader, how)}. Each leader and each person at most once.
+      1. exact — the login IS the person's Slack full or display name;
+      2. remembered — the account an earlier pull or login matched, if
+         that person is still here and unclaimed (an exact match always
+         wins over it, so a wrong guess heals once the evidence improves);
+      3. first — the login's first word is the first word of exactly one
+         unclaimed person (a guess: the pull summary lists new ones).
+    Inactive logins match too (so reactivation finds them), but only
+    active ones take a person off the team roster."""
+    assigned: dict[str, tuple] = {}
+    taken: set[int] = set()
+
+    def assign(p: dict, leader: dict, how: str) -> None:
+        assigned[p["slack_id"]] = (leader, how)
+        taken.add(leader["id"])
+
+    for leader in leaders:
+        lname = leader["name"].casefold()
+        cands = [p for p in people if p["slack_id"] not in assigned and lname in p["_exact"]]
+        if len(cands) == 1:
+            assign(cands[0], leader, "exact")
+    present = {p["slack_id"]: p for p in people}
+    for leader in leaders:
+        p = present.get(leader.get("slack_id") or "")
+        if leader["id"] not in taken and p and p["slack_id"] not in assigned:
+            assign(p, leader, "remembered")
+    by_first: dict[str, list[dict]] = {}
+    for leader in leaders:
+        if leader["id"] not in taken:
+            by_first.setdefault(_first_word(leader["name"]), []).append(leader)
+    for first, group in by_first.items():
+        if not first or len(group) != 1:
+            continue
+        cands = [p for p in people if p["slack_id"] not in assigned and first in p["_first"]]
+        if len(cands) == 1:
+            assign(cands[0], group[0], "first")
+    return assigned
+
+
+def _store_leader_links(conn, assigned: dict[str, tuple]) -> list[str]:
+    """Write each match onto leaders.slack_id (unique: a Slack account
+    belongs to one login). Returns "Login → Slack name" for new or changed
+    links made by a first-name guess, for the summary."""
+    guesses = []
+    for slack_id, (leader, how) in assigned.items():
+        if leader.get("slack_id") == slack_id:
+            continue
+        conn.execute("UPDATE leaders SET slack_id=NULL WHERE slack_id=? AND id<>?",
+                     (slack_id, leader["id"]))
+        conn.execute("UPDATE leaders SET slack_id=? WHERE id=?", (slack_id, leader["id"]))
+        leader["slack_id"] = slack_id
+        if how == "first":
+            guesses.append(leader["name"])
+    return guesses
+
+
+def sync_roster_from_slack(people: list[dict], record_sync: bool = True) -> dict:
+    """Merge Slack #general members into the roster. `people` is
+    [{'slack_id', 'name', 'display'}] — real, active, full workspace members
+    with cleaned names (shift_app.fetch_slack_roster does the filtering).
+
+    Leaders (see _match_leaders): a person matched to an ACTIVE login is
+    left off the team roster (they're under Leaders; a roster twin would
+    list them twice), and any roster row already carrying their Slack name
+    is linked so the picker hides it. Unmatched active logins are reported,
+    and people who might be one of them are added but flagged ambiguous.
+
+    Roster rows are linked rather than duplicated: by Slack id; by exact
+    name (a removed row only on a multi-word name — a removed one-word
+    "Sam" may be someone else); or a one-word ACTIVE row equal to a first
+    name that only one member has. Never linked: a row named like an
+    active login that isn't this person (that's the leader's own lineup
+    entry). Never re-adds someone the Operator removed, never removes
+    anyone, never renames anyone (lineup names stay as typed).
+
+    One write transaction, so a manual pull and the daily refresh can't
+    race each other into the name UNIQUE constraint."""
+    out: dict[str, list[str]] = {k: [] for k in (
+        "added", "linked", "already", "removed_kept", "leaders", "ambiguous",
+        "duplicates", "leader_named", "leader_guesses", "unmatched_leaders")}
+    stamp = now_stamp()
+    people = _slack_keys(people)
+    with closing(connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            leaders_all = [dict(r) for r in conn.execute(
+                "SELECT id, name, active, slack_id FROM leaders "
+                "ORDER BY active DESC, name COLLATE NOCASE")]
+            assigned = _match_leaders(leaders_all, people)
+            guesses = _store_leader_links(conn, assigned)
+            matched_ids = {leader["id"] for leader, _ in assigned.values()}
+            unmatched = [l for l in leaders_all if l["active"] and l["id"] not in matched_ids]
+            out["unmatched_leaders"] = [l["name"] for l in unmatched]
+            open_keys = ({l["name"].casefold() for l in unmatched}
+                         | {_first_word(l["name"]) for l in unmatched})
+
+            rows = [dict(r) for r in conn.execute(
+                "SELECT id, name, active, slack_id FROM team_members")]
+            by_slack = {r["slack_id"]: r for r in rows if r["slack_id"]}
+            by_name = {r["name"].casefold(): r for r in rows}
+
+            def set_row_slack(row: dict, slack_id: str) -> None:
+                conn.execute("UPDATE team_members SET slack_id=? WHERE id=?",
+                             (slack_id, row["id"]))
+                row["slack_id"] = slack_id
+                by_slack[slack_id] = row
+
+            team = []
+            for p in people:
+                match = assigned.get(p["slack_id"])
+                if match and match[0]["active"]:
+                    leader = match[0]
+                    label = p["name"]
+                    if leader["name"] in guesses:
+                        out["leader_guesses"].append(f"{leader['name']} → {p['name']}")
+                    out["leaders"].append(label)
+                    # A roster row under this leader's Slack name is the
+                    # leader: link it so the picker hides it.
+                    if p["slack_id"] not in by_slack:
+                        for key in sorted(p["_exact"]):
+                            row = by_name.get(key)
+                            if row and not row["slack_id"]:
+                                set_row_slack(row, p["slack_id"])
+                                break
+                    continue
+                p["_ambiguous"] = bool((p["_exact"] | p["_first"]) & open_keys)
+                if p["_ambiguous"]:
+                    out["ambiguous"].append(p["name"])
+                team.append(p)
+
+            def owner_login(row: dict, p: dict) -> bool:
+                """The row is named like an active login that isn't p."""
+                key = row["name"].casefold()
+                for leader in leaders_all:
+                    if leader["active"] and leader["name"].casefold() == key:
+                        match = assigned.get(p["slack_id"])
+                        return not (match and match[0]["id"] == leader["id"])
+                return False
+
+            first_counts: dict[str, int] = {}
+            for p in team:
+                f = _first_word(p["name"])
+                first_counts[f] = first_counts.get(f, 0) + 1
+
+            def link(row: dict, p: dict) -> None:
+                set_row_slack(row, p["slack_id"])
+                if not row["active"]:
+                    out["removed_kept"].append(row["name"])
+                elif row["name"].casefold() == p["name"].casefold():
+                    out["linked"].append(row["name"])
+                else:
+                    out["linked"].append(f"{row['name']} → {p['name']}")
+
+            for p in team:
+                row = by_slack.get(p["slack_id"])
+                if row:
+                    out["already" if row["active"] else "removed_kept"].append(row["name"])
+                    continue
+                row = by_name.get(p["name"].casefold())
+                if row:
+                    if row["slack_id"]:
+                        out["duplicates"].append(p["name"])
+                    elif owner_login(row, p):
+                        out["leader_named"].append(p["name"])
+                    elif not row["active"] and len(row["name"].split()) < 2:
+                        out["removed_kept"].append(row["name"])   # maybe someone else: no link
+                    else:
+                        link(row, p)
+                    continue
+                first = _first_word(p["name"])
+                row = by_name.get(first)
+                if (row and row["active"] and not row["slack_id"]
+                        and len(row["name"].split()) == 1
+                        and first_counts.get(first) == 1 and not p["_ambiguous"]
+                        and not owner_login(row, p)):
+                    link(row, p)
+                    continue
+                cur = conn.execute(
+                    "INSERT INTO team_members (name, role, active, created_at, slack_id) "
+                    "VALUES (?, 'team', 1, ?, ?)", (p["name"], stamp, p["slack_id"]))
+                row = {"id": cur.lastrowid, "name": p["name"], "active": 1,
+                       "slack_id": p["slack_id"]}
+                by_slack[p["slack_id"]] = by_name[p["name"].casefold()] = row
+                out["added"].append(p["name"])
+            if record_sync:
+                conn.execute("INSERT OR REPLACE INTO meta (key, value) "
+                             "VALUES ('slack_roster_synced_at', ?)", (stamp,))
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    return out
+
+
+def relink_leaders_from_roster() -> list[str]:
+    """Match leader logins that have no Slack account yet against the
+    Slack-linked roster rows already in the database — no Slack call. Run
+    when a login is added or reactivated, so promoting a team member who
+    came in from Slack (or the boot seed) lists them once right away
+    instead of waiting for a live pull. Display names aren't stored, so
+    this uses the exact-name and unique-first-name rules only. Returns
+    "Login → roster name" for each new link."""
+    made = []
+    with closing(connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            leaders = [dict(r) for r in conn.execute(
+                "SELECT id, name, active, slack_id FROM leaders "
+                "WHERE slack_id IS NULL ORDER BY active DESC, name COLLATE NOCASE")]
+            held = {r[0] for r in conn.execute(
+                "SELECT slack_id FROM leaders WHERE slack_id IS NOT NULL")}
+            people = _slack_keys([
+                {"slack_id": r["slack_id"], "name": r["name"], "display": ""}
+                for r in conn.execute(
+                    "SELECT name, slack_id FROM team_members "
+                    "WHERE active=1 AND slack_id IS NOT NULL")
+                if r["slack_id"] not in held])
+            assigned = _match_leaders(leaders, people)
+            for slack_id, (leader, _) in assigned.items():
+                conn.execute("UPDATE leaders SET slack_id=? WHERE id=?",
+                             (slack_id, leader["id"]))
+                name = next(p["name"] for p in people if p["slack_id"] == slack_id)
+                made.append(f"{leader['name']} → {name}")
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    return made
+
+
+def apply_roster_snapshot(people: list[dict]) -> dict | None:
+    """Seed the roster ONCE from the pinned Slack #general snapshot
+    (shift_roster_seed.py), so the 1:1 picker lists the whole team on the
+    first boot after upgrade — before the bot can pull live. Same merge
+    rules as a live pull. Skipped once applied, or once a live pull has
+    run. Doesn't count as a live pull (no 'updated' stamp, no daily
+    auto-refresh). Returns the summary, or None when skipped."""
+    with closing(connect()) as conn:
+        done = conn.execute(
+            "SELECT 1 FROM meta WHERE key IN "
+            "('roster_snapshot_applied', 'slack_roster_synced_at')"
+        ).fetchone()
+    if done:
+        return None
+    out = sync_roster_from_slack([dict(p) for p in people], record_sync=False)
+    with closing(connect()) as conn, conn:
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES "
+                     "('roster_snapshot_applied', ?)", (now_stamp(),))
+    return out
+
+
+def slack_roster_synced_at() -> str | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key='slack_roster_synced_at'"
+        ).fetchone()
+    return row["value"] if row else None
+
+
+def claim_slack_roster_autosync(min_hours: float = 20) -> bool:
+    """True (and the slot is taken) when the daily background refresh is
+    due: a manual pull has succeeded at least once, and no refresh was
+    attempted within `min_hours`. Recording the ATTEMPT, not the success,
+    means a broken token retries once a day instead of on every page view."""
+    now = datetime.strptime(now_stamp(), "%Y-%m-%d %H:%M")
+    with closing(connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            vals = {r["key"]: r["value"] for r in conn.execute(
+                "SELECT key, value FROM meta WHERE key IN "
+                "('slack_roster_synced_at', 'slack_roster_attempted_at')")}
+            if "slack_roster_synced_at" not in vals:
+                conn.rollback()
+                return False
+            last = max(vals.values())
+            try:
+                due = now - datetime.strptime(last, "%Y-%m-%d %H:%M") \
+                    >= timedelta(hours=min_hours)
+            except ValueError:
+                due = True
+            if due:
+                conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES "
+                             "('slack_roster_attempted_at', ?)", (now_stamp(),))
+            conn.commit()
+            return due
+        except BaseException:
+            conn.rollback()
+            raise
+
+
 def set_member_active(member_id: int, active: bool) -> None:
     with closing(connect()) as conn, conn:
         conn.execute(
@@ -2018,7 +2429,7 @@ def export_json() -> str:
         for table in EXPORT_TABLES:
             payload[table] = [dict(r) for r in conn.execute(f"SELECT * FROM {table}")]
         payload["leaders"] = [dict(r) for r in conn.execute(
-            "SELECT id, name, role, active, created_at FROM leaders"
+            "SELECT id, name, role, active, created_at, slack_id FROM leaders"
         )]
         conn.commit()
     return json.dumps(payload, ensure_ascii=False, indent=1)
@@ -2070,10 +2481,11 @@ def import_json(raw: str) -> str | None:
                     for row in payload.get("leaders", []):
                         conn.execute(
                             "INSERT INTO leaders (id, name, pin_hash, role, active, "
-                            "created_at) VALUES (?,?,?,?,?,?)",
+                            "created_at, slack_id) VALUES (?,?,?,?,?,?,?)",
                             (row.get("id"), row.get("name", ""), locked_hash,
                              row.get("role", "lead"), row.get("active", 1),
-                             row.get("created_at", now_stamp())),
+                             row.get("created_at", now_stamp()),
+                             row.get("slack_id")),
                         )
                     for table in EXPORT_TABLES:
                         valid_cols = {r["name"] for r in

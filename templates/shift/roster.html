@@ -5,6 +5,13 @@
 <div class="sub">Names that show up when building lineups. Not logins — leaders
 get those under Admin.</div>
 
+{% if shift_is_operator %}
+<form method="post" action="{{ url_for('shift.roster_slack_sync') }}" style="margin-bottom:12px;">
+  <button class="pill small ghost" type="submit">↻ Pull team from Slack #general</button>
+  <div class="progress-note">Adds anyone in #general who isn't here yet. People
+  you've removed stay removed; leaders stay under their logins.</div>
+</form>
+{% endif %}
 <form method="post" action="{{ url_for('shift.roster_add') }}" class="inline-form" style="margin-bottom:14px;">
   <input type="text" name="name" placeholder="Add a team member…" required>
   <button class="pill primary" type="submit">Add</button>
@@ -14,9 +21,7 @@ get those under Admin.</div>
   {% for m in members %}
   <div style="display:flex; align-items:center; gap:8px; padding:8px 0; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
     <span style="flex:1; font-weight:700; font-size:14px;">{{ m.name }}</span>
-    {% if shift_is_operator %}
     <a class="pill small ghost" href="{{ url_for('shift.oneonone_member', member_id=m.id) }}">🤝 1:1</a>
-    {% endif %}
     <form method="post" action="{{ url_for('shift.roster_toggle', member_id=m.id) }}">
       <input type="hidden" name="active" value="0">
       <button class="pill small ghost" type="submit">Remove</button>

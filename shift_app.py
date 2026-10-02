@@ -55,6 +55,9 @@ SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
 # as the coverage flow (the bot must be invited to the channel). Empty
 # channel disables the cross-post.
 SHIFT_SHOUTOUT_SLACK_CHANNEL = os.getenv("SHIFT_SHOUTOUT_SLACK_CHANNEL", "").strip()
+# The team roster can be pulled from a Slack channel's members (needs the
+# bot scopes channels:read + users:read). Empty = the workspace's #general.
+SHIFT_ROSTER_SLACK_CHANNEL = os.getenv("SHIFT_ROSTER_SLACK_CHANNEL", "").strip()
 
 # In-process login throttle: 5 wrong PINs locks that name for 10 minutes.
 # Resets on redeploy and is per-worker — fine for one small gunicorn service.
@@ -133,6 +136,14 @@ def require_login():
 
 # Blueprint-scoped (not app-wide): the bot's own pages must never touch the
 # shift database, so a shift-DB failure can't break them.
+@shift_bp.errorhandler(OverflowError)
+def _id_out_of_range(e):
+    # <int:...> URL ids are unbounded, but SQLite integers stop at 2**63-1:
+    # a hand-edited huge id is just a page that doesn't exist, never a 500.
+    flash("That page doesn't exist.")
+    return redirect(url_for("shift.today"))
+
+
 @shift_bp.context_processor
 def inject_shift_globals():
     signed_in = bool(session.get("shift_name"))
@@ -643,7 +654,8 @@ def more():
         "shift/more.html",
         open_recoveries=len(open_recs),
         awaiting_recoveries=len(awaiting_recs),
-        my_open_topics=shift_db.open_topic_count(session.get("shift_leader_id")),
+        my_open_topics=(shift_db.open_topic_count(session.get("shift_leader_id"))
+                        + shift_db.open_member_topic_count(session.get("shift_leader_id"))),
     )
 
 
@@ -894,6 +906,185 @@ def todo_delete(task_id):
 
 
 # ---------------------------------------------------------------------------
+# Roster pull from Slack #general (Operator only)
+# ---------------------------------------------------------------------------
+
+class SlackRosterError(Exception):
+    """A Slack problem worth showing the Operator as-is."""
+
+
+_SLACK_SCOPE_HELP = (
+    "The CFA Sidekick Slack bot needs two more permissions to read the "
+    "team list: api.slack.com/apps → CFA Sidekick → OAuth & Permissions → "
+    "Bot Token Scopes → add channels:read and users:read → Reinstall to "
+    "Workspace. (Setup guide: docs/shift-leading-app.md.)")
+
+
+def _slack_get(method: str, params: dict) -> dict:
+    resp = requests.get(f"https://slack.com/api/{method}",
+                        headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+                        params=params, timeout=15)
+    try:
+        data = resp.json()
+    except ValueError:
+        raise SlackRosterError(f"Slack answered {resp.status_code} — try again in a minute.")
+    if data.get("ok"):
+        return data
+    error = data.get("error") or "unknown_error"
+    print(f"Slack roster {method} error: {error} {data.get('needed', '')}")
+    if error == "missing_scope":
+        raise SlackRosterError(_SLACK_SCOPE_HELP)
+    if error in ("not_authed", "invalid_auth", "account_inactive", "token_revoked"):
+        raise SlackRosterError("Slack rejected the bot token — check SLACK_BOT_TOKEN on Render.")
+    if error == "channel_not_found":
+        raise SlackRosterError("Slack can't find that channel — check SHIFT_ROSTER_SLACK_CHANNEL on Render.")
+    if error == "ratelimited":
+        raise SlackRosterError("Slack is busy — try again in a minute.")
+    raise SlackRosterError(f"Slack said “{error}” — try again in a minute.")
+
+
+def _slack_paged(method: str, params: dict, key: str) -> list:
+    items: list = []
+    cursor = ""
+    for _ in range(50):          # a 50-page answer means something is wrong
+        data = _slack_get(method, {**params, "cursor": cursor} if cursor else params)
+        items.extend(data.get(key) or [])
+        cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
+        if not cursor:
+            return items
+    raise SlackRosterError("Slack kept paging — stopped to be safe. Try again later.")
+
+
+def _clean_slack_name(raw: str) -> str:
+    """Collapse whitespace and capitalize all-lowercase words ("grace
+    fraser" -> "Grace Fraser"); mixed-case words (MacLennan, NeHa) stay."""
+    words = (raw or "").split()
+    return " ".join(w[:1].upper() + w[1:] if w.islower() else w
+                    for w in words)[:60].strip()
+
+
+def fetch_slack_roster() -> list[dict]:
+    """Members of SHIFT_ROSTER_SLACK_CHANNEL (default: the workspace's
+    #general) as [{'slack_id', 'name', 'display'}]: real, active, full
+    members only — no bots, deactivated accounts, guests, or the workspace's
+    primary owner (the Operator). Names come from the Slack profile's real
+    name; emails and everything else stay in Slack."""
+    if not SLACK_BOT_TOKEN:
+        raise SlackRosterError("Slack isn't connected — SLACK_BOT_TOKEN isn't set on Render.")
+    channel = SHIFT_ROSTER_SLACK_CHANNEL
+    if not channel:
+        channels = _slack_paged("conversations.list", {
+            "types": "public_channel", "exclude_archived": "true", "limit": 1000,
+        }, "channels")
+        channel = next((c.get("id") for c in channels if c.get("is_general")), "")
+        if not channel:
+            raise SlackRosterError("Couldn't find #general — set SHIFT_ROSTER_SLACK_CHANNEL on Render.")
+    member_ids = set(_slack_paged("conversations.members",
+                                  {"channel": channel, "limit": 1000}, "members"))
+    people = []
+    for user in _slack_paged("users.list", {"limit": 200}, "members"):
+        if user.get("id") not in member_ids or user.get("id") == "USLACKBOT":
+            continue
+        if (user.get("deleted") or user.get("is_bot") or user.get("is_app_user")
+                or user.get("is_restricted") or user.get("is_ultra_restricted")
+                or user.get("is_primary_owner")):
+            continue
+        profile = user.get("profile") or {}
+        name = _clean_slack_name(profile.get("real_name") or user.get("real_name")
+                                 or profile.get("display_name") or "")
+        if name:
+            people.append({"slack_id": user["id"], "name": name,
+                           "display": _clean_slack_name(profile.get("display_name") or "")})
+    return people
+
+
+def _slack_sync_summary(summary: dict, pulled: int) -> str:
+    def names(key: str) -> str:
+        found = summary[key]
+        shown = ", ".join(found[:8])
+        return shown + (f" +{len(found) - 8} more" if len(found) > 8 else "")
+
+    parts = [f"Pulled {pulled} people from Slack."]
+    if summary["added"]:
+        parts.append(f"Added {len(summary['added'])}: {names('added')}.")
+    else:
+        parts.append("Nobody new to add.")
+    on_roster = len(summary["already"]) + len(summary["linked"])
+    if on_roster:
+        parts.append(f"{on_roster} already on the roster.")
+    renamed = [x for x in summary["linked"] if "→" in x]
+    if renamed:
+        parts.append("Matched to existing roster names: " + ", ".join(renamed[:8])
+                     + (f" +{len(renamed) - 8} more" if len(renamed) > 8 else "") + ".")
+    if summary["leaders"]:
+        parts.append(f"{len(summary['leaders'])} have leader logins (they're under Leaders).")
+    if summary["removed_kept"]:
+        parts.append(f"Left off because you removed them from the roster: "
+                     f"{names('removed_kept')} — restore them on Team roster if that was a mistake.")
+    if summary["ambiguous"]:
+        parts.append(f"Couldn't tell which of these is a leader login, so they're "
+                     f"listed as team members: {names('ambiguous')}. Setting the "
+                     "leader's Slack display name to their login name sorts it "
+                     "out on the next pull.")
+    if summary["duplicates"]:
+        parts.append(f"Skipped — same name as someone already linked: {names('duplicates')}.")
+    if summary["leader_named"]:
+        parts.append(f"Skipped — a roster entry with that exact name is a leader's "
+                     f"login: {names('leader_named')}.")
+    if summary["leader_guesses"]:
+        parts.append(f"Matched leader logins by first name: {names('leader_guesses')} "
+                     "— if one is wrong, set that leader's Slack display name to "
+                     "their login name and pull again.")
+    if summary["unmatched_leaders"]:
+        parts.append(f"No Slack account matched these leader logins: "
+                     f"{names('unmatched_leaders')} — set their Slack display name "
+                     "to their login name so they aren't listed twice.")
+    return " ".join(parts)
+
+
+@shift_bp.route("/roster/slack-sync", methods=["POST"])
+@operator_required
+def roster_slack_sync():
+    # No #team fragment: on a phone it would scroll the result (or the
+    # Slack setup instructions) off-screen above the fold.
+    back = (url_for("shift.oneonone")
+            if request.form.get("back") == "oneonone" else url_for("shift.roster"))
+    try:
+        people = fetch_slack_roster()
+    except SlackRosterError as e:
+        flash(str(e))
+        return redirect(back)
+    except Exception as e:  # network trouble — never a 500 for the Operator
+        print(f"Slack roster pull failed: {e}")
+        flash("Couldn't reach Slack just now — try again in a minute.")
+        return redirect(back)
+    summary = shift_db.sync_roster_from_slack(people)
+    print(f"Slack roster pull: {len(people)} people, added {len(summary['added'])}")
+    flash(_slack_sync_summary(summary, len(people)))
+    return redirect(back)
+
+
+def _maybe_autosync_roster() -> None:
+    """Once a day, after the first manual pull, refresh the roster from
+    Slack in the background when the Operator opens the 1:1 page — so new
+    hires show up in the picker without anyone remembering to tap."""
+    if not SLACK_BOT_TOKEN or not shift_db.claim_slack_roster_autosync():
+        return
+
+    def run() -> None:
+        try:
+            summary = shift_db.sync_roster_from_slack(fetch_slack_roster())
+            print(f"Slack roster auto-sync: added {len(summary['added'])}")
+        except Exception as e:
+            print(f"Slack roster auto-sync failed: {e}")
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    if current_app.config.get("TESTING"):
+        thread.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------
 # 1:1 meeting agendas — private between each leader and the Operator
 # ---------------------------------------------------------------------------
 
@@ -903,28 +1094,51 @@ def _oneonone_url(kind: str, subject_id: int) -> str:
     return url_for("shift.oneonone_member", member_id=subject_id)
 
 
+def _picker_choice() -> tuple[str, int] | None:
+    """The 1:1 dropdown posts "leader:<id>" or "member:<id>". ASCII digits
+    only, and short: str.isdigit() also passes "²", and ids past SQLite's
+    int64 range crash the target route's lookup. The target route
+    re-checks existence and access, so a stale or hand-edited value just
+    lands on that route's own handling."""
+    kind, _, subject_id = request.args.get("who", "").partition(":")
+    if kind in ("leader", "member") and re.fullmatch(r"[0-9]{1,9}", subject_id):
+        return kind, int(subject_id)
+    return None
+
+
 @shift_bp.route("/oneonone")
 def oneonone():
+    choice = _picker_choice()
     if _is_operator():
-        # The picker posts "leader:<id>" or "member:<id>"; the target route
-        # re-checks existence and access, so a stale or hand-edited value
-        # just lands on that route's own "doesn't exist" flash.
-        kind, _, subject_id = request.args.get("who", "").partition(":")
-        # ASCII digits only, and short: str.isdigit() also passes "²", and
-        # ids past SQLite's int64 range crash the target route's lookup.
-        if kind in ("leader", "member") and re.fullmatch(r"[0-9]{1,9}", subject_id):
-            return redirect(_oneonone_url(kind, int(subject_id)))
+        if choice:
+            return redirect(_oneonone_url(*choice))
+        _maybe_autosync_roster()
         return render_template("shift/oneonone.html",
                                leaders=shift_db.oneonone_summary(),
                                team=shift_db.member_oneonone_index(),
-                               people=shift_db.oneonone_people())
-    # Leaders never see the picker or any lookup — straight to their own
-    # agenda, so ?who= reveals nothing about who exists.
+                               people=shift_db.oneonone_people(),
+                               leader_threads=shift_db.leader_member_threads(),
+                               slack_synced_at=shift_db.slack_roster_synced_at())
     leader_id = session.get("shift_leader_id")
     if not leader_id:
         flash("Your login isn't linked to a leader profile — ask the Operator.")
         return redirect(url_for("shift.today"))
-    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
+    # A leader's picker only ever opens their OWN threads: a team member
+    # (their 1:1 with that person) or their own agenda with the Operator —
+    # never another leader's agenda, whatever id the URL carries.
+    if choice and choice[0] == "member":
+        return redirect(url_for("shift.oneonone_member", member_id=choice[1]))
+    if choice:
+        return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
+    _, history = shift_db.oneonone_for_leader(leader_id)
+    return render_template(
+        "shift/oneonone_mine.html",
+        me=shift_db.get_leader(leader_id),
+        my_open=shift_db.open_topic_count(leader_id),
+        my_last_met=history[0]["date"] if history else None,
+        team=shift_db.member_oneonone_index(holder_id=leader_id),
+        people=[p for p in shift_db.oneonone_people() if p["kind"] == "member"],
+    )
 
 
 @shift_bp.route("/oneonone/<int:leader_id>")
@@ -1021,57 +1235,127 @@ def oneonone_action(leader_id):
                     + "#actions")
 
 
-# Team-member 1:1s — the Operator master login's alone. Team members have
-# no login, and leaders (admin-role included) never reach these routes:
-# operator_required runs before any lookup. Separate table and URL prefix,
-# so a member topic id can never be acted on through the leader routes.
+# Team-member 1:1s. Each thread is (member, holder): the Operator master
+# login's own (holder None — Operator-only) or one leader's (that leader +
+# the Operator; never other leaders, admin-role included). Team members
+# have no login. Separate table and URL prefix, so a member topic id can
+# never be acted on through the leader-agenda routes.
 
-@shift_bp.route("/oneonone/member/<int:member_id>")
-@operator_required
-def oneonone_member(member_id):
+_MEMBER_PRIVATE = ("Team-member 1:1s are private to the leader who holds "
+                   "them and the Operator.")
+
+
+def _member_thread_holder(url_holder_id: int | None) -> tuple[bool, int | None]:
+    """(allowed, holder) for a thread URL. The plain URL is the viewer's
+    own thread (the Operator's, or this leader's); /by/<leader> is a
+    leader's thread, open to that leader and the Operator only."""
+    if _is_operator():
+        return True, url_holder_id
+    me = session.get("shift_leader_id")
+    if me and url_holder_id in (None, me):
+        return True, me
+    return False, None
+
+
+def _can_touch_member_thread(holder_id: int | None) -> bool:
+    return _is_operator() or (holder_id is not None
+                              and session.get("shift_leader_id") == holder_id)
+
+
+def _member_thread_url(member_id: int, holder_id: int | None,
+                       endpoint: str = "shift.oneonone_member") -> str:
+    # The Operator reaches a leader's thread via /by/<leader>; everyone's
+    # own thread is the plain URL.
+    if holder_id is not None and _is_operator():
+        return url_for(endpoint, member_id=member_id, holder_id=holder_id)
+    return url_for(endpoint, member_id=member_id)
+
+
+def _member_thread_context(member_id: int, url_holder_id: int | None):
+    """Shared checks for a thread's page and its add-topic form. Returns
+    (member, holder_id, holder_leader) or a redirect response."""
+    allowed, holder = _member_thread_holder(url_holder_id)
+    if not allowed:
+        flash(_MEMBER_PRIVATE)
+        return redirect(url_for("shift.oneonone"))
+    holder_leader = None
+    if holder is not None:
+        holder_leader = shift_db.get_leader(holder)
+        if not holder_leader:
+            flash("That leader doesn't exist.")
+            return redirect(url_for("shift.oneonone"))
     member = shift_db.get_member(member_id)
     if not member:
         flash("That team member isn't on the roster.")
         return redirect(url_for("shift.oneonone") + "#team")
-    agenda, history = shift_db.oneonone_for_member(member_id)
-    leader = shift_db.active_leader_named(member["name"])
+    return member, holder, holder_leader
+
+
+@shift_bp.route("/oneonone/member/<int:member_id>", defaults={"holder_id": None})
+@shift_bp.route("/oneonone/member/<int:member_id>/by/<int:holder_id>")
+def oneonone_member(member_id, holder_id):
+    ctx = _member_thread_context(member_id, holder_id)
+    if not isinstance(ctx, tuple):
+        return ctx
+    member, holder, holder_leader = ctx
+    agenda, history = shift_db.oneonone_for_member(member_id, holder)
+    leader = shift_db.active_leader_for_member(member)
     if leader and not agenda and not history:
         # One thread per person: someone with a leader login has a shared
-        # agenda already.
-        return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
-    return render_template("shift/oneonone_member.html", member=member,
-                           agenda=agenda, history=history, leader=leader)
+        # agenda with the Operator already.
+        if holder is None:
+            return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
+        flash(f"{leader['name']} has a leader login — 1:1s with leaders go "
+              "through the Operator.")
+        return redirect(url_for("shift.oneonone"))
+    return render_template(
+        "shift/oneonone_member.html", member=member, agenda=agenda,
+        history=history, leader=leader, holder=holder_leader,
+        topics_url=_member_thread_url(member_id, holder,
+                                      "shift.oneonone_member_topic_add"))
 
 
-@shift_bp.route("/oneonone/member/<int:member_id>/topics", methods=["POST"])
-@operator_required
-def oneonone_member_topic_add(member_id):
-    member = shift_db.get_member(member_id)
-    if not member:
-        flash("That team member isn't on the roster.")
-        return redirect(url_for("shift.oneonone") + "#team")
-    leader = shift_db.active_leader_named(member["name"])
+@shift_bp.route("/oneonone/member/<int:member_id>/topics", methods=["POST"],
+                defaults={"holder_id": None})
+@shift_bp.route("/oneonone/member/<int:member_id>/by/<int:holder_id>/topics",
+                methods=["POST"])
+def oneonone_member_topic_add(member_id, holder_id):
+    ctx = _member_thread_context(member_id, holder_id)
+    if not isinstance(ctx, tuple):
+        return ctx
+    member, holder, _ = ctx
+    leader = shift_db.active_leader_for_member(member)
     if leader:
-        # A leader's 1:1 is shared with them — an Operator-only shadow file
-        # on the same person would go around that.
-        flash(f"{leader['name']} has a leader login — add it to your shared 1:1 instead.")
-        return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
+        # A leader's 1:1 is shared with them — a shadow file on the same
+        # person would go around that.
+        if holder is None:
+            flash(f"{leader['name']} has a leader login — add it to your shared 1:1 instead.")
+            return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
+        flash(f"{leader['name']} has a leader login — 1:1s with leaders go "
+              "through the Operator.")
+        return redirect(url_for("shift.oneonone"))
     if not shift_db.add_member_topic(member_id, request.form.get("topic", ""),
-                                     current_name()):
+                                     current_name(), holder_id=holder):
         flash("A talking point needs some words.")
-        return redirect(url_for("shift.oneonone_member", member_id=member_id))
-    return redirect(url_for("shift.oneonone_member", member_id=member_id)
-                    + "#agenda")
+        return redirect(_member_thread_url(member_id, holder))
+    return redirect(_member_thread_url(member_id, holder) + "#agenda")
+
+
+def _member_topic_for_viewer(topic_id: int) -> dict | None:
+    # holder and member come from the row, never the form.
+    topic = shift_db.get_member_topic(topic_id)
+    if not topic or not _can_touch_member_thread(topic["holder_leader_id"]):
+        flash("That topic doesn't exist or isn't on your agenda.")
+        return None
+    return topic
 
 
 @shift_bp.route("/oneonone/member/topic/<int:topic_id>/toggle", methods=["POST"])
-@operator_required
 def oneonone_member_topic_toggle(topic_id):
-    # member_id comes from the row, never the form.
-    topic = shift_db.get_member_topic(topic_id)
+    topic = _member_topic_for_viewer(topic_id)
     if not topic:
-        flash("That topic doesn't exist any more.")
-        return redirect(url_for("shift.oneonone") + "#team")
+        return redirect(url_for("shift.oneonone"))
+    back = _member_thread_url(topic["member_id"], topic["holder_leader_id"])
     discussed = request.form.get("discussed") == "1"
     ok = shift_db.set_member_topic_discussed(
         topic_id, discussed, request.form.get("note", ""), current_name())
@@ -1083,23 +1367,21 @@ def oneonone_member_topic_toggle(topic_id):
                   else "Already back on the agenda — nothing changed.")
         else:
             flash("That topic doesn't exist any more.")
-            return redirect(url_for("shift.oneonone_member",
-                                    member_id=topic["member_id"]))
+            return redirect(back)
     anchor = "#agenda" if discussed else f"#topic-{topic_id}"
-    return redirect(url_for("shift.oneonone_member",
-                            member_id=topic["member_id"]) + anchor)
+    return redirect(back + anchor)
 
 
 @shift_bp.route("/oneonone/member/topic/<int:topic_id>/delete", methods=["POST"])
-@operator_required
 def oneonone_member_topic_delete(topic_id):
-    topic = shift_db.get_member_topic(topic_id)
+    topic = _member_topic_for_viewer(topic_id)
     if not topic:
-        flash("That topic doesn't exist any more.")
-        return redirect(url_for("shift.oneonone") + "#team")
-    if not shift_db.delete_member_topic(topic_id):
+        return redirect(url_for("shift.oneonone"))
+    if not (_is_operator() or topic["added_by"] == current_name()):
+        flash("Only whoever added a topic (or the Operator) can remove it.")
+    elif not shift_db.delete_member_topic(topic_id):
         flash("That topic was already discussed — it's part of meeting history now.")
-    return redirect(url_for("shift.oneonone_member", member_id=topic["member_id"]))
+    return redirect(_member_thread_url(topic["member_id"], topic["holder_leader_id"]))
 
 
 # ---------------------------------------------------------------------------
@@ -1355,13 +1637,34 @@ def admin_leader_add():
     )
     if error:
         flash(error)
+    else:
+        _flash_leader_relinks()
     return redirect(url_for("shift.admin"))
+
+
+def _flash_leader_relinks() -> None:
+    """A new or reactivated login may be someone already on the team
+    roster (from Slack): link them so the 1:1 picker lists them once, and
+    say so — it's a name-based match the Operator should be able to see."""
+    try:
+        made = shift_db.relink_leaders_from_roster()
+    except Exception as e:  # never block the admin action itself
+        print(f"Leader relink failed: {e}")
+        return
+    if made:
+        flash("Matched to the team roster, so they're listed once in the 1:1 "
+              f"picker: {', '.join(made)}. If that's not the same person, set "
+              "the leader's Slack display name to their login name and pull "
+              "from Slack.")
 
 
 @shift_bp.route("/admin/leaders/<int:leader_id>/toggle", methods=["POST"])
 @admin_required
 def admin_leader_toggle(leader_id):
-    shift_db.set_leader_active(leader_id, request.form.get("active") == "1")
+    active = request.form.get("active") == "1"
+    shift_db.set_leader_active(leader_id, active)
+    if active:
+        _flash_leader_relinks()
     return redirect(url_for("shift.admin"))
 
 

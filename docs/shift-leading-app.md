@@ -63,21 +63,25 @@ the leadership team:
   only — not to other leaders, and not to admin-role leaders either.**
   Growth and operational topics only; conduct/discipline/wage/health
   conversations never go in this app.
-  **Team members too:** the Operator's 1:1 page has a dropdown of everyone
-  (leaders first, then the active team roster — pick a name and the 1:1
-  opens, no typing) plus a browsable roster list, so a 1:1 can be opened
-  with anyone on the team roster, not just leaders. A
-  team-member 1:1 works the same way — talking points between meetings,
-  check-offs with outcome notes, carried topics, past-meeting history —
-  minus goals, course, and to-dos (those are leader features). **These are
-  visible to the Operator master login only**: team members have no
-  login, and leaders (admin-role included) never see them. Someone with a
-  leader login appears once, under Leaders, and opens the shared leader
-  agenda (one thread per person). Each roster member also gets a 🤝 1:1 shortcut on
-  the Team roster page (Operator only). Growth and coaching only —
-  conduct, attendance, discipline, wage, medical, and accommodation
-  matters stay in the `docs/legal-counsel/` process. Two people with the
-  same name need distinct roster entries (e.g. "Sam K." and "Sam T.").
+  **Team members too:** every leader — not just the Operator — can hold
+  1:1s with anyone on the team roster. More → 1:1 meetings has a dropdown
+  of the team (pick a name and the 1:1 opens, no typing); a leader's page
+  also links their own agenda with the Operator, and the Operator's
+  dropdown lists leaders first, then the team. A team-member 1:1 works
+  the same way — talking points between meetings, check-offs with outcome
+  notes, carried topics, past-meeting history — minus goals, course, and
+  to-dos (those are leader features). **Privacy: each team-member 1:1
+  belongs to whoever holds it.** A leader's 1:1s with team members are
+  visible to that leader and the Operator only — never to other leaders,
+  admin-role included; the Operator's own are Operator-only; and the
+  Operator's page has a "Leaders' 1:1s with the team" overview of every
+  leader's. Team members have no login. Someone with a leader login
+  appears once, under Leaders (1:1s with leaders go through the
+  Operator's shared agenda). Each roster member also gets a 🤝 1:1
+  shortcut on the Team roster page. Growth and coaching only — conduct,
+  attendance, discipline, wage, medical, and accommodation matters stay
+  in the `docs/legal-counsel/` process. Two people with the same name
+  need distinct roster entries (e.g. "Sam K." and "Sam T.").
 - **Shout-outs** — any leader recognizes a team member in ~20 seconds:
   name (roster autosuggest), an optional value tag (2nd-mile service,
   speed, food safety, teamwork, hospitality, cleanliness), and what
@@ -111,6 +115,7 @@ GroupMe and Slack bots keep running untouched.
 | `SHIFT_NOTIFY_SLACK_CHANNEL` | For completion pings | Slack channel ID the to-do completion pings post to. The CFA Sidekick Slack bot (`SLACK_BOT_TOKEN`) must be invited to it. Empty (default) disables the pings. Production: `C0C51833JAH` (#sidekick-alerts). |
 | `SHIFT_NOTIFY_SLACK_MENTION` | No | Slack user ID to @-mention in each ping so it triggers a phone notification. Production: `U05R80802EB` (the Operator). |
 | `SHIFT_SHOUTOUT_SLACK_CHANNEL` | For shout-out cross-posts | Slack channel ID where shout-outs post for the whole team (the CFA Sidekick bot must be invited to it). Empty (default) keeps shout-outs in-app. Production: `C0682FXBY3T` (#recognition-). |
+| `SHIFT_ROSTER_SLACK_CHANNEL` | No | Slack channel ID whose members the *Pull team from Slack* button adds to the team roster. Empty (default) = the workspace's #general (`C05S15A1XMF` in production). Needs the bot scopes below. |
 | `SHIFT_NOTIFY_EMAIL` | No | Opt-in email copy of completion notifications, via FormSubmit. Off by default — FormSubmit sits behind Cloudflare bot protection that challenges server-side posts, so email delivery is unreliable; Slack is the supported path. |
 
 ### To-do completion pings (Slack)
@@ -129,6 +134,50 @@ Every ping shows who completed what, the due date, how many to-dos that
 leader still has open, and a link to their to-do page. Failures are logged
 (`To-do completion Slack status: …` in Render logs) and never shown to the
 leader tapping the checkmark.
+
+### Pulling the team roster from Slack #general
+
+The Operator's 1:1 page and the Team roster page have a **↻ Pull team from
+Slack #general** button (Operator master login only). It adds everyone in
+#general to the team roster under their Slack real name, so they show up
+in the 1:1 dropdown (and lineup autosuggest):
+
+- Leaders with a login are skipped — they're already under Leaders.
+  A login matches the Slack account whose full or display name *is* the
+  login name; failing that, the one person whose first name matches.
+  First-name guesses and logins with no match are listed in the pull
+  result — if one is wrong, set that leader's Slack display name to their
+  login name and pull again (an exact match always wins). The match is
+  remembered on the login, so when you add or reactivate a leader who's
+  already on the roster from Slack (a promotion), they're listed once
+  right away — the admin page says who they were matched to.
+- A deactivated leader is treated as a team member until reactivated.
+- The workspace owner (the Operator), bots, deactivated accounts, and
+  guests are skipped.
+- An existing roster name is linked instead of duplicated (same full
+  name, or a one-word name like "Calla" matching exactly one person's
+  first name). Nobody is ever renamed.
+- People you've **removed** from the roster stay removed; the pull never
+  takes anyone off the roster either — remove leavers on Team roster.
+- Only names (and the Slack user ID, to avoid duplicates) are stored —
+  never emails or anything else from Slack.
+- After the first pull, it refreshes itself once a day in the background
+  when the Operator opens the 1:1 page, so new hires appear on their own.
+
+The first boot after this feature shipped also seeded the roster once
+from a pinned snapshot of #general (`shift_roster_seed.py`, names + Slack
+user IDs only, same merge rules), so the dropdown was full before the
+Slack setup below. It never runs again, and never after a live pull.
+
+One-time Slack setup (the bot can only post until you do this):
+
+1. api.slack.com/apps → **CFA Sidekick** → **OAuth & Permissions** →
+   **Bot Token Scopes** → add `channels:read` and `users:read`.
+2. Click **Reinstall to Workspace** (top of that page) and approve.
+3. Slack normally keeps the same Bot User OAuth Token. If the page shows
+   a different `xoxb-` token, paste it into `SLACK_BOT_TOKEN` on Render.
+4. Tap the pull button. If a permission is still missing, the button says
+   exactly which one.
 
 ## The persistent disk (do this before rollout)
 
