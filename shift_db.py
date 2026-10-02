@@ -1954,100 +1954,162 @@ def _first_word(name: str) -> str:
     return words[0].casefold() if words else ""
 
 
+def _slack_keys(people: list[dict]) -> list[dict]:
+    people = [dict(p) for p in people]
+    for p in people:
+        p["_exact"] = {p["name"].casefold(), (p.get("display") or "").casefold()} - {""}
+        p["_first"] = {_first_word(p["name"]), _first_word(p.get("display") or "")} - {""}
+    return people
+
+
+def _match_leaders(leaders: list[dict], people: list[dict]) -> dict[str, tuple]:
+    """Which Slack person is which leader login, recomputed on every pull:
+    {slack_id: (leader, how)}. Each leader and each person at most once.
+      1. exact — the login IS the person's Slack full or display name;
+      2. remembered — the account an earlier pull or login matched, if
+         that person is still here and unclaimed (an exact match always
+         wins over it, so a wrong guess heals once the evidence improves);
+      3. first — the login's first word is the first word of exactly one
+         unclaimed person (a guess: the pull summary lists new ones).
+    Inactive logins match too (so reactivation finds them), but only
+    active ones take a person off the team roster."""
+    assigned: dict[str, tuple] = {}
+    taken: set[int] = set()
+
+    def assign(p: dict, leader: dict, how: str) -> None:
+        assigned[p["slack_id"]] = (leader, how)
+        taken.add(leader["id"])
+
+    for leader in leaders:
+        lname = leader["name"].casefold()
+        cands = [p for p in people if p["slack_id"] not in assigned and lname in p["_exact"]]
+        if len(cands) == 1:
+            assign(cands[0], leader, "exact")
+    present = {p["slack_id"]: p for p in people}
+    for leader in leaders:
+        p = present.get(leader.get("slack_id") or "")
+        if leader["id"] not in taken and p and p["slack_id"] not in assigned:
+            assign(p, leader, "remembered")
+    by_first: dict[str, list[dict]] = {}
+    for leader in leaders:
+        if leader["id"] not in taken:
+            by_first.setdefault(_first_word(leader["name"]), []).append(leader)
+    for first, group in by_first.items():
+        if not first or len(group) != 1:
+            continue
+        cands = [p for p in people if p["slack_id"] not in assigned and first in p["_first"]]
+        if len(cands) == 1:
+            assign(cands[0], group[0], "first")
+    return assigned
+
+
+def _store_leader_links(conn, assigned: dict[str, tuple]) -> list[str]:
+    """Write each match onto leaders.slack_id (unique: a Slack account
+    belongs to one login). Returns "Login → Slack name" for new or changed
+    links made by a first-name guess, for the summary."""
+    guesses = []
+    for slack_id, (leader, how) in assigned.items():
+        if leader.get("slack_id") == slack_id:
+            continue
+        conn.execute("UPDATE leaders SET slack_id=NULL WHERE slack_id=? AND id<>?",
+                     (slack_id, leader["id"]))
+        conn.execute("UPDATE leaders SET slack_id=? WHERE id=?", (slack_id, leader["id"]))
+        leader["slack_id"] = slack_id
+        if how == "first":
+            guesses.append(leader["name"])
+    return guesses
+
+
 def sync_roster_from_slack(people: list[dict], record_sync: bool = True) -> dict:
     """Merge Slack #general members into the roster. `people` is
     [{'slack_id', 'name', 'display'}] — real, active, full workspace members
     with cleaned names (shift_app.fetch_slack_roster does the filtering).
 
-    Leaders: a Slack member who IS an active leader login is left off the
-    roster (they're under Leaders; a roster twin would list them twice in
-    the 1:1 picker). Matched in priority order, each leader at most once,
-    each person at most once: the Slack account remembered from an earlier
-    pull, then an exact full or display name, then — only when exactly one
-    unmatched member has it — the first name. The match is remembered on
-    the login (leaders.slack_id). Members who might be an unmatched leader
-    are still added, and reported as ambiguous.
+    Leaders (see _match_leaders): a person matched to an ACTIVE login is
+    left off the team roster (they're under Leaders; a roster twin would
+    list them twice), and any roster row already carrying their Slack name
+    is linked so the picker hides it. Unmatched active logins are reported,
+    and people who might be one of them are added but flagged ambiguous.
 
     Roster rows are linked rather than duplicated: by Slack id; by exact
     name (a removed row only on a multi-word name — a removed one-word
     "Sam" may be someone else); or a one-word ACTIVE row equal to a first
-    name that only one member has. Never linked: a row named like a leader
-    login (that's the leader's own lineup entry). Never re-adds someone the
-    Operator removed, never removes anyone, never renames anyone (lineup
-    names stay as typed).
+    name that only one member has. Never linked: a row named like an
+    active login that isn't this person (that's the leader's own lineup
+    entry). Never re-adds someone the Operator removed, never removes
+    anyone, never renames anyone (lineup names stay as typed).
 
     One write transaction, so a manual pull and the daily refresh can't
     race each other into the name UNIQUE constraint."""
     out: dict[str, list[str]] = {k: [] for k in (
-        "added", "linked", "already", "removed_kept", "leaders",
-        "ambiguous", "duplicates")}
+        "added", "linked", "already", "removed_kept", "leaders", "ambiguous",
+        "duplicates", "leader_named", "leader_guesses", "unmatched_leaders")}
     stamp = now_stamp()
-    people = [dict(p) for p in people]
-    for p in people:
-        p["_exact"] = {p["name"].casefold(), (p.get("display") or "").casefold()} - {""}
-        p["_first"] = {_first_word(p["name"]), _first_word(p.get("display") or "")} - {""}
+    people = _slack_keys(people)
     with closing(connect()) as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
             leaders_all = [dict(r) for r in conn.execute(
                 "SELECT id, name, active, slack_id FROM leaders "
-                "ORDER BY name COLLATE NOCASE")]
-            leader_names_any = {l["name"].casefold() for l in leaders_all}
-            active = [l for l in leaders_all if l["active"]]
-            assigned: dict[str, dict] = {}            # slack_id -> leader
-            taken: set[int] = set()
-
-            def assign(person: dict, leader: dict) -> None:
-                assigned[person["slack_id"]] = leader
-                taken.add(leader["id"])
-
-            remembered = {l["slack_id"]: l for l in active if l["slack_id"]}
-            for p in people:
-                if p["slack_id"] in remembered:
-                    assign(p, remembered[p["slack_id"]])
-            for keys in ("_exact", "_first"):
-                for l in active:
-                    if l["id"] in taken:
-                        continue
-                    lname = l["name"].casefold()
-                    cands = [p for p in people
-                             if p["slack_id"] not in assigned and lname in p[keys]]
-                    if len(cands) == 1:
-                        assign(cands[0], l)
-            open_leader_names = {l["name"].casefold() for l in active
-                                 if l["id"] not in taken}
-
-            team = []
-            for p in people:
-                leader = assigned.get(p["slack_id"])
-                if leader:
-                    if leader["slack_id"] != p["slack_id"]:
-                        conn.execute("UPDATE leaders SET slack_id=NULL "
-                                     "WHERE slack_id=? AND id<>?",
-                                     (p["slack_id"], leader["id"]))
-                        conn.execute("UPDATE leaders SET slack_id=? WHERE id=?",
-                                     (p["slack_id"], leader["id"]))
-                    out["leaders"].append(p["name"])
-                    continue
-                p["_ambiguous"] = bool((p["_exact"] | p["_first"]) & open_leader_names)
-                if p["_ambiguous"]:
-                    out["ambiguous"].append(p["name"])
-                team.append(p)
+                "ORDER BY active DESC, name COLLATE NOCASE")]
+            assigned = _match_leaders(leaders_all, people)
+            guesses = _store_leader_links(conn, assigned)
+            matched_ids = {leader["id"] for leader, _ in assigned.values()}
+            unmatched = [l for l in leaders_all if l["active"] and l["id"] not in matched_ids]
+            out["unmatched_leaders"] = [l["name"] for l in unmatched]
+            open_keys = ({l["name"].casefold() for l in unmatched}
+                         | {_first_word(l["name"]) for l in unmatched})
 
             rows = [dict(r) for r in conn.execute(
                 "SELECT id, name, active, slack_id FROM team_members")]
             by_slack = {r["slack_id"]: r for r in rows if r["slack_id"]}
             by_name = {r["name"].casefold(): r for r in rows}
+
+            def set_row_slack(row: dict, slack_id: str) -> None:
+                conn.execute("UPDATE team_members SET slack_id=? WHERE id=?",
+                             (slack_id, row["id"]))
+                row["slack_id"] = slack_id
+                by_slack[slack_id] = row
+
+            team = []
+            for p in people:
+                match = assigned.get(p["slack_id"])
+                if match and match[0]["active"]:
+                    leader = match[0]
+                    label = p["name"]
+                    if leader["name"] in guesses:
+                        out["leader_guesses"].append(f"{leader['name']} → {p['name']}")
+                    out["leaders"].append(label)
+                    # A roster row under this leader's Slack name is the
+                    # leader: link it so the picker hides it.
+                    if p["slack_id"] not in by_slack:
+                        for key in sorted(p["_exact"]):
+                            row = by_name.get(key)
+                            if row and not row["slack_id"]:
+                                set_row_slack(row, p["slack_id"])
+                                break
+                    continue
+                p["_ambiguous"] = bool((p["_exact"] | p["_first"]) & open_keys)
+                if p["_ambiguous"]:
+                    out["ambiguous"].append(p["name"])
+                team.append(p)
+
+            def owner_login(row: dict, p: dict) -> bool:
+                """The row is named like an active login that isn't p."""
+                key = row["name"].casefold()
+                for leader in leaders_all:
+                    if leader["active"] and leader["name"].casefold() == key:
+                        match = assigned.get(p["slack_id"])
+                        return not (match and match[0]["id"] == leader["id"])
+                return False
+
             first_counts: dict[str, int] = {}
             for p in team:
                 f = _first_word(p["name"])
                 first_counts[f] = first_counts.get(f, 0) + 1
 
             def link(row: dict, p: dict) -> None:
-                conn.execute("UPDATE team_members SET slack_id=? WHERE id=?",
-                             (p["slack_id"], row["id"]))
-                row["slack_id"] = p["slack_id"]
-                by_slack[p["slack_id"]] = row
+                set_row_slack(row, p["slack_id"])
                 if not row["active"]:
                     out["removed_kept"].append(row["name"])
                 elif row["name"].casefold() == p["name"].casefold():
@@ -2062,8 +2124,10 @@ def sync_roster_from_slack(people: list[dict], record_sync: bool = True) -> dict
                     continue
                 row = by_name.get(p["name"].casefold())
                 if row:
-                    if row["slack_id"] or row["name"].casefold() in leader_names_any:
+                    if row["slack_id"]:
                         out["duplicates"].append(p["name"])
+                    elif owner_login(row, p):
+                        out["leader_named"].append(p["name"])
                     elif not row["active"] and len(row["name"].split()) < 2:
                         out["removed_kept"].append(row["name"])   # maybe someone else: no link
                     else:
@@ -2074,7 +2138,7 @@ def sync_roster_from_slack(people: list[dict], record_sync: bool = True) -> dict
                 if (row and row["active"] and not row["slack_id"]
                         and len(row["name"].split()) == 1
                         and first_counts.get(first) == 1 and not p["_ambiguous"]
-                        and first not in leader_names_any):
+                        and not owner_login(row, p)):
                     link(row, p)
                     continue
                 cur = conn.execute(
@@ -2092,6 +2156,42 @@ def sync_roster_from_slack(people: list[dict], record_sync: bool = True) -> dict
             conn.rollback()
             raise
     return out
+
+
+def relink_leaders_from_roster() -> list[str]:
+    """Match leader logins that have no Slack account yet against the
+    Slack-linked roster rows already in the database — no Slack call. Run
+    when a login is added or reactivated, so promoting a team member who
+    came in from Slack (or the boot seed) lists them once right away
+    instead of waiting for a live pull. Display names aren't stored, so
+    this uses the exact-name and unique-first-name rules only. Returns
+    "Login → roster name" for each new link."""
+    made = []
+    with closing(connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            leaders = [dict(r) for r in conn.execute(
+                "SELECT id, name, active, slack_id FROM leaders "
+                "WHERE slack_id IS NULL ORDER BY active DESC, name COLLATE NOCASE")]
+            held = {r[0] for r in conn.execute(
+                "SELECT slack_id FROM leaders WHERE slack_id IS NOT NULL")}
+            people = _slack_keys([
+                {"slack_id": r["slack_id"], "name": r["name"], "display": ""}
+                for r in conn.execute(
+                    "SELECT name, slack_id FROM team_members "
+                    "WHERE active=1 AND slack_id IS NOT NULL")
+                if r["slack_id"] not in held])
+            assigned = _match_leaders(leaders, people)
+            for slack_id, (leader, _) in assigned.items():
+                conn.execute("UPDATE leaders SET slack_id=? WHERE id=?",
+                             (slack_id, leader["id"]))
+                name = next(p["name"] for p in people if p["slack_id"] == slack_id)
+                made.append(f"{leader['name']} → {name}")
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    return made
 
 
 def apply_roster_snapshot(people: list[dict]) -> dict | None:

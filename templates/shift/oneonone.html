@@ -71,7 +71,7 @@ window.addEventListener('pageshow', function () {
   </a>
   {% endfor %}
 </div>
-{% else %}
+{% elif not team.former %}
 <div class="empty">No team-member 1:1s yet — pick someone from the list above to start one.</div>
 {% endif %}
 
@@ -94,13 +94,14 @@ window.addEventListener('pageshow', function () {
 {% endif %}
 
 {% if team.former %}
-<details style="margin-bottom:12px;">
+<details style="margin-bottom:12px;" {{ 'open' if team.former | selectattr('open') | list }}>
   <summary style="font-size:13px; color:var(--soft); cursor:pointer; padding:6px 0;">Former team members with 1:1 history ({{ team.former | length }})</summary>
   <div class="card" style="padding: 4px 14px; margin-top:8px;">
     {% for m in team.former %}
     <a href="{{ url_for('shift.oneonone_member', member_id=m.id) }}"
        style="display:flex; align-items:center; min-height:44px; text-decoration:none; color:var(--soft); {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
       <span style="flex:1; font-size:14px;">{{ m.name }}</span>
+      {% if m.open %}<span class="critical-flag" style="margin-right:6px;">● {{ m.open }} waiting</span>{% endif %}
       <span class="progress-note" style="margin:0;">{% if m.last_met %}last 1:1 {{ m.last_met }}{% endif %}</span>
     </a>
     {% endfor %}

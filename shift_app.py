@@ -136,6 +136,14 @@ def require_login():
 
 # Blueprint-scoped (not app-wide): the bot's own pages must never touch the
 # shift database, so a shift-DB failure can't break them.
+@shift_bp.errorhandler(OverflowError)
+def _id_out_of_range(e):
+    # <int:...> URL ids are unbounded, but SQLite integers stop at 2**63-1:
+    # a hand-edited huge id is just a page that doesn't exist, never a 500.
+    flash("That page doesn't exist.")
+    return redirect(url_for("shift.today"))
+
+
 @shift_bp.context_processor
 def inject_shift_globals():
     signed_in = bool(session.get("shift_name"))
@@ -1020,6 +1028,17 @@ def _slack_sync_summary(summary: dict, pulled: int) -> str:
                      "out on the next pull.")
     if summary["duplicates"]:
         parts.append(f"Skipped — same name as someone already linked: {names('duplicates')}.")
+    if summary["leader_named"]:
+        parts.append(f"Skipped — a roster entry with that exact name is a leader's "
+                     f"login: {names('leader_named')}.")
+    if summary["leader_guesses"]:
+        parts.append(f"Matched leader logins by first name: {names('leader_guesses')} "
+                     "— if one is wrong, set that leader's Slack display name to "
+                     "their login name and pull again.")
+    if summary["unmatched_leaders"]:
+        parts.append(f"No Slack account matched these leader logins: "
+                     f"{names('unmatched_leaders')} — set their Slack display name "
+                     "to their login name so they aren't listed twice.")
     return " ".join(parts)
 
 
@@ -1618,13 +1637,34 @@ def admin_leader_add():
     )
     if error:
         flash(error)
+    else:
+        _flash_leader_relinks()
     return redirect(url_for("shift.admin"))
+
+
+def _flash_leader_relinks() -> None:
+    """A new or reactivated login may be someone already on the team
+    roster (from Slack): link them so the 1:1 picker lists them once, and
+    say so — it's a name-based match the Operator should be able to see."""
+    try:
+        made = shift_db.relink_leaders_from_roster()
+    except Exception as e:  # never block the admin action itself
+        print(f"Leader relink failed: {e}")
+        return
+    if made:
+        flash("Matched to the team roster, so they're listed once in the 1:1 "
+              f"picker: {', '.join(made)}. If that's not the same person, set "
+              "the leader's Slack display name to their login name and pull "
+              "from Slack.")
 
 
 @shift_bp.route("/admin/leaders/<int:leader_id>/toggle", methods=["POST"])
 @admin_required
 def admin_leader_toggle(leader_id):
-    shift_db.set_leader_active(leader_id, request.form.get("active") == "1")
+    active = request.form.get("active") == "1"
+    shift_db.set_leader_active(leader_id, active)
+    if active:
+        _flash_leader_relinks()
     return redirect(url_for("shift.admin"))
 
 

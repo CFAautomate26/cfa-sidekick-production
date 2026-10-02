@@ -1241,6 +1241,55 @@ def test_roster_slack_sync_route(client, fake_slack):
     assert resp.headers["Location"].endswith("/shift/roster")
 
 
+def test_promoting_a_pulled_member_flashes_the_match(client, fake_slack):
+    login_operator(client)
+    client.post("/shift/roster/slack-sync")                # Calla Jonkman pulled
+    resp = client.post("/shift/admin/leaders/add",
+                       data={"name": "Calla", "pin": "4444"}, follow_redirects=True)
+    assert "Calla → Calla Jonkman".encode() in resp.data
+    page = client.get("/shift/oneonone").data.decode()
+    picker = page[page.index('<select name="who"'):page.index("</select>")]
+    assert ">Calla</option>" in picker and "Calla Jonkman" not in picker
+
+
+def test_former_member_threads_show_what_is_waiting(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    shift_db.add_member("Avery")
+    av = _roster_id("Avery")
+    login_leader(client)
+    client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "Check in"})
+    shift_db.set_member_active(av, False)                 # Avery left the roster
+    assert "● 1 on your agenda".encode() in client.get("/shift/more").data
+    page = client.get("/shift/oneonone").data.decode()
+    assert "No 1:1s with team members yet" not in page    # badge and page agree
+    former = page[page.index("Former team members with 1:1 history"):]
+    assert "● 1 waiting" in former
+    assert "<details style=\"margin-bottom:12px;\" open>" in page
+    # Leaders can get back to their 1:1 page from their agenda
+    agenda = client.get(f"/shift/oneonone/{maya['id']}").data.decode()
+    assert 'href="/shift/oneonone">← All 1:1s' in agenda
+
+
+def test_oversized_ids_never_500(client):
+    make_leader(client)
+    huge = "9" * 25
+    for login in (login_leader, login_operator):
+        login(client)
+        for method, url in [
+            ("get", f"/shift/oneonone/member/{huge}"),
+            ("get", f"/shift/oneonone/member/1/by/{huge}"),
+            ("post", f"/shift/oneonone/member/{huge}/topics"),
+            ("post", f"/shift/oneonone/member/topic/{huge}/toggle"),
+            ("post", f"/shift/oneonone/member/topic/{huge}/delete"),
+            ("post", f"/shift/oneonone/topic/{huge}/toggle"),
+            ("get", f"/shift/goals/{huge}"),
+        ]:
+            resp = getattr(client, method)(url, follow_redirects=True)
+            assert resp.status_code == 200, (login.__name__, url)
+        client.post("/shift/logout")
+
+
 def test_roster_slack_sync_route_is_operator_only(client, fake_slack):
     make_leader(client)                                    # Maya, lead
     make_leader(client, name="Dana", pin="5555", role="admin")

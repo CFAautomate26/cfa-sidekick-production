@@ -143,7 +143,15 @@ Slack #general** button (Operator master login only). It adds everyone in
 in the 1:1 dropdown (and lineup autosuggest):
 
 - Leaders with a login are skipped — they're already under Leaders.
-  Matching is by full name, Slack display name, or first name.
+  A login matches the Slack account whose full or display name *is* the
+  login name; failing that, the one person whose first name matches.
+  First-name guesses and logins with no match are listed in the pull
+  result — if one is wrong, set that leader's Slack display name to their
+  login name and pull again (an exact match always wins). The match is
+  remembered on the login, so when you add or reactivate a leader who's
+  already on the roster from Slack (a promotion), they're listed once
+  right away — the admin page says who they were matched to.
+- A deactivated leader is treated as a team member until reactivated.
 - The workspace owner (the Operator), bots, deactivated accounts, and
   guests are skipped.
 - An existing roster name is linked instead of duplicated (same full

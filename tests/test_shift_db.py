@@ -1105,7 +1105,9 @@ def test_sync_never_links_a_leaders_lineup_row(isolated_db):
         _slack_person("UTM", "Sammy Jones")])
     assert out["leaders"] == ["Samantha Lee"]             # exact display wins
     assert out["added"] == ["Sammy Jones"] and not out["ambiguous"]
-    assert next(r for r in shift_db.roster() if r["name"] == "Sammy")["slack_id"] is None
+    # Her own lineup row is linked to HER account (so it stays hidden),
+    # never to Sammy Jones
+    assert next(r for r in shift_db.roster() if r["name"] == "Sammy")["slack_id"] == "ULEAD"
     assert shift_db.leaders()[0]["slack_id"] == "ULEAD"
     team = [p["name"] for p in shift_db.oneonone_people() if p["kind"] == "member"]
     assert team == ["Sammy Jones"]                        # leader listed once
@@ -1155,6 +1157,70 @@ def test_sync_ambiguous_leader_claimants_are_listed_and_reported(isolated_db):
     assert out["leaders"] == ["Chloe Hill"] and not out["ambiguous"]
     team = [p["name"] for p in shift_db.oneonone_people() if p["kind"] == "member"]
     assert team == ["Chloe Nguyen"]
+
+
+def test_promotion_after_seed_lists_the_leader_once(isolated_db):
+    import shift_roster_seed
+    shift_db.add_leader("Riya", "1111")
+    shift_db.apply_roster_snapshot(shift_roster_seed.PEOPLE)
+    assert ("member", "Keira Van Dinther") in [
+        (p["kind"], p["name"]) for p in shift_db.oneonone_people()]
+    shift_db.add_leader("Keira", "2222")                  # promoted later
+    assert shift_db.relink_leaders_from_roster() == ["Keira → Keira Van Dinther"]
+    picker = [(p["kind"], p["name"]) for p in shift_db.oneonone_people()]
+    assert ("leader", "Keira") in picker
+    assert ("member", "Keira Van Dinther") not in picker
+    keira_row = shift_db.get_member(_member_id("Keira Van Dinther"))
+    assert shift_db.active_leader_for_member(keira_row)["name"] == "Keira"
+    assert shift_db.relink_leaders_from_roster() == []    # idempotent
+
+
+def test_wrong_first_name_guess_heals_on_exact_match(isolated_db):
+    shift_db.add_leader("Pru", "1111")
+    people = [_slack_person("UPRU", "Prudence MacLennan"),
+              _slack_person("UNEW", "Pru Smith")]
+    out = shift_db.sync_roster_from_slack([dict(p) for p in people])
+    assert out["leader_guesses"] == ["Pru → Pru Smith"]   # visible in the flash
+    assert out["added"] == ["Prudence MacLennan"]
+    # Prudence sets her Slack display name to her login, as the flash says
+    people[0]["display"] = "Pru"
+    out = shift_db.sync_roster_from_slack([dict(p) for p in people])
+    assert out["leaders"] == ["Prudence MacLennan"]
+    assert out["added"] == ["Pru Smith"]                  # no longer hidden
+    picker = [(p["kind"], p["name"]) for p in shift_db.oneonone_people()]
+    assert picker == [("leader", "Pru"), ("member", "Pru Smith")]  # Prudence hidden
+
+
+def test_leader_roster_row_under_slack_name_is_hidden(isolated_db):
+    shift_db.add_leader("Neha", "1111")
+    shift_db.add_member("Neha Ambookkan")                 # typed in full once
+    out = shift_db.sync_roster_from_slack([_slack_person("UNEHA", "Neha Ambookkan", "NeHa")])
+    assert out["leaders"] == ["Neha Ambookkan"]
+    picker = [(p["kind"], p["name"]) for p in shift_db.oneonone_people()]
+    assert picker == [("leader", "Neha")]                 # listed once
+
+
+def test_deactivated_leader_links_their_lineup_row(isolated_db):
+    shift_db.add_leader("Keira", "1111")
+    keira = shift_db.leaders()[0]
+    shift_db.set_leader_active(keira["id"], False)        # stepped back to team
+    shift_db.add_member("Keira")                          # her lineup row
+    out = shift_db.sync_roster_from_slack([_slack_person("UK", "Keira Van Dinther", "Keira")])
+    assert out["linked"] == ["Keira → Keira Van Dinther"] and not out["added"]
+    team = [p["name"] for p in shift_db.oneonone_people() if p["kind"] == "member"]
+    assert team == ["Keira"]                              # once, as a team member
+    # Back as a leader: listed once, under Leaders
+    shift_db.set_leader_active(keira["id"], True)
+    picker = [(p["kind"], p["name"]) for p in shift_db.oneonone_people()]
+    assert picker == [("leader", "Keira")]
+
+
+def test_unmatched_leaders_reported_and_multiword_logins(isolated_db):
+    shift_db.add_leader("Riya Thomas", "1111")            # multi-word login
+    shift_db.add_leader("Pru", "2222")                    # not in Slack at all
+    out = shift_db.sync_roster_from_slack([_slack_person("URIYA", "Riya Ronny Thomas")])
+    assert out["leaders"] == ["Riya Ronny Thomas"]        # first word of the login
+    assert out["unmatched_leaders"] == ["Pru"]
 
 
 def test_claim_slack_roster_autosync(isolated_db):
