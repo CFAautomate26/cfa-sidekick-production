@@ -591,8 +591,10 @@ def roster_toggle(member_id):
 
 @shift_bp.route("/more")
 def more():
+    open_recs, awaiting_recs, _ = shift_db.recovery_feed(resolved_limit=0)
     return render_template("shift/more.html",
-                           open_recoveries=shift_db.open_recovery_count())
+                           open_recoveries=len(open_recs),
+                           awaiting_recoveries=len(awaiting_recs))
 
 
 # ---------------------------------------------------------------------------

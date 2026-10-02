@@ -1207,9 +1207,12 @@ def recovery_feed(resolved_limit: int = 50) \
 
 
 def open_recovery_count() -> int:
+    """Truly-open recoveries (nobody has reached the guest yet) — matches
+    recovery_feed's open bucket, so badges never contradict the page."""
     with closing(connect()) as conn:
         return conn.execute(
-            "SELECT COUNT(*) FROM guest_recoveries WHERE resolved_at IS NULL"
+            "SELECT COUNT(*) FROM guest_recoveries "
+            "WHERE resolved_at IS NULL AND contacted_at IS NULL"
         ).fetchone()[0]
 
 
@@ -1281,17 +1284,24 @@ def recovery_issue_counts(days: int = 28) -> list[dict]:
 
 
 def purge_old_recovery_contacts(days: int = 90) -> int:
-    """Clear guest phone/email on recoveries resolved more than `days` ago
-    (the row itself — name, issue, remedy, outcome — stays for history).
-    Called on every recovery-page view, so old contact info ages out of the
-    database and future backups without any cron. Returns rows purged."""
+    """Clear guest phone/email (and the free-text contact note) on
+    recoveries resolved more than `days` ago, and on contacted-but-never-
+    came-back rows whose contact is older than that — otherwise the
+    awaiting state would park guest PII forever. The row itself (name,
+    issue, remedy, outcome) stays for history. Called on every
+    recovery-page view, so old contact info ages out of the database and
+    future backups without any cron. Returns rows purged."""
     cutoff = (date.fromisoformat(today_local()) - timedelta(days=days)).isoformat()
     with closing(connect()) as conn, conn:
         cur = conn.execute(
-            "UPDATE guest_recoveries SET guest_phone=NULL, guest_email=NULL "
-            "WHERE resolved_at IS NOT NULL AND resolved_at < ? "
-            "AND (guest_phone IS NOT NULL OR guest_email IS NOT NULL)",
-            (cutoff,),
+            "UPDATE guest_recoveries SET guest_phone=NULL, guest_email=NULL, "
+            "contact_note=NULL WHERE "
+            "((resolved_at IS NOT NULL AND resolved_at < ?) "
+            " OR (resolved_at IS NULL AND contacted_at IS NOT NULL "
+            "     AND contacted_at < ?)) "
+            "AND (guest_phone IS NOT NULL OR guest_email IS NOT NULL "
+            "     OR contact_note IS NOT NULL)",
+            (cutoff, cutoff),
         )
         return cur.rowcount
 

@@ -660,7 +660,7 @@ def test_recovery_contact_route_flow(client):
     assert b"Waiting to come back (1)" in page and b"coming Saturday" in page
 
     today_page = client.get("/shift/").data
-    assert b"coming back for their replacement" in today_page
+    assert "📞 1 contacted — coming back".encode() in today_page
     assert b"Jordan" in today_page
 
     # Second contact from a stale page: told, first stamp kept
@@ -689,11 +689,19 @@ def test_recovery_contacted_now_checkbox(client):
     })
     open_recs, awaiting, _ = shift_db.recovery_feed()
     assert not open_recs and awaiting[0]["guest_name"] == "Sam"
-    assert b"Waiting to come back (1)" in client.get("/shift/recovery").data
+    page = client.get("/shift/recovery").data
+    assert b"Waiting to come back (1)" in page
+    # The open list's empty-state must not celebrate while a guest waits
+    assert b"every guest taken care of" not in page
+    assert b"Nobody left to contact" in page
     # Today card renders in its calm (non-red) awaiting-only form
     today_page = client.get("/shift/").data
-    assert b"coming back for their replacement" in today_page
-    assert b"Hand over their replacement" in today_page
+    assert "📞 1 contacted — coming back".encode() in today_page
+    assert b"Hand over what was promised" in today_page
+    # More badge must agree: no red "open" badge, a calm coming-back note
+    more_page = client.get("/shift/more").data
+    assert b"open</span>" not in more_page
+    assert "📞 1 coming back".encode() in more_page
 
 
 def test_recovery_operator_create_and_resolve(client):

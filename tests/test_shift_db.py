@@ -724,15 +724,28 @@ def test_recovery_contact_purge_after_90_days(isolated_db):
                                   "refund", "", False, "Riya", resolved_now=True)
     still_open = shift_db.add_recovery("Open", "519-555-0003", "", "service",
                                        "refund", "", False, "Riya")
+    # A guest who was contacted but never came back must also age out —
+    # the awaiting state can't park PII forever.
+    no_show = shift_db.add_recovery("NoShow", "519-555-0004", "", "service",
+                                    "refund", "", False, "Riya")
+    shift_db.set_recovery_contacted(no_show, True, "said next week", "Riya")
+    waiting_fresh = shift_db.add_recovery("Waiting", "519-555-0005", "",
+                                          "service", "refund", "", False, "Riya")
+    shift_db.set_recovery_contacted(waiting_fresh, True, "Sat", "Riya")
     with shift_db.closing(shift_db.connect()) as conn, conn:
         conn.execute("UPDATE guest_recoveries SET resolved_at=? WHERE id=?",
                      ("2020-01-01 09:00", old))
-    assert shift_db.purge_old_recovery_contacts() == 1
+        conn.execute("UPDATE guest_recoveries SET contacted_at=? WHERE id=?",
+                     ("2020-01-01 09:00", no_show))
+    assert shift_db.purge_old_recovery_contacts() == 2
     purged = shift_db.get_recovery(old)
     assert purged["guest_phone"] is None and purged["guest_email"] is None
     assert purged["guest_name"] == "Old"              # history row survives
+    gone = shift_db.get_recovery(no_show)
+    assert gone["guest_phone"] is None and gone["contact_note"] is None
     assert shift_db.get_recovery(fresh)["guest_phone"] == "519-555-0002"
     assert shift_db.get_recovery(still_open)["guest_phone"] == "519-555-0003"
+    assert shift_db.get_recovery(waiting_fresh)["contact_note"] == "Sat"
     assert shift_db.purge_old_recovery_contacts() == 0  # idempotent
 
 

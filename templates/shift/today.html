@@ -49,10 +49,10 @@
   <div style="font-size:13px; color:var(--soft); padding:3px 0;">+{{ open_recoveries | length - 3 }} more</div>
   {% endif %}
   {% if awaiting_recoveries %}
-  <div style="font-size:13px; padding:3px 0;">📞 {{ awaiting_recoveries | length }} contacted — coming back for their replacement
+  <div style="font-size:13px; padding:3px 0;">📞 {{ awaiting_recoveries | length }} contacted — coming back
     ({{ awaiting_recoveries[:2] | map(attribute='guest_name') | join(', ') }}{{ '…' if awaiting_recoveries | length > 2 }})</div>
   {% endif %}
-  <div class="progress-note">{% if open_recoveries %}{{ open_recoveries | length }} guest{{ 's' if open_recoveries | length != 1 }} waiting — tap to resolve or log a new one{% else %}Hand over their replacement when they're in, then mark it done{% endif %}</div>
+  <div class="progress-note">{% if open_recoveries %}{{ open_recoveries | length }} guest{{ 's' if open_recoveries | length != 1 }} waiting — tap to resolve or log a new one{% else %}Hand over what was promised when they're in, then mark it done{% endif %}</div>
 </a>
 {% endif %}
 

@@ -79,9 +79,9 @@
   </div>
   {% if r.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:4px;">{{ r.details }}</div>{% endif %}
   <div class="progress-note">logged by {{ r.logged_by }} · {{ r.created_at }}</div>
-  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-top:8px;">
-    <details style="flex:1;">
-      <summary class="pill small" style="cursor:pointer; display:inline-block;">📞 Contacted — coming back</summary>
+  <div style="display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px; margin-top:8px;">
+    <details style="flex:1; min-width:130px;">
+      <summary class="pill small" style="cursor:pointer; display:inline-block;">📞 Contacted</summary>
       <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}" style="margin-top:8px;">
         <input type="hidden" name="contacted" value="1">
         <input type="text" name="note" placeholder="What was agreed — e.g. coming Sat for the remake">
@@ -90,7 +90,7 @@
         </div>
       </form>
     </details>
-    <details style="flex:1;">
+    <details style="flex:1; min-width:130px;">
       <summary class="pill small primary" style="cursor:pointer; display:inline-block;">Resolve ✓</summary>
       <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}" style="margin-top:8px;">
         <input type="hidden" name="resolved" value="1">
@@ -109,7 +109,7 @@
   </div>
 </div>
 {% else %}
-<div class="empty">No open recoveries — every guest taken care of ✓</div>
+<div class="empty">{% if awaiting_recs %}Nobody left to contact — {{ awaiting_recs | length }} guest{{ 's' if awaiting_recs | length != 1 }} below waiting to come back.{% else %}No open recoveries — every guest taken care of ✓{% endif %}</div>
 {% endfor %}
 
 {% if awaiting_recs %}
@@ -144,7 +144,8 @@
         </div>
       </form>
     </details>
-    <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}">
+    <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}"
+          onsubmit="return confirm('Undo? This clears the contacted stamp and the note about what was agreed, and moves it back to the open list.');">
       <input type="hidden" name="contacted" value="0">
       <button class="pill small ghost" type="submit">Undo</button>
     </form>
