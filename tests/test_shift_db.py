@@ -685,6 +685,17 @@ def _member_id(name):
                 if m["name"] == name)
 
 
+def test_add_leader_may_replace_guard(isolated_db):
+    assert shift_db.add_leader("Maya", "4721") is None
+    err = shift_db.add_leader(" maya ", "0000", role="admin", may_replace=False)
+    assert err and "only the Operator" in err
+    maya = shift_db.leaders()[0]
+    assert maya["role"] == "lead" and shift_db.verify_leader("Maya", "4721")
+    assert shift_db.add_leader("Devon", "8888", may_replace=False) is None
+    assert shift_db.add_leader("Maya", "1357") is None    # Operator path
+    assert shift_db.verify_leader("Maya", "1357")
+
+
 def test_migration_adds_member_oneonone_table(tmp_path, monkeypatch):
     monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "prod.db"))
     shift_db.init_db()

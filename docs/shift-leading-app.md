@@ -164,6 +164,9 @@ scale.
 - Backups and leader PIN resets are **Operator-master-login only** (not
   admin-role leaders): the backup JSON contains every leader's private
   1:1 content, and a PIN reset would allow logging in as another leader.
+  That includes re-adding an existing leader's name under *Add a leader*
+  (which replaces their PIN): admins can add brand-new leaders, but only
+  the Operator can re-add an existing one.
 - **Manual**: Admin → *Download backup (JSON)* — everything except PINs.
   Backups now include guest recovery rows (guest names + contact info), so
   treat exported files with the same care as the database itself.

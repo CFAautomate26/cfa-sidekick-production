@@ -1353,6 +1353,7 @@ def admin_leader_add():
     error = shift_db.add_leader(
         request.form.get("name", ""), request.form.get("pin", ""),
         role="admin" if request.form.get("role") == "admin" else "lead",
+        may_replace=_is_operator(),
     )
     if error:
         flash(error)

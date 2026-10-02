@@ -775,6 +775,41 @@ def test_backups_and_pin_resets_are_operator_only(client):
                       follow_redirects=False).status_code == 302
 
 
+def test_admin_cannot_take_over_a_login_by_re_adding_it(client):
+    make_leader(client)                                   # Maya, PIN 4721
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    login_operator(client)
+    client.post(f"/shift/oneonone/{maya['id']}/topics",
+                data={"topic": "MAYA-PRIVATE-NOTE"})
+    client.post("/shift/logout")
+
+    # Re-adding an existing name would replace its PIN — a back-door reset
+    login_leader(client, name="Dana", pin="5555")
+    for name in ["Maya", "  mAYA "]:
+        resp = client.post("/shift/admin/leaders/add",
+                           data={"name": name, "pin": "0000", "role": "admin"},
+                           follow_redirects=True)
+        assert b"only the Operator can reset a PIN" in resp.data
+    # Brand-new names still work for admins
+    client.post("/shift/admin/leaders/add", data={"name": "Jordan", "pin": "6060"})
+    client.post("/shift/logout")
+    assert login_leader(client, name="Maya", pin="0000").status_code == 401
+    assert login_leader(client).status_code == 302        # original PIN intact
+    assert next(l for l in shift_db.leaders()
+                if l["name"] == "Maya")["role"] == "lead"
+    assert b"MAYA-PRIVATE-NOTE" in client.get(f"/shift/oneonone/{maya['id']}").data
+    client.post("/shift/logout")
+    assert login_leader(client, name="Jordan", pin="6060").status_code == 302
+    client.post("/shift/logout")
+
+    # The Operator keeps the re-add path (reactivate + new PIN)
+    login_operator(client)
+    client.post("/shift/admin/leaders/add", data={"name": "Maya", "pin": "1357"})
+    client.post("/shift/logout")
+    assert login_leader(client, name="Maya", pin="1357").status_code == 302
+
+
 def test_restore_invalidates_leader_sessions(client):
     make_leader(client)
     login_operator(client)
@@ -908,8 +943,26 @@ def test_oneonone_index_picker(client):
     assert resp.headers["Location"].endswith(f"/shift/oneonone/member/{_roster_id('Avery')}")
     resp = client.get("/shift/oneonone?q=%20MAYA%20", follow_redirects=False)
     assert resp.headers["Location"].endswith(f"/shift/oneonone/{maya['id']}")
-    page = client.get("/shift/oneonone?q=av").data
-    assert f"/shift/oneonone/member/{_roster_id('Avery')}".encode() in page
+    def match_block(q):
+        # Only the search-results block — the roster browse list further
+        # down links everyone regardless of the query.
+        page = client.get("/shift/oneonone", query_string={"q": q}).data.decode()
+        return page[page.index("</datalist>"):page.index('id="leaders"')]
+
+    block = match_block("av")
+    assert f"/shift/oneonone/member/{_roster_id('Avery')}" in block
+    assert "Blake" not in block and "No one matches" not in block
+    assert '<span class="note-cat">Team</span>' in block
+    block = match_block("ay")                             # partial leader name
+    assert f"/shift/oneonone/{maya['id']}" in block
+    assert '<span class="note-cat">Leader</span>' in block
+    shift_db.add_member("Casey Former")
+    cf = _roster_id("Casey Former")
+    shift_db.add_member_topic(cf, "History", "Operator")
+    shift_db.set_member_active(cf, False)
+    block = match_block("casey")
+    assert f"/shift/oneonone/member/{cf}" in block
+    assert '<span class="note-cat">former</span>' in block
     roster_size = len(shift_db.roster(include_inactive=True))
     page = client.get("/shift/oneonone?q=nobody").data
     assert b"No one matches" in page

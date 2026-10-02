@@ -951,8 +951,13 @@ def leaders(include_inactive: bool = False) -> list[dict]:
         return [dict(r) for r in conn.execute(q).fetchall()]
 
 
-def add_leader(name: str, pin: str, role: str = "lead") -> str | None:
-    """Create (or reactivate) a leader login. Returns an error message or None."""
+def add_leader(name: str, pin: str, role: str = "lead",
+               may_replace: bool = True) -> str | None:
+    """Create (or reactivate) a leader login. Returns an error message or None.
+    Re-adding an existing name REPLACES its PIN and role, so only the
+    Operator master login may do it (may_replace=False refuses): for anyone
+    else it would be a PIN reset by another name — log in as that leader,
+    read their private 1:1."""
     name = " ".join(name.split())
     if not name:
         return "Name is required."
@@ -965,6 +970,9 @@ def add_leader(name: str, pin: str, role: str = "lead") -> str | None:
         existing = conn.execute(
             "SELECT id FROM leaders WHERE name=? COLLATE NOCASE", (name,)
         ).fetchone()
+        if existing and not may_replace:
+            return (f"{name} already has a login — only the Operator can "
+                    "reset a PIN.")
         if existing:
             conn.execute(
                 "UPDATE leaders SET pin_hash=?, role=?, active=1 WHERE id=?",
