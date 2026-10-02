@@ -22,11 +22,13 @@ the leadership team:
 - **Announcements** — Operator/admin posts; every leader taps **Got it**, and
   admins see exactly who has acknowledged.
 - **History** — any past day's checklists (who did what), lineups, and notes.
-- **Leader to-dos** — admins assign tasks to individual leaders (title,
-  details, due date); each leader's open to-dos appear on their Today
-  screen the moment they sign in, they check them off from their to-do
-  page (stamped who/when), and admins see open/overdue counts per leader
-  with a full completed history. When a leader completes a task, the
+- **Leader to-dos** — any leader assigns tasks to any leader (title,
+  details, due date; stamped with who assigned it); each leader's open
+  to-dos appear on their Today screen the moment they sign in, they check
+  them off from their to-do page (stamped who/when; only the assignee or
+  an admin can complete or reopen a task, and only admins delete), and
+  everyone sees open/overdue counts per leader with a full completed
+  history. When a leader completes a task, the
   Operator gets a **Slack ping** in a private channel (posted by the same
   Slack bot as the coverage flow, with an @-mention so the phone buzzes) —
   see "To-do completion pings" below. An email copy via FormSubmit is
@@ -39,8 +41,8 @@ the leadership team:
   (remade on the spot, refund, free entrée card, dessert/drink, catering
   credit…), plus whether the guest expects a call-back. Open recoveries
   sit on everyone's Today screen until someone resolves them (stamped
-  who/when, with a note on how it was closed); admins also get a 28-day
-  what-keeps-going-wrong breakdown. A middle state covers the common case
+  who/when, with a note on how it was closed); every leader sees the
+  28-day what-keeps-going-wrong breakdown. A middle state covers the common case
   of reaching the guest before they've been made whole: mark it
   **"Contacted — coming back"** (or tick "already talked to the guest"
   when logging) and it moves to a *Waiting to come back* list — every

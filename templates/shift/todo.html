@@ -7,7 +7,7 @@ assign or review.</div>
 
 {% for l in leaders %}
 <a class="card tap" href="{{ url_for('shift.todo_leader', leader_id=l.id) }}">
-  <h2>{{ l.name }} <span style="font-weight:400; color:var(--soft);">· {{ l.role }}</span>
+  <h2>{{ l.name }}{{ ' (you)' if l.id == my_leader_id }} <span style="font-weight:400; color:var(--soft);">· {{ l.role }}</span>
     {% if l.overdue %}<span class="critical-flag">● {{ l.overdue }} overdue</span>{% endif %}</h2>
   <div class="progress-note">
     {% if l.open %}{{ l.open }} open{% else %}All caught up ✓{% endif %}

@@ -194,7 +194,7 @@
 </details>
 {% endif %}
 
-{% if shift_is_admin and issue_counts %}
+{% if issue_counts %}
 {% set max_count = issue_counts | map(attribute='count') | max %}
 <details style="margin-top:14px;">
   <summary style="cursor:pointer;" class="section-label">📊 Last 28 days</summary>

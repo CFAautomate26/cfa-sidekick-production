@@ -4,7 +4,6 @@
 <h1 class="page">{{ leader.name }}'s to-dos</h1>
 <div class="sub">{{ open_tasks | length }} open{% if done_tasks %} · {{ done_tasks | length }} completed{% endif %}</div>
 
-{% if shift_is_admin %}
 <details class="compose">
   <summary>+ Assign a to-do</summary>
   <form method="post" action="{{ url_for('shift.todo_assign', leader_id=leader.id) }}" class="card">
@@ -21,7 +20,6 @@
     </div>
   </form>
 </details>
-{% endif %}
 
 <div class="section-label">Open</div>
 {% for t in open_tasks %}
@@ -73,7 +71,5 @@
 </details>
 {% endif %}
 
-{% if shift_is_admin %}
 <a class="pill small ghost" style="margin-top:12px; display:inline-block;" href="{{ url_for('shift.todo') }}">← All leaders</a>
-{% endif %}
 {% endblock %}

@@ -659,23 +659,18 @@ def development_update(leader_id, lesson_id):
 # Leader to-dos
 # ---------------------------------------------------------------------------
 
+# Any leader can assign to-dos and browse the per-leader lists (the
+# Operator opened this up from admin-only); completing a task stays with
+# its assignee or an admin, and delete stays admin-only.
 @shift_bp.route("/todo")
 def todo():
-    if is_admin():
-        return render_template("shift/todo.html",
-                               leaders=shift_db.leader_task_summary())
-    leader_id = session.get("shift_leader_id")
-    if not leader_id:
-        flash("Your login isn't linked to a leader profile — ask the Operator.")
-        return redirect(url_for("shift.today"))
-    return redirect(url_for("shift.todo_leader", leader_id=leader_id))
+    return render_template("shift/todo.html",
+                           leaders=shift_db.leader_task_summary(),
+                           my_leader_id=session.get("shift_leader_id"))
 
 
 @shift_bp.route("/todo/<int:leader_id>")
 def todo_leader(leader_id):
-    if not _can_view_development(leader_id):
-        flash("You can only see your own to-do list.")
-        return redirect(url_for("shift.today"))
     leader = shift_db.get_leader(leader_id)
     if not leader:
         flash("That leader doesn't exist.")
@@ -686,7 +681,6 @@ def todo_leader(leader_id):
 
 
 @shift_bp.route("/todo/<int:leader_id>/assign", methods=["POST"])
-@admin_required
 def todo_assign(leader_id):
     ok = shift_db.add_task(
         leader_id,
@@ -838,7 +832,7 @@ def recovery():
         open_recs=open_recs,
         awaiting_recs=awaiting_recs,
         resolved_recs=resolved_recs,
-        issue_counts=shift_db.recovery_issue_counts() if is_admin() else [],
+        issue_counts=shift_db.recovery_issue_counts(),
         RECOVERY_ISSUES=shift_db.RECOVERY_ISSUES,
         RECOVERY_ISSUE_LABELS=shift_db.RECOVERY_ISSUE_LABELS,
         RECOVERY_REMEDIES=shift_db.RECOVERY_REMEDIES,

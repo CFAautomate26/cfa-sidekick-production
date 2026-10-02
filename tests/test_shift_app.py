@@ -506,12 +506,15 @@ def test_development_mark_complete_flow(client):
 
 # --- leader to-dos ---------------------------------------------------------
 
-def test_todo_assign_is_admin_only(client):
+def test_todo_self_assign_allowed(client):
+    # Assignment is open to every leader (Operator's call) — including
+    # adding a task to your own list.
     make_leader(client)
     leader = shift_db.leaders()[0]
     login_leader(client)
     client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Self-assigned"})
-    assert not shift_db.tasks_for_leader(leader["id"])[0]  # nothing created
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+    assert task["title"] == "Self-assigned" and task["assigned_by"] == "Maya"
 
 
 def test_todo_full_flow(client):
@@ -542,26 +545,36 @@ def test_todo_full_flow(client):
     assert b"Deep clean fryer 2" not in client.get("/shift/").data
 
 
-def test_todo_other_leader_blocked(client):
+def test_any_leader_assigns_but_only_assignee_completes(client):
     make_leader(client)
     make_leader(client, name="Devon", pin="8888")
-    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
     devon = next(l for l in shift_db.leaders() if l["name"] == "Devon")
-    login_operator(client)
-    client.post(f"/shift/todo/{devon['id']}/assign", data={"title": "Devon's task"})
-    client.post("/shift/logout")
 
-    login_leader(client)  # Maya
-    resp = client.get("/shift/todo", follow_redirects=False)
-    assert resp.headers["Location"].endswith(f"/shift/todo/{maya['id']}")
-    assert client.get(f"/shift/todo/{devon['id']}", follow_redirects=False).status_code == 302
+    login_leader(client)  # Maya, a plain lead
+    # The index is open to every leader, with their own row marked
+    page = client.get("/shift/todo")
+    assert page.status_code == 200
+    assert b"Maya (you)" in page.data and b"Devon" in page.data
 
+    # A lead can open another leader's list and assign to them
+    assert client.get(f"/shift/todo/{devon['id']}").status_code == 200
+    client.post(f"/shift/todo/{devon['id']}/assign", data={"title": "From Maya"})
     task = shift_db.tasks_for_leader(devon["id"])[0][0]
+    assert task["assigned_by"] == "Maya"
+
+    # ...but completing stays with the assignee (or an admin)
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
     assert not shift_db.tasks_for_leader(devon["id"])[1]  # still open
 
+    # ...and delete stays admin-only
     client.post(f"/shift/todo/task/{task['id']}/delete")
-    assert shift_db.get_task(task["id"])  # lead can't delete
+    assert shift_db.get_task(task["id"])
+
+    # The assignee can complete it
+    client.post("/shift/logout")
+    login_leader(client, name="Devon", pin="8888")
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    assert shift_db.tasks_for_leader(devon["id"])[1][0]["completed_by"] == "Devon"
 
     # Bogus ids are graceful
     assert client.post("/shift/todo/task/999999/toggle",
@@ -788,14 +801,11 @@ def test_demote_last_admin_blocked_without_pin(client, monkeypatch):
     assert shift_db.get_leader(dana["id"])["role"] == "lead"
 
 
-def test_recovery_admin_sees_issue_radar(client):
+def test_recovery_issue_radar_visible_to_all_leaders(client):
     make_leader(client)
     login_leader(client)
     client.post("/shift/recovery", data={"guest_name": "G1",
                                          "issue": "order-error", "remedy": "refund"})
-    assert b"Last 28 days" not in client.get("/shift/recovery").data
-    client.post("/shift/logout")
-    login_operator(client)
     assert b"Last 28 days" in client.get("/shift/recovery").data
 
 
