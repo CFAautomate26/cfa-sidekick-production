@@ -905,23 +905,18 @@ def _oneonone_url(kind: str, subject_id: int) -> str:
 @shift_bp.route("/oneonone")
 def oneonone():
     if _is_operator():
-        q = " ".join((request.args.get("q") or "").split())[:80]
-        if q:
-            hit = shift_db.oneonone_resolve(q)
-            if hit:
-                return redirect(_oneonone_url(*hit))
-        people = shift_db.oneonone_people()
-        team = shift_db.member_oneonone_index()
-        matches = []
-        if q:
-            needle = q.casefold()
-            pool = people + [dict(f, kind="member") for f in team["former"]]
-            matches = [p for p in pool if needle in p["name"].casefold()][:20]
+        # The picker posts "leader:<id>" or "member:<id>"; the target route
+        # re-checks existence and access, so a stale or hand-edited value
+        # just lands on that route's own "doesn't exist" flash.
+        kind, _, subject_id = request.args.get("who", "").partition(":")
+        if kind in ("leader", "member") and subject_id.isdigit():
+            return redirect(_oneonone_url(kind, int(subject_id)))
         return render_template("shift/oneonone.html",
                                leaders=shift_db.oneonone_summary(),
-                               team=team, people=people, q=q, matches=matches)
+                               team=shift_db.member_oneonone_index(),
+                               people=shift_db.oneonone_people())
     # Leaders never see the picker or any lookup — straight to their own
-    # agenda, so ?q= reveals nothing about who exists.
+    # agenda, so ?who= reveals nothing about who exists.
     leader_id = session.get("shift_leader_id")
     if not leader_id:
         flash("Your login isn't linked to a leader profile — ask the Operator.")

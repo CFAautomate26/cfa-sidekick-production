@@ -63,16 +63,17 @@ the leadership team:
   only — not to other leaders, and not to admin-role leaders either.**
   Growth and operational topics only; conduct/discipline/wage/health
   conversations never go in this app.
-  **Team members too:** the Operator's 1:1 page has a type-any-name picker
-  (with the roster as autosuggest) and a browsable roster list, so a 1:1
-  can be opened with anyone on the team roster, not just leaders. A
+  **Team members too:** the Operator's 1:1 page has a dropdown of everyone
+  (leaders first, then the active team roster — pick a name and the 1:1
+  opens, no typing) plus a browsable roster list, so a 1:1 can be opened
+  with anyone on the team roster, not just leaders. A
   team-member 1:1 works the same way — talking points between meetings,
   check-offs with outcome notes, carried topics, past-meeting history —
   minus goals, course, and to-dos (those are leader features). **These are
   visible to the Operator master login only**: team members have no
-  login, and leaders (admin-role included) never see them. Typing a name
-  that has a leader login opens the shared leader agenda instead (one
-  thread per person). Each roster member also gets a 🤝 1:1 shortcut on
+  login, and leaders (admin-role included) never see them. Someone with a
+  leader login appears once, under Leaders, and opens the shared leader
+  agenda (one thread per person). Each roster member also gets a 🤝 1:1 shortcut on
   the Team roster page (Operator only). Growth and coaching only —
   conduct, attendance, discipline, wage, medical, and accommodation
   matters stay in the `docs/legal-counsel/` process. Two people with the

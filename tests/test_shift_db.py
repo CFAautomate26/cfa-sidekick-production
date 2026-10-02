@@ -839,7 +839,7 @@ def test_member_oneonone_index_grouping(isolated_db):
                                     if l["name"] == "Maya")
 
 
-def test_oneonone_people_and_resolve(isolated_db):
+def test_oneonone_people(isolated_db):
     for n in ["Avery", "maya", "Old Timer"]:
         shift_db.add_member(n)
     shift_db.set_member_active(_member_id("Old Timer"), False)
@@ -847,20 +847,14 @@ def test_oneonone_people_and_resolve(isolated_db):
     maya = shift_db.leaders()[0]
 
     people = shift_db.oneonone_people()
-    assert [(p["kind"], p["name"]) for p in people] == [
-        ("member", "Avery"), ("leader", "Maya")]           # one Maya, no Old Timer
+    assert [(p["kind"], p["id"], p["name"]) for p in people] == [
+        ("member", _member_id("Avery"), "Avery"),
+        ("leader", maya["id"], "Maya")]                  # one Maya, no Old Timer
 
-    assert shift_db.oneonone_resolve("  MAYA ") == ("leader", maya["id"])
-    assert shift_db.oneonone_resolve("avery") == ("member", _member_id("Avery"))
-    assert shift_db.oneonone_resolve("old   timer") == \
-        ("member", _member_id("Old Timer"))
-    roster_size = len(shift_db.roster(include_inactive=True))
-    assert shift_db.oneonone_resolve("nobody") is None
-    assert shift_db.oneonone_resolve("   ") is None
-    assert len(shift_db.roster(include_inactive=True)) == roster_size  # no phantoms
-
+    # Deactivating the login turns the roster 'maya' back into a team member
     shift_db.set_leader_active(maya["id"], False)
-    assert shift_db.oneonone_resolve("maya") == ("member", _member_id("maya"))
+    assert [(p["kind"], p["name"]) for p in shift_db.oneonone_people()] == [
+        ("member", "Avery"), ("member", "maya")]
 
 
 def test_member_oneonone_survives_export_import(isolated_db):

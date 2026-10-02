@@ -864,12 +864,14 @@ def test_member_oneonone_operator_only(client):
         agenda, history = shift_db.oneonone_for_member(av)
         assert [t["topic"] for t in agenda] == ["Cross-train breading"] \
             and not history, name
-        # ?q= on the index never looks anything up for a leader
-        resp = client.get("/shift/oneonone?q=Avery", follow_redirects=False)
+        # ?who= on the index never routes a leader anywhere but their own agenda
+        resp = client.get(f"/shift/oneonone?who=member:{av}", follow_redirects=False)
         own = next(l for l in shift_db.leaders() if l["name"] == name)
         assert resp.headers["Location"].endswith(f"/shift/oneonone/{own['id']}")
-        page = client.get("/shift/oneonone?q=Avery", follow_redirects=True).data
+        page = client.get(f"/shift/oneonone?who=member:{av}",
+                          follow_redirects=True).data
         assert b"Avery" not in page and b"Cross-train" not in page
+        assert b'name="who"' not in page                  # no picker for leaders
         for path in ["/shift/", "/shift/more", "/shift/roster"]:
             page = client.get(path).data
             assert b"Cross-train" not in page, (name, path)
@@ -929,50 +931,52 @@ def test_member_topic_routes(client):
 def test_oneonone_index_picker(client):
     make_leader(client)
     maya = shift_db.leaders()[0]
-    for n in ["Avery", "maya", "Blake"]:
+    for n in ["Avery", "maya", "Blake", "Old Timer"]:
         shift_db.add_member(n)
+    shift_db.set_member_active(_roster_id("Old Timer"), False)
     login_operator(client)
     page = client.get("/shift/oneonone").data.decode()
     assert "Leaders · shared agendas" in page and "Team members" in page
-    assert '<option value="Avery">' in page and '<option value="Blake">' in page
-    # Roster 'maya' + leader 'Maya' → exactly one option, labelled Leader
-    assert page.lower().count('<option value="maya"') == 1
-    assert '<option value="Maya" label="Leader">' in page
+    picker = page[page.index('<select name="who"'):page.index("</select>")]
+    leaders_group = picker[picker.index('<optgroup label="Leaders">'):
+                           picker.index('<optgroup label="Team members">')]
+    team_group = picker[picker.index('<optgroup label="Team members">'):]
+    assert f'<option value="leader:{maya["id"]}">Maya</option>' in leaders_group
+    assert f'<option value="member:{_roster_id("Avery")}">Avery</option>' in team_group
+    assert f'<option value="member:{_roster_id("Blake")}">Blake</option>' in team_group
+    # Roster 'maya' + leader 'Maya' → one entry, under Leaders; inactive out
+    assert picker.lower().count(">maya</option>") == 1
+    assert "Old Timer" not in picker
+    assert "Open a 1:1 with" in picker                 # blank first choice
 
-    resp = client.get("/shift/oneonone?q=avery", follow_redirects=False)
+    resp = client.get(f"/shift/oneonone?who=member:{_roster_id('Avery')}",
+                      follow_redirects=False)
     assert resp.headers["Location"].endswith(f"/shift/oneonone/member/{_roster_id('Avery')}")
-    resp = client.get("/shift/oneonone?q=%20MAYA%20", follow_redirects=False)
+    resp = client.get(f"/shift/oneonone?who=leader:{maya['id']}", follow_redirects=False)
     assert resp.headers["Location"].endswith(f"/shift/oneonone/{maya['id']}")
-    def match_block(q):
-        # Only the search-results block — the roster browse list further
-        # down links everyone regardless of the query.
-        page = client.get("/shift/oneonone", query_string={"q": q}).data.decode()
-        return page[page.index("</datalist>"):page.index('id="leaders"')]
-
-    block = match_block("av")
-    assert f"/shift/oneonone/member/{_roster_id('Avery')}" in block
-    assert "Blake" not in block and "No one matches" not in block
-    assert '<span class="note-cat">Team</span>' in block
-    block = match_block("ay")                             # partial leader name
-    assert f"/shift/oneonone/{maya['id']}" in block
-    assert '<span class="note-cat">Leader</span>' in block
-    shift_db.add_member("Casey Former")
-    cf = _roster_id("Casey Former")
-    shift_db.add_member_topic(cf, "History", "Operator")
-    shift_db.set_member_active(cf, False)
-    block = match_block("casey")
-    assert f"/shift/oneonone/member/{cf}" in block
-    assert '<span class="note-cat">former</span>' in block
-    roster_size = len(shift_db.roster(include_inactive=True))
-    page = client.get("/shift/oneonone?q=nobody").data
-    assert b"No one matches" in page
-    assert len(shift_db.roster(include_inactive=True)) == roster_size
+    # Blank or garbage choices just show the page again — never a 500
+    for bad in ["", "member:", "member:abc", "boss:1", "leader:-1", "member:1:2"]:
+        assert client.get("/shift/oneonone", query_string={"who": bad}).status_code == 200, bad
+    # A stale id lands on the target route's own "doesn't exist" handling
+    resp = client.get("/shift/oneonone?who=member:999999", follow_redirects=True)
+    assert b"on the roster" in resp.data
 
     client.post(f"/shift/oneonone/member/{_roster_id('Blake')}/topics",
                 data={"topic": "Check in"})
     page = client.get("/shift/oneonone").data.decode()
     team = page[page.index('id="team"'):]
     assert "Blake" in team and "● 1 waiting" in team
+
+
+def test_oneonone_picker_empty_roster_hint(client):
+    login_operator(client)
+    page = client.get("/shift/oneonone").data.decode()
+    assert '<optgroup label="Team members">' not in page
+    assert "Team members show up here once" in page
+    shift_db.add_member("Avery")
+    page = client.get("/shift/oneonone").data.decode()
+    assert '<optgroup label="Team members">' in page
+    assert "Team members show up here once" not in page
 
 
 def test_member_page_defers_to_leader_login(client):

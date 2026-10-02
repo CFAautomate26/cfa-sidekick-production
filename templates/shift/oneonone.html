@@ -5,32 +5,36 @@
 <div class="sub">Shared agendas with your leaders, plus private 1:1s with
 anyone on the team roster.</div>
 
+{% set picker_leaders = people | selectattr('kind', 'equalto', 'leader') | list %}
+{% set picker_team = people | selectattr('kind', 'equalto', 'member') | list %}
 <form method="get" action="{{ url_for('shift.oneonone') }}" class="inline-form" style="margin-bottom:12px;">
-  <input type="text" name="q" value="{{ q }}" list="oneonone-people"
-         autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="go"
-         aria-label="Find a leader or team member"
-         placeholder="Type any name…">
+  <select name="who" autocomplete="off" aria-label="Open a 1:1 with"
+          onchange="if (this.value) this.form.submit();">
+    <option value="">Open a 1:1 with…</option>
+    {% if picker_leaders %}
+    <optgroup label="Leaders">
+      {% for p in picker_leaders %}<option value="leader:{{ p.id }}">{{ p.name }}</option>{% endfor %}
+    </optgroup>
+    {% endif %}
+    {% if picker_team %}
+    <optgroup label="Team members">
+      {% for p in picker_team %}<option value="member:{{ p.id }}">{{ p.name }}</option>{% endfor %}
+    </optgroup>
+    {% endif %}
+  </select>
   <button class="pill primary" type="submit">Open</button>
 </form>
-<datalist id="oneonone-people">
-  {% for p in people %}<option value="{{ p.name }}"{% if p.kind == 'leader' %} label="Leader"{% endif %}>{% endfor %}
-</datalist>
-
-{% if q %}
-{% if matches %}
-<div class="card" style="padding: 4px 14px;">
-  {% for p in matches %}
-  <a href="{{ url_for('shift.oneonone_leader', leader_id=p.id) if p.kind == 'leader' else url_for('shift.oneonone_member', member_id=p.id) }}"
-     style="display:flex; align-items:center; gap:8px; min-height:44px; text-decoration:none; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <span style="flex:1; font-weight:700; font-size:15px;">{{ p.name }}</span>
-    <span class="note-cat">{{ 'Leader' if p.kind == 'leader' else ('Team' if p.active is not defined or p.active else 'former') }}</span>
-  </a>
-  {% endfor %}
-</div>
-{% else %}
-<div class="empty">No one matches “{{ q }}”. New people go on the
-<a href="{{ url_for('shift.roster') }}">Team roster</a> first.</div>
-{% endif %}
+<script>
+// Back-button pages restore the last pick; reset it so choosing the same
+// person again still fires onchange.
+window.addEventListener('pageshow', function () {
+  var who = document.querySelector('select[name=who]');
+  if (who) who.value = '';
+});
+</script>
+{% if not picker_team %}
+<div class="progress-note" style="margin:-4px 0 12px;">Team members show up here once
+they're on the <a href="{{ url_for('shift.roster') }}">Team roster</a>.</div>
 {% endif %}
 
 <div class="section-label" id="leaders">Leaders · shared agendas</div>
@@ -61,7 +65,7 @@ anyone on the team roster.</div>
   {% endfor %}
 </div>
 {% else %}
-<div class="empty">No team-member 1:1s yet — type a name above to start one.</div>
+<div class="empty">No team-member 1:1s yet — pick someone from the list above to start one.</div>
 {% endif %}
 
 {% if team.everyone %}
