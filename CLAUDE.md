@@ -50,7 +50,9 @@ Canada.
   completion pings to a private Slack channel via `SLACK_BOT_TOKEN`;
   empty channel disables), `SHIFT_NOTIFY_EMAIL` (opt-in email copy via
   FormSubmit — unreliable, Cloudflare bot-challenges server-side posts;
-  off by default). Never store
+  off by default), `SHIFT_ROSTER_SLACK_CHANNEL` (Operator-only "Pull team
+  from Slack" roster sync; empty = #general; bot needs `channels:read` +
+  `users:read`; stores names + Slack user IDs only). Never store
   HR/discipline/wage/medical content in it. The office QR poster in
   `assets/shift-qr/` points at the live `/shift` URL;
   `scripts/generate_shift_qr.py` regenerates it (pass a different URL as

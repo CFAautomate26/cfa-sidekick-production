@@ -893,6 +893,122 @@ def test_old_backup_without_member_section_restores(isolated_db):
     assert shift_db.oneonone_for_member(_member_id("Avery")) == ([], [])
 
 
+# --- roster pull from Slack #general -----------------------------------------
+
+def _slack_person(uid, name, display=""):
+    return {"slack_id": uid, "name": name, "display": display}
+
+
+def test_migration_adds_team_members_slack_id(tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "old_roster.db"))
+    conn = sqlite3.connect(shift_db.DB_PATH)
+    conn.executescript("""
+        CREATE TABLE team_members (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            role TEXT NOT NULL DEFAULT 'team',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL);
+        INSERT INTO team_members (name, created_at) VALUES ('Calla', '2026-09-01 09:00');
+    """)
+    conn.commit()
+    conn.close()
+    shift_db.init_db()
+    shift_db.init_db()   # idempotent
+    rows = shift_db.roster()
+    assert [(r["name"], r["slack_id"]) for r in rows] == [("Calla", None)]
+    with shift_db.closing(shift_db.connect()) as c:
+        idx = [r["name"] for r in c.execute("PRAGMA index_list(team_members)")]
+    assert "idx_team_members_slack" in idx
+
+
+def test_sync_roster_from_slack(isolated_db):
+    shift_db.add_leader("Riya", "1111")
+    shift_db.add_leader("Neha", "2222")
+    shift_db.add_member("Calla")                    # typed into a lineup once
+    shift_db.add_member("Shelly Montiyagala")
+    shift_db.add_member("Old Hand")
+    shift_db.set_member_active(_member_id("Old Hand"), False)
+    people = [
+        _slack_person("U1", "Riya Ronny Thomas", "Riya"),   # leader (display)
+        _slack_person("U2", "Neha Ambookkan", "NeHa"),      # leader (first name)
+        _slack_person("U3", "Calla Jonkman"),               # links to "Calla"
+        _slack_person("U4", "Shelly Montiyagala"),          # exact name link
+        _slack_person("U5", "Old Hand"),                    # removed: stays removed
+        _slack_person("U6", "Keira Van Dinther", "Keira"),  # new
+        _slack_person("U7", "Tushar"),                      # new, one word
+    ]
+    out = shift_db.sync_roster_from_slack([dict(p) for p in people])
+    assert sorted(out["leaders"]) == ["Neha Ambookkan", "Riya Ronny Thomas"]
+    assert sorted(out["added"]) == ["Keira Van Dinther", "Tushar"]
+    assert sorted(out["linked"]) == ["Calla", "Shelly Montiyagala"]
+    assert out["removed_kept"] == ["Old Hand"]
+    assert not out["ambiguous"] and not out["duplicates"]
+
+    active = {r["name"]: r["slack_id"] for r in shift_db.roster()}
+    assert active == {"Calla": "U3", "Keira Van Dinther": "U6",
+                      "Shelly Montiyagala": "U4", "Tushar": "U7"}   # no renames
+    gone = next(r for r in shift_db.roster(include_inactive=True)
+                if r["name"] == "Old Hand")
+    assert gone["active"] == 0 and gone["slack_id"] == "U5"
+    assert shift_db.slack_roster_synced_at()
+
+    # Second pull: nothing new, nothing reactivated, nothing duplicated
+    again = shift_db.sync_roster_from_slack([dict(p) for p in people])
+    assert again["added"] == [] and again["linked"] == []
+    assert sorted(again["already"]) == ["Calla", "Keira Van Dinther",
+                                        "Shelly Montiyagala", "Tushar"]
+    assert again["removed_kept"] == ["Old Hand"]
+    assert len(shift_db.roster(include_inactive=True)) == 5
+
+    # The picker lists each person once: leaders under logins, team by row
+    picker = [(p["kind"], p["name"]) for p in shift_db.oneonone_people()]
+    assert ("member", "Riya Ronny Thomas") not in picker
+    assert picker.count(("leader", "Riya")) == 1
+
+
+def test_sync_roster_ambiguity_rules(isolated_db):
+    shift_db.add_leader("Sam", "1111")
+    shift_db.add_member("Jordan")
+    out = shift_db.sync_roster_from_slack([
+        _slack_person("U1", "Sam Kennedy"), _slack_person("U2", "Sam Torres"),
+        _slack_person("U3", "Jordan Bischop"), _slack_person("U4", "Jordan Lee"),
+        _slack_person("U5", "Alex Kim"), _slack_person("U6", "alex kim"),
+    ])
+    # Two Sams claim leader "Sam": neither is assumed to be the login
+    assert sorted(out["ambiguous"]) == ["Sam Kennedy", "Sam Torres"]
+    assert out["leaders"] == []
+    # Two Jordans: the one-word "Jordan" row is left alone, both added
+    assert "Jordan Bischop" in out["added"] and "Jordan Lee" in out["added"]
+    assert next(r for r in shift_db.roster() if r["name"] == "Jordan")["slack_id"] is None
+    # Same full name twice: the second is reported, never a crash
+    assert out["duplicates"] == ["alex kim"]
+
+
+def test_claim_slack_roster_autosync(isolated_db):
+    assert not shift_db.claim_slack_roster_autosync()     # never pulled
+    shift_db.sync_roster_from_slack([_slack_person("U1", "Avery Sharpe")])
+    assert not shift_db.claim_slack_roster_autosync()     # just pulled
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE meta SET value='2020-01-01 09:00' "
+                     "WHERE key='slack_roster_synced_at'")
+    assert shift_db.claim_slack_roster_autosync()         # due → slot taken
+    assert not shift_db.claim_slack_roster_autosync()     # attempted just now
+
+
+def test_slack_ids_survive_export_import(isolated_db):
+    shift_db.sync_roster_from_slack([_slack_person("U9", "Casee Konecny")])
+    raw = shift_db.export_json()
+    payload = json.loads(raw)
+    assert shift_db.import_json(raw) is None
+    assert shift_db.roster()[0]["slack_id"] == "U9"
+    for row in payload["team_members"]:
+        del row["slack_id"]                                 # pre-release backup
+    assert shift_db.import_json(json.dumps(payload)) is None
+    assert shift_db.roster()[0]["slack_id"] is None
+
+
 # --- shout-outs --------------------------------------------------------------
 
 def test_shoutout_lifecycle(isolated_db):

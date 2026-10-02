@@ -32,10 +32,17 @@ window.addEventListener('pageshow', function () {
   if (who) who.value = '';
 });
 </script>
-{% if not picker_team %}
-<div class="progress-note" style="margin:-4px 0 12px;">Team members show up here once
-they're on the <a href="{{ url_for('shift.roster') }}">Team roster</a>.</div>
-{% endif %}
+<form method="post" action="{{ url_for('shift.roster_slack_sync') }}"
+      style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:-4px 0 12px;">
+  <input type="hidden" name="back" value="oneonone">
+  <button class="pill small {{ 'ghost' if slack_synced_at else 'primary' }}" type="submit">
+    ↻ {{ 'Update team from Slack' if slack_synced_at else 'Pull team from Slack #general' }}</button>
+  <span class="progress-note" style="margin:0;">
+    {% if slack_synced_at %}Team list from Slack #general · updated {{ slack_synced_at }}
+    {% elif not picker_team %}Team members show up here once they're on the
+    <a href="{{ url_for('shift.roster') }}">Team roster</a> — or pull everyone from Slack.
+    {% else %}Adds everyone in #general who isn't on the roster yet.{% endif %}</span>
+</form>
 
 <div class="section-label" id="leaders">Leaders · shared agendas</div>
 {% for l in leaders %}

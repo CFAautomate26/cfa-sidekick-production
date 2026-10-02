@@ -132,7 +132,8 @@ CREATE TABLE IF NOT EXISTS team_members (
     name TEXT NOT NULL COLLATE NOCASE UNIQUE,
     role TEXT NOT NULL DEFAULT 'team',          -- team | leader
     active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    slack_id TEXT                               -- set by the Slack #general sync
 );
 
 -- NOTE: COLLATE NOCASE case-folds ASCII only, so "José" and "josé" count as
@@ -524,6 +525,13 @@ def _migrate(conn) -> None:
     if "leader_id" not in cols:
         conn.execute("ALTER TABLE goals ADD COLUMN leader_id INTEGER "
                      "REFERENCES leaders(id) ON DELETE SET NULL")
+    # Roster ride-along: the Slack user a roster row was pulled from or
+    # linked to, so re-syncing never duplicates anyone.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(team_members)")}
+    if "slack_id" not in cols:
+        conn.execute("ALTER TABLE team_members ADD COLUMN slack_id TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_team_members_slack "
+                 "ON team_members(slack_id) WHERE slack_id IS NOT NULL")
 
 
 def _seed_base(conn) -> None:
@@ -1841,6 +1849,144 @@ def add_member(name: str, role: str = "team", touch_existing: bool = True) -> bo
                 (name, role, now_stamp()),
             )
     return True
+
+
+def _first_word(name: str) -> str:
+    words = (name or "").split()
+    return words[0].casefold() if words else ""
+
+
+def sync_roster_from_slack(people: list[dict]) -> dict:
+    """Merge Slack #general members into the roster. `people` is
+    [{'slack_id', 'name', 'display'}] — real, active, full workspace members
+    with cleaned names (shift_app.fetch_slack_roster does the filtering).
+
+    - Someone matching an active leader login (full name, display name, or
+      first name — when only one Slack member claims that leader) is left
+      off: they're under Leaders already, and a roster twin would put them
+      in the 1:1 picker twice.
+    - An existing roster row is linked rather than duplicated: by Slack id,
+      then exact name, then a one-word roster name equal to the first name
+      (only when exactly one Slack member has that first name).
+    - Never re-adds someone the Operator removed, never removes anyone,
+      never renames anyone (lineup names stay as leaders typed them).
+
+    Returns the lists of names in each outcome. One write transaction, so a
+    manual sync and the daily auto-sync can't race each other into the
+    name UNIQUE constraint."""
+    out: dict[str, list[str]] = {k: [] for k in (
+        "added", "linked", "already", "removed_kept", "leaders",
+        "ambiguous", "duplicates")}
+    stamp = now_stamp()
+    with closing(connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            leaders = {r["name"].casefold() for r in conn.execute(
+                "SELECT name FROM leaders WHERE active=1")}
+            claims: dict[str, int] = {}
+            for p in people:
+                keys = {p["name"].casefold(), _first_word(p["name"]),
+                        (p.get("display") or "").casefold(),
+                        _first_word(p.get("display") or "")}
+                p["_leader_keys"] = (keys - {""}) & leaders
+                for k in p["_leader_keys"]:
+                    claims[k] = claims.get(k, 0) + 1
+            team = []
+            for p in people:
+                if any(claims[k] == 1 for k in p["_leader_keys"]):
+                    out["leaders"].append(p["name"])
+                    continue
+                if p["_leader_keys"]:
+                    out["ambiguous"].append(p["name"])
+                team.append(p)
+
+            rows = [dict(r) for r in conn.execute(
+                "SELECT id, name, active, slack_id FROM team_members")]
+            by_slack = {r["slack_id"]: r for r in rows if r["slack_id"]}
+            by_name = {r["name"].casefold(): r for r in rows}
+            first_counts: dict[str, int] = {}
+            for p in team:
+                f = _first_word(p["name"])
+                first_counts[f] = first_counts.get(f, 0) + 1
+
+            def link(row: dict, p: dict) -> None:
+                conn.execute("UPDATE team_members SET slack_id=? WHERE id=?",
+                             (p["slack_id"], row["id"]))
+                row["slack_id"] = p["slack_id"]
+                by_slack[p["slack_id"]] = row
+                out["linked" if row["active"] else "removed_kept"].append(row["name"])
+
+            for p in team:
+                row = by_slack.get(p["slack_id"])
+                if row:
+                    out["already" if row["active"] else "removed_kept"].append(row["name"])
+                    continue
+                row = by_name.get(p["name"].casefold())
+                if row:
+                    if row["slack_id"]:
+                        out["duplicates"].append(p["name"])   # same name, other Slack user
+                    else:
+                        link(row, p)
+                    continue
+                first = _first_word(p["name"])
+                row = by_name.get(first)
+                if (row and not row["slack_id"] and first_counts.get(first) == 1
+                        and len(row["name"].split()) == 1):
+                    link(row, p)
+                    continue
+                cur = conn.execute(
+                    "INSERT INTO team_members (name, role, active, created_at, slack_id) "
+                    "VALUES (?, 'team', 1, ?, ?)", (p["name"], stamp, p["slack_id"]))
+                row = {"id": cur.lastrowid, "name": p["name"], "active": 1,
+                       "slack_id": p["slack_id"]}
+                by_slack[p["slack_id"]] = by_name[p["name"].casefold()] = row
+                out["added"].append(p["name"])
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) "
+                         "VALUES ('slack_roster_synced_at', ?)", (stamp,))
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    return out
+
+
+def slack_roster_synced_at() -> str | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key='slack_roster_synced_at'"
+        ).fetchone()
+    return row["value"] if row else None
+
+
+def claim_slack_roster_autosync(min_hours: float = 20) -> bool:
+    """True (and the slot is taken) when the daily background refresh is
+    due: a manual pull has succeeded at least once, and no refresh was
+    attempted within `min_hours`. Recording the ATTEMPT, not the success,
+    means a broken token retries once a day instead of on every page view."""
+    now = datetime.strptime(now_stamp(), "%Y-%m-%d %H:%M")
+    with closing(connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            vals = {r["key"]: r["value"] for r in conn.execute(
+                "SELECT key, value FROM meta WHERE key IN "
+                "('slack_roster_synced_at', 'slack_roster_attempted_at')")}
+            if "slack_roster_synced_at" not in vals:
+                conn.rollback()
+                return False
+            last = max(vals.values())
+            try:
+                due = now - datetime.strptime(last, "%Y-%m-%d %H:%M") \
+                    >= timedelta(hours=min_hours)
+            except ValueError:
+                due = True
+            if due:
+                conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES "
+                             "('slack_roster_attempted_at', ?)", (now_stamp(),))
+            conn.commit()
+            return due
+        except BaseException:
+            conn.rollback()
+            raise
 
 
 def set_member_active(member_id: int, active: bool) -> None:

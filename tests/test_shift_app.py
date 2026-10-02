@@ -1043,6 +1043,185 @@ def test_leader_more_badge_ignores_member_topics(client):
     assert shift_db.open_topic_count(maya["id"]) == 0
 
 
+# --- roster pull from Slack #general -----------------------------------------
+
+SLACK_USERS = [
+    {"id": "UOWNER", "is_primary_owner": True,
+     "profile": {"real_name": "Joshua Huesser", "display_name": "Joshua Huesser"}},
+    {"id": "URIYA", "profile": {"real_name": "Riya Ronny Thomas", "display_name": "Riya"}},
+    {"id": "UCALLA", "profile": {"real_name": "Calla Jonkman", "display_name": ""}},
+    {"id": "UGRACE", "profile": {"real_name": "grace   fraser", "display_name": ""}},
+    {"id": "UTUSH", "profile": {"real_name": "", "display_name": "tushar"}},
+    {"id": "UBOT", "is_bot": True, "profile": {"real_name": "Workflow Bot"}},
+    {"id": "UGONE", "deleted": True, "profile": {"real_name": "Left Long Ago"}},
+    {"id": "UGUEST", "is_restricted": True, "profile": {"real_name": "Vendor Guest"}},
+    {"id": "USLACKBOT", "profile": {"real_name": "Slackbot"}},
+    {"id": "UOTHER", "profile": {"real_name": "Not In General"}},
+]
+GENERAL_MEMBERS = ["UOWNER", "URIYA", "UCALLA", "UGRACE", "UTUSH", "UBOT",
+                   "UGONE", "UGUEST", "USLACKBOT"]
+
+
+@pytest.fixture()
+def fake_slack(monkeypatch):
+    """A stand-in Slack Web API: two pages of members and users, a
+    non-general channel listed first, and an `errors` hook per method."""
+    state = {"calls": [], "errors": {}, "users": list(SLACK_USERS),
+             "members": list(GENERAL_MEMBERS)}
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_ROSTER_SLACK_CHANNEL", "")
+
+    def page(items, params, size):
+        start = int(params.get("cursor") or 0)
+        nxt = start + size
+        return items[start:nxt], (str(nxt) if nxt < len(items) else "")
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        method = url.rsplit("/", 1)[-1]
+        params = dict(params or {})
+        state["calls"].append((method, params))
+        assert headers["Authorization"] == "Bearer xoxb-test"
+
+        class R:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        if method in state["errors"]:
+            return R({"ok": False, "error": state["errors"][method],
+                      "needed": "channels:read"})
+        if method == "conversations.list":
+            return R({"ok": True, "channels": [
+                {"id": "CRANDOM", "is_general": False},
+                {"id": "CGENERAL", "is_general": True}]})
+        if method == "conversations.members":
+            assert params["channel"] in ("CGENERAL", "COVERRIDE")
+            items, nxt = page(state["members"], params, 5)
+            return R({"ok": True, "members": items,
+                      "response_metadata": {"next_cursor": nxt}})
+        if method == "users.list":
+            items, nxt = page(state["users"], params, 4)
+            return R({"ok": True, "members": items,
+                      "response_metadata": {"next_cursor": nxt}})
+        raise AssertionError(f"unexpected Slack call {method}")
+
+    monkeypatch.setattr(shift_app.requests, "get", fake_get)
+    return state
+
+
+def test_fetch_slack_roster_filters_and_pages(client, fake_slack):
+    people = shift_app.fetch_slack_roster()
+    assert [(p["slack_id"], p["name"]) for p in people] == [
+        ("URIYA", "Riya Ronny Thomas"), ("UCALLA", "Calla Jonkman"),
+        ("UGRACE", "Grace Fraser"), ("UTUSH", "Tushar")]
+    assert people[0]["display"] == "Riya"
+    methods = [m for m, _ in fake_slack["calls"]]
+    assert methods.count("conversations.members") == 2      # followed the cursor
+    assert methods.count("users.list") == 3
+
+
+def test_fetch_slack_roster_channel_override(client, fake_slack, monkeypatch):
+    monkeypatch.setattr(shift_app, "SHIFT_ROSTER_SLACK_CHANNEL", "COVERRIDE")
+    shift_app.fetch_slack_roster()
+    methods = [m for m, _ in fake_slack["calls"]]
+    assert "conversations.list" not in methods
+
+
+def test_fetch_slack_roster_errors(client, fake_slack, monkeypatch):
+    fake_slack["errors"]["conversations.list"] = "missing_scope"
+    with pytest.raises(shift_app.SlackRosterError) as e:
+        shift_app.fetch_slack_roster()
+    assert "channels:read" in str(e.value) and "users:read" in str(e.value)
+    fake_slack["errors"] = {"users.list": "invalid_auth"}
+    with pytest.raises(shift_app.SlackRosterError, match="SLACK_BOT_TOKEN"):
+        shift_app.fetch_slack_roster()
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "")
+    with pytest.raises(shift_app.SlackRosterError, match="isn't set"):
+        shift_app.fetch_slack_roster()
+
+
+def test_roster_slack_sync_route(client, fake_slack):
+    make_leader(client, name="Riya", pin="1111", role="admin")
+    shift_db.add_member("Calla")
+    login_operator(client)
+    resp = client.post("/shift/roster/slack-sync", data={"back": "oneonone"})
+    assert resp.headers["Location"].endswith("/shift/oneonone#team")
+    page = client.get("/shift/oneonone").data.decode()
+    assert "Added 2: Grace Fraser, Tushar." in page
+    assert "1 already on the roster." in page
+    assert "1 have leader logins" in page
+    picker = page[page.index('<select name="who"'):page.index("</select>")]
+    team = picker[picker.index('label="Team members"'):]
+    for name in ["Calla", "Grace Fraser", "Tushar"]:
+        assert f">{name}</option>" in team
+    assert "Riya Ronny Thomas" not in picker and "Joshua" not in picker
+    assert "updated" in page and "Update team from Slack" in page
+    resp = client.post("/shift/roster/slack-sync")
+    assert resp.headers["Location"].endswith("/shift/roster")
+
+
+def test_roster_slack_sync_route_is_operator_only(client, fake_slack):
+    make_leader(client)                                    # Maya, lead
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    for name, pin in [("Maya", "4721"), ("Dana", "5555")]:
+        login_leader(client, name=name, pin=pin)
+        assert client.post("/shift/roster/slack-sync").status_code == 302
+        assert b"Pull team from Slack" not in client.get("/shift/roster").data
+        client.post("/shift/logout")
+    assert fake_slack["calls"] == [] and shift_db.roster() == []
+    login_operator(client)
+    assert b"Pull team from Slack" in client.get("/shift/roster").data
+
+
+def test_roster_slack_sync_route_failures_never_500(client, fake_slack, monkeypatch):
+    login_operator(client)
+    fake_slack["errors"]["conversations.list"] = "missing_scope"
+    resp = client.post("/shift/roster/slack-sync", follow_redirects=True)
+    assert resp.status_code == 200 and b"users:read" in resp.data
+
+    def boom(*a, **k):
+        raise shift_app.requests.ConnectionError("no route to slack.com")
+    monkeypatch.setattr(shift_app.requests, "get", boom)
+    resp = client.post("/shift/roster/slack-sync", follow_redirects=True)
+    assert resp.status_code == 200 and b"reach Slack" in resp.data
+    assert shift_db.roster() == [] and shift_db.slack_roster_synced_at() is None
+
+
+def test_roster_autosync_daily_after_first_pull(client, fake_slack):
+    login_operator(client)
+    client.get("/shift/oneonone")                          # never pulled
+    assert fake_slack["calls"] == []
+    client.post("/shift/roster/slack-sync")
+    pulled = len(fake_slack["calls"])
+    client.get("/shift/oneonone")                          # pulled just now
+    assert len(fake_slack["calls"]) == pulled
+
+    # A day later a new hire appears in #general
+    fake_slack["users"].append({"id": "UNEW", "profile": {"real_name": "Mason Reed"}})
+    fake_slack["members"].append("UNEW")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE meta SET value='2020-01-01 09:00' "
+                     "WHERE key IN ('slack_roster_synced_at', 'slack_roster_attempted_at')")
+    client.get("/shift/oneonone")                          # background refresh
+    assert any(r["name"] == "Mason Reed" for r in shift_db.roster())
+    calls = len(fake_slack["calls"])
+    client.get("/shift/oneonone")                          # once per day only
+    assert len(fake_slack["calls"]) == calls
+    # Leaders' 1:1 visits never trigger it
+    client.post("/shift/logout")
+    make_leader(client)
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE meta SET value='2020-01-01 09:00' "
+                     "WHERE key IN ('slack_roster_synced_at', 'slack_roster_attempted_at')")
+    login_leader(client)
+    client.get("/shift/oneonone", follow_redirects=True)
+    assert len(fake_slack["calls"]) == calls
+
+
 # --- shout-outs ---------------------------------------------------------------
 
 @pytest.fixture()

@@ -111,6 +111,7 @@ GroupMe and Slack bots keep running untouched.
 | `SHIFT_NOTIFY_SLACK_CHANNEL` | For completion pings | Slack channel ID the to-do completion pings post to. The CFA Sidekick Slack bot (`SLACK_BOT_TOKEN`) must be invited to it. Empty (default) disables the pings. Production: `C0C51833JAH` (#sidekick-alerts). |
 | `SHIFT_NOTIFY_SLACK_MENTION` | No | Slack user ID to @-mention in each ping so it triggers a phone notification. Production: `U05R80802EB` (the Operator). |
 | `SHIFT_SHOUTOUT_SLACK_CHANNEL` | For shout-out cross-posts | Slack channel ID where shout-outs post for the whole team (the CFA Sidekick bot must be invited to it). Empty (default) keeps shout-outs in-app. Production: `C0682FXBY3T` (#recognition-). |
+| `SHIFT_ROSTER_SLACK_CHANNEL` | No | Slack channel ID whose members the *Pull team from Slack* button adds to the team roster. Empty (default) = the workspace's #general (`C05S15A1XMF` in production). Needs the bot scopes below. |
 | `SHIFT_NOTIFY_EMAIL` | No | Opt-in email copy of completion notifications, via FormSubmit. Off by default — FormSubmit sits behind Cloudflare bot protection that challenges server-side posts, so email delivery is unreliable; Slack is the supported path. |
 
 ### To-do completion pings (Slack)
@@ -129,6 +130,37 @@ Every ping shows who completed what, the due date, how many to-dos that
 leader still has open, and a link to their to-do page. Failures are logged
 (`To-do completion Slack status: …` in Render logs) and never shown to the
 leader tapping the checkmark.
+
+### Pulling the team roster from Slack #general
+
+The Operator's 1:1 page and the Team roster page have a **↻ Pull team from
+Slack #general** button (Operator master login only). It adds everyone in
+#general to the team roster under their Slack real name, so they show up
+in the 1:1 dropdown (and lineup autosuggest):
+
+- Leaders with a login are skipped — they're already under Leaders.
+  Matching is by full name, Slack display name, or first name.
+- The workspace owner (the Operator), bots, deactivated accounts, and
+  guests are skipped.
+- An existing roster name is linked instead of duplicated (same full
+  name, or a one-word name like "Calla" matching exactly one person's
+  first name). Nobody is ever renamed.
+- People you've **removed** from the roster stay removed; the pull never
+  takes anyone off the roster either — remove leavers on Team roster.
+- Only names (and the Slack user ID, to avoid duplicates) are stored —
+  never emails or anything else from Slack.
+- After the first pull, it refreshes itself once a day in the background
+  when the Operator opens the 1:1 page, so new hires appear on their own.
+
+One-time Slack setup (the bot can only post until you do this):
+
+1. api.slack.com/apps → **CFA Sidekick** → **OAuth & Permissions** →
+   **Bot Token Scopes** → add `channels:read` and `users:read`.
+2. Click **Reinstall to Workspace** (top of that page) and approve.
+3. Slack normally keeps the same Bot User OAuth Token. If the page shows
+   a different `xoxb-` token, paste it into `SLACK_BOT_TOKEN` on Render.
+4. Tap the pull button. If a permission is still missing, the button says
+   exactly which one.
 
 ## The persistent disk (do this before rollout)
 

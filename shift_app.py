@@ -55,6 +55,9 @@ SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
 # as the coverage flow (the bot must be invited to the channel). Empty
 # channel disables the cross-post.
 SHIFT_SHOUTOUT_SLACK_CHANNEL = os.getenv("SHIFT_SHOUTOUT_SLACK_CHANNEL", "").strip()
+# The team roster can be pulled from a Slack channel's members (needs the
+# bot scopes channels:read + users:read). Empty = the workspace's #general.
+SHIFT_ROSTER_SLACK_CHANNEL = os.getenv("SHIFT_ROSTER_SLACK_CHANNEL", "").strip()
 
 # In-process login throttle: 5 wrong PINs locks that name for 10 minutes.
 # Resets on redeploy and is per-worker — fine for one small gunicorn service.
@@ -894,6 +897,166 @@ def todo_delete(task_id):
 
 
 # ---------------------------------------------------------------------------
+# Roster pull from Slack #general (Operator only)
+# ---------------------------------------------------------------------------
+
+class SlackRosterError(Exception):
+    """A Slack problem worth showing the Operator as-is."""
+
+
+_SLACK_SCOPE_HELP = (
+    "The CFA Sidekick Slack bot needs two more permissions to read the "
+    "team list: api.slack.com/apps → CFA Sidekick → OAuth & Permissions → "
+    "Bot Token Scopes → add channels:read and users:read → Reinstall to "
+    "Workspace. (Setup guide: docs/shift-leading-app.md.)")
+
+
+def _slack_get(method: str, params: dict) -> dict:
+    resp = requests.get(f"https://slack.com/api/{method}",
+                        headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+                        params=params, timeout=15)
+    try:
+        data = resp.json()
+    except ValueError:
+        raise SlackRosterError(f"Slack answered {resp.status_code} — try again in a minute.")
+    if data.get("ok"):
+        return data
+    error = data.get("error") or "unknown_error"
+    print(f"Slack roster {method} error: {error} {data.get('needed', '')}")
+    if error == "missing_scope":
+        raise SlackRosterError(_SLACK_SCOPE_HELP)
+    if error in ("not_authed", "invalid_auth", "account_inactive", "token_revoked"):
+        raise SlackRosterError("Slack rejected the bot token — check SLACK_BOT_TOKEN on Render.")
+    if error == "channel_not_found":
+        raise SlackRosterError("Slack can't find that channel — check SHIFT_ROSTER_SLACK_CHANNEL on Render.")
+    if error == "ratelimited":
+        raise SlackRosterError("Slack is busy — try again in a minute.")
+    raise SlackRosterError(f"Slack said “{error}” — try again in a minute.")
+
+
+def _slack_paged(method: str, params: dict, key: str) -> list:
+    items: list = []
+    cursor = ""
+    for _ in range(50):          # a 50-page answer means something is wrong
+        data = _slack_get(method, {**params, "cursor": cursor} if cursor else params)
+        items.extend(data.get(key) or [])
+        cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
+        if not cursor:
+            return items
+    raise SlackRosterError("Slack kept paging — stopped to be safe. Try again later.")
+
+
+def _clean_slack_name(raw: str) -> str:
+    """Collapse whitespace and capitalize all-lowercase words ("grace
+    fraser" -> "Grace Fraser"); mixed-case words (MacLennan, NeHa) stay."""
+    words = (raw or "").split()
+    return " ".join(w[:1].upper() + w[1:] if w.islower() else w
+                    for w in words)[:60].strip()
+
+
+def fetch_slack_roster() -> list[dict]:
+    """Members of SHIFT_ROSTER_SLACK_CHANNEL (default: the workspace's
+    #general) as [{'slack_id', 'name', 'display'}]: real, active, full
+    members only — no bots, deactivated accounts, guests, or the workspace's
+    primary owner (the Operator). Names come from the Slack profile's real
+    name; emails and everything else stay in Slack."""
+    if not SLACK_BOT_TOKEN:
+        raise SlackRosterError("Slack isn't connected — SLACK_BOT_TOKEN isn't set on Render.")
+    channel = SHIFT_ROSTER_SLACK_CHANNEL
+    if not channel:
+        channels = _slack_paged("conversations.list", {
+            "types": "public_channel", "exclude_archived": "true", "limit": 1000,
+        }, "channels")
+        channel = next((c.get("id") for c in channels if c.get("is_general")), "")
+        if not channel:
+            raise SlackRosterError("Couldn't find #general — set SHIFT_ROSTER_SLACK_CHANNEL on Render.")
+    member_ids = set(_slack_paged("conversations.members",
+                                  {"channel": channel, "limit": 1000}, "members"))
+    people = []
+    for user in _slack_paged("users.list", {"limit": 200}, "members"):
+        if user.get("id") not in member_ids or user.get("id") == "USLACKBOT":
+            continue
+        if (user.get("deleted") or user.get("is_bot") or user.get("is_app_user")
+                or user.get("is_restricted") or user.get("is_ultra_restricted")
+                or user.get("is_primary_owner")):
+            continue
+        profile = user.get("profile") or {}
+        name = _clean_slack_name(profile.get("real_name") or user.get("real_name")
+                                 or profile.get("display_name") or "")
+        if name:
+            people.append({"slack_id": user["id"], "name": name,
+                           "display": _clean_slack_name(profile.get("display_name") or "")})
+    return people
+
+
+def _slack_sync_summary(summary: dict, pulled: int) -> str:
+    def names(key: str) -> str:
+        found = summary[key]
+        shown = ", ".join(found[:8])
+        return shown + (f" +{len(found) - 8} more" if len(found) > 8 else "")
+
+    parts = [f"Pulled {pulled} people from Slack."]
+    if summary["added"]:
+        parts.append(f"Added {len(summary['added'])}: {names('added')}.")
+    else:
+        parts.append("Nobody new to add.")
+    on_roster = len(summary["already"]) + len(summary["linked"])
+    if on_roster:
+        parts.append(f"{on_roster} already on the roster.")
+    if summary["leaders"]:
+        parts.append(f"{len(summary['leaders'])} have leader logins (they're under Leaders).")
+    if summary["removed_kept"]:
+        parts.append(f"Left off because you removed them from the roster: "
+                     f"{names('removed_kept')} — restore them on Team roster if that was a mistake.")
+    if summary["ambiguous"]:
+        parts.append(f"Couldn't tell which of these is a leader login, so they were "
+                     f"added as team members: {names('ambiguous')}.")
+    if summary["duplicates"]:
+        parts.append(f"Skipped — same name as someone already linked: {names('duplicates')}.")
+    return " ".join(parts)
+
+
+@shift_bp.route("/roster/slack-sync", methods=["POST"])
+@operator_required
+def roster_slack_sync():
+    back = (url_for("shift.oneonone") + "#team"
+            if request.form.get("back") == "oneonone" else url_for("shift.roster"))
+    try:
+        people = fetch_slack_roster()
+    except SlackRosterError as e:
+        flash(str(e))
+        return redirect(back)
+    except Exception as e:  # network trouble — never a 500 for the Operator
+        print(f"Slack roster pull failed: {e}")
+        flash("Couldn't reach Slack just now — try again in a minute.")
+        return redirect(back)
+    summary = shift_db.sync_roster_from_slack(people)
+    print(f"Slack roster pull: {len(people)} people, added {len(summary['added'])}")
+    flash(_slack_sync_summary(summary, len(people)))
+    return redirect(back)
+
+
+def _maybe_autosync_roster() -> None:
+    """Once a day, after the first manual pull, refresh the roster from
+    Slack in the background when the Operator opens the 1:1 page — so new
+    hires show up in the picker without anyone remembering to tap."""
+    if not SLACK_BOT_TOKEN or not shift_db.claim_slack_roster_autosync():
+        return
+
+    def run() -> None:
+        try:
+            summary = shift_db.sync_roster_from_slack(fetch_slack_roster())
+            print(f"Slack roster auto-sync: added {len(summary['added'])}")
+        except Exception as e:
+            print(f"Slack roster auto-sync failed: {e}")
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    if current_app.config.get("TESTING"):
+        thread.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------
 # 1:1 meeting agendas — private between each leader and the Operator
 # ---------------------------------------------------------------------------
 
@@ -914,10 +1077,12 @@ def oneonone():
         # ids past SQLite's int64 range crash the target route's lookup.
         if kind in ("leader", "member") and re.fullmatch(r"[0-9]{1,9}", subject_id):
             return redirect(_oneonone_url(kind, int(subject_id)))
+        _maybe_autosync_roster()
         return render_template("shift/oneonone.html",
                                leaders=shift_db.oneonone_summary(),
                                team=shift_db.member_oneonone_index(),
-                               people=shift_db.oneonone_people())
+                               people=shift_db.oneonone_people(),
+                               slack_synced_at=shift_db.slack_roster_synced_at())
     # Leaders never see the picker or any lookup — straight to their own
     # agenda, so ?who= reveals nothing about who exists.
     leader_id = session.get("shift_leader_id")
