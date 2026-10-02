@@ -947,7 +947,8 @@ def test_oneonone_index_picker(client):
     # Roster 'maya' + leader 'Maya' → one entry, under Leaders; inactive out
     assert picker.lower().count(">maya</option>") == 1
     assert "Old Timer" not in picker
-    assert "Open a 1:1 with" in picker                 # blank first choice
+    first = picker[picker.index("<option"):]
+    assert first.startswith('<option value="">Open a 1:1 with…</option>')
 
     resp = client.get(f"/shift/oneonone?who=member:{_roster_id('Avery')}",
                       follow_redirects=False)
@@ -955,8 +956,12 @@ def test_oneonone_index_picker(client):
     resp = client.get(f"/shift/oneonone?who=leader:{maya['id']}", follow_redirects=False)
     assert resp.headers["Location"].endswith(f"/shift/oneonone/{maya['id']}")
     # Blank or garbage choices just show the page again — never a 500
-    for bad in ["", "member:", "member:abc", "boss:1", "leader:-1", "member:1:2"]:
-        assert client.get("/shift/oneonone", query_string={"who": bad}).status_code == 200, bad
+    for bad in ["", "member:", "member:abc", "boss:1", "leader:-1", "member:1:2",
+                "leader:²", "member:①", "member:" + "9" * 5000,
+                "leader:9223372036854775808", "member:" + "9" * 30]:
+        resp = client.get("/shift/oneonone", query_string={"who": bad},
+                          follow_redirects=True)
+        assert resp.status_code == 200, bad
     # A stale id lands on the target route's own "doesn't exist" handling
     resp = client.get("/shift/oneonone?who=member:999999", follow_redirects=True)
     assert b"on the roster" in resp.data

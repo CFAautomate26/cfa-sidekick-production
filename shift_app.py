@@ -15,6 +15,7 @@ Setup guide: docs/shift-leading-app.md
 
 import hmac
 import os
+import re
 import threading
 import time
 from datetime import date
@@ -909,7 +910,9 @@ def oneonone():
         # re-checks existence and access, so a stale or hand-edited value
         # just lands on that route's own "doesn't exist" flash.
         kind, _, subject_id = request.args.get("who", "").partition(":")
-        if kind in ("leader", "member") and subject_id.isdigit():
+        # ASCII digits only, and short: str.isdigit() also passes "²", and
+        # ids past SQLite's int64 range crash the target route's lookup.
+        if kind in ("leader", "member") and re.fullmatch(r"[0-9]{1,9}", subject_id):
             return redirect(_oneonone_url(kind, int(subject_id)))
         return render_template("shift/oneonone.html",
                                leaders=shift_db.oneonone_summary(),
