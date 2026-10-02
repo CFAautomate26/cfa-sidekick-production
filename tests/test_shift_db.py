@@ -651,7 +651,7 @@ def test_oneonone_and_shoutouts_survive_export_import(isolated_db):
     gid = shift_db.create_goal("Personal", "", "", "", None, "up", "weekly",
                                "", "Operator", leader_id=maya["id"])
     sid = shift_db.add_shoutout("Avery", "speed", "Flew through the rush",
-                                "Maya", groupme=True)
+                                "Maya", share=True)
     raw = shift_db.export_json()
 
     shift_db.delete_topic(shift_db.oneonone_for_leader(maya["id"])[0][0]["id"])
@@ -673,14 +673,14 @@ def test_shoutout_lifecycle(isolated_db):
     assert shift_db.add_shoutout("  ", "speed", "msg", "Maya") is None
     assert shift_db.add_shoutout("Avery", "speed", "  ", "Maya") is None
     sid = shift_db.add_shoutout(" Avery  P ", "not-a-tag", " Great save ",
-                                "Maya", groupme=True)
+                                "Maya", share=True)
     rec = shift_db.get_shoutout(sid)
     assert rec["member_name"] == "Avery P" and rec["message"] == "Great save"
     assert rec["value_tag"] is None                     # bad tag coerced
-    assert rec["groupme_at"]
+    assert rec["shared_at"]
 
     quiet = shift_db.add_shoutout("Sam", "teamwork", "Covered a break", "Neha")
-    assert shift_db.get_shoutout(quiet)["groupme_at"] is None
+    assert shift_db.get_shoutout(quiet)["shared_at"] is None
 
     assert [s["id"] for s in shift_db.shoutout_feed()] == [quiet, sid]
     assert [s["id"] for s in shift_db.shoutout_feed(value_tag="teamwork")] == [quiet]

@@ -701,26 +701,27 @@ def test_goal_leader_tag_via_route(client):
 # --- shout-outs ---------------------------------------------------------------
 
 @pytest.fixture()
-def groupme_posts(monkeypatch):
-    monkeypatch.setattr(shift_app, "GROUPME_BOT_ID", "test-bot-id")
+def slack_shares(monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "C123TEAM")
     calls = []
-    monkeypatch.setattr("shift_app.send_shoutout_groupme",
+    monkeypatch.setattr("shift_app.send_shoutout_slack",
                         lambda shoutout: calls.append(shoutout))
     return calls
 
 
-def test_shoutout_posts_and_crossposts(client, groupme_posts):
+def test_shoutout_posts_and_crossposts(client, slack_shares):
     make_leader(client)
     login_leader(client)
     resp = client.post("/shift/shoutouts", data={
         "member_name": "Avery P", "value_tag": "speed",
-        "message": "Flew through the lunch rush", "groupme": "1",
+        "message": "Flew through the lunch rush", "share": "1",
     })
     assert resp.status_code == 302 and "#shout-" in resp.headers["Location"]
-    assert len(groupme_posts) == 1
-    assert groupme_posts[0]["member_name"] == "Avery P"
+    assert len(slack_shares) == 1
+    assert slack_shares[0]["member_name"] == "Avery P"
     shout = shift_db.shoutout_feed()[0]
-    assert shout["groupme_at"] and shout["author"] == "Maya"
+    assert shout["shared_at"] and shout["author"] == "Maya"
     # The roster learned the new name for next time's autosuggest
     assert any(m["name"] == "Avery P" for m in shift_db.roster())
     # Feed + Today strip render it
@@ -728,26 +729,26 @@ def test_shoutout_posts_and_crossposts(client, groupme_posts):
     assert b"Avery P" in client.get("/shift/").data
 
 
-def test_shoutout_without_checkbox_stays_in_app(client, groupme_posts):
+def test_shoutout_without_checkbox_stays_in_app(client, slack_shares):
     login_operator(client)
     client.post("/shift/shoutouts", data={
         "member_name": "Sam", "message": "Covered a double",
     })
-    assert not groupme_posts
-    assert shift_db.shoutout_feed()[0]["groupme_at"] is None
+    assert not slack_shares
+    assert shift_db.shoutout_feed()[0]["shared_at"] is None
 
 
-def test_shoutout_unconfigured_groupme_is_honest(client, monkeypatch):
-    monkeypatch.setattr(shift_app, "GROUPME_BOT_ID", "")
+def test_shoutout_unconfigured_slack_is_honest(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "")
     login_operator(client)
     resp = client.post("/shift/shoutouts", data={
-        "member_name": "Sam", "message": "Great hustle", "groupme": "1",
+        "member_name": "Sam", "message": "Great hustle", "share": "1",
     }, follow_redirects=True)
     assert b"Posted" in resp.data
-    assert shift_db.shoutout_feed()[0]["groupme_at"] is None   # never stamped
+    assert shift_db.shoutout_feed()[0]["shared_at"] is None   # never stamped
 
 
-def test_shoutout_validation_and_delete_rules(client, groupme_posts):
+def test_shoutout_validation_and_delete_rules(client, slack_shares):
     make_leader(client)
     make_leader(client, name="Devon", pin="8888")
     login_leader(client)
@@ -769,8 +770,9 @@ def test_shoutout_validation_and_delete_rules(client, groupme_posts):
     assert shift_db.get_shoutout(shout["id"]) is None
 
 
-def test_shoutout_groupme_payload(client, monkeypatch):
-    monkeypatch.setattr(shift_app, "GROUPME_BOT_ID", "test-bot-id")
+def test_shoutout_slack_payload(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "C123TEAM")
     posted = {}
 
     def fake_post(url, **kwargs):
@@ -778,31 +780,34 @@ def test_shoutout_groupme_payload(client, monkeypatch):
         posted.update(kwargs)
 
         class R:
-            status_code = 202
-            text = "{}"
+            status_code = 200
+            text = '{"ok": true}'
         return R()
 
     monkeypatch.setattr(shift_app.requests, "post", fake_post)
-    shift_app.send_shoutout_groupme({
-        "member_name": "Avery", "value_tag": "speed",
-        "message": "x" * 2000, "author": "Maya",
+    shift_app.send_shoutout_slack({
+        "member_name": "Avery <&> P", "value_tag": "speed",
+        "message": "Tell <!channel> nothing", "author": "Maya",
     })
-    assert posted["url"] == "https://api.groupme.com/v3/bots/post"
-    assert posted["json"]["bot_id"] == "test-bot-id"
-    assert len(posted["json"]["text"]) <= 995          # GroupMe cap
-    assert "SHOUT-OUT: Avery" in posted["json"]["text"]
-    assert "⚡ Speed of service" in posted["json"]["text"]
+    assert posted["url"] == "https://slack.com/api/chat.postMessage"
+    assert posted["headers"]["Authorization"] == "Bearer xoxb-test"
+    body = posted["json"]
+    assert body["channel"] == "C123TEAM"
+    assert "SHOUT-OUT: Avery &lt;&amp;&gt; P" in body["text"]
+    assert "⚡ Speed of service" in body["text"]
+    assert "<!channel>" not in body["text"]            # mrkdwn injection escaped
 
 
-def test_shoutout_groupme_failure_never_breaks_post(client, monkeypatch):
-    monkeypatch.setattr(shift_app, "GROUPME_BOT_ID", "test-bot-id")
+def test_shoutout_slack_failure_never_breaks_post(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "C123TEAM")
 
     def boom(*a, **k):
         raise RuntimeError("db hiccup")
     monkeypatch.setattr(shift_db, "get_shoutout", boom)  # prepare path blows up
     login_operator(client)
     resp = client.post("/shift/shoutouts", data={
-        "member_name": "Sam", "message": "Clutch", "groupme": "1",
+        "member_name": "Sam", "message": "Clutch", "share": "1",
     })
     assert resp.status_code == 302                     # the post still lands
     assert shift_db.shoutout_feed()[0]["member_name"] == "Sam"

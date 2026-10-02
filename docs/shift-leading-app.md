@@ -65,9 +65,10 @@ the leadership team:
   name (roster autosuggest), an optional value tag (2nd-mile service,
   speed, food safety, teamwork, hospitality, cleanliness), and what
   happened. Fresh shout-outs show on everyone's Today screen for a week,
-  and by default cross-post to the team GroupMe through the existing bot
-  (uncheck the box to keep one in-app; delivery is best-effort). Admins
-  get a 28-day recognition radar — most recognized and top recognizers.
+  and by default cross-post to the team Slack channel through the same
+  bot as the coverage flow (uncheck the box to keep one in-app; delivery
+  is best-effort). Admins get a 28-day recognition radar — most
+  recognized and top recognizers.
 - **Leadership development** — the Operator's course (from the "Leadership
   Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,
   Leading Organization) tracked per leader. Admins see every leader's
@@ -92,6 +93,7 @@ GroupMe and Slack bots keep running untouched.
 | `SHIFT_TZ` | No | Store timezone; defaults to `America/Toronto`. |
 | `SHIFT_NOTIFY_SLACK_CHANNEL` | For completion pings | Slack channel ID the to-do completion pings post to. The CFA Sidekick Slack bot (`SLACK_BOT_TOKEN`) must be invited to it. Empty (default) disables the pings. Production: `C0C51833JAH` (#sidekick-alerts). |
 | `SHIFT_NOTIFY_SLACK_MENTION` | No | Slack user ID to @-mention in each ping so it triggers a phone notification. Production: `U05R80802EB` (the Operator). |
+| `SHIFT_SHOUTOUT_SLACK_CHANNEL` | For shout-out cross-posts | Slack channel ID where shout-outs post for the whole team (the CFA Sidekick bot must be invited to it). Empty (default) keeps shout-outs in-app. Production: `C05S15A1XMF` (#general). |
 | `SHIFT_NOTIFY_EMAIL` | No | Opt-in email copy of completion notifications, via FormSubmit. Off by default — FormSubmit sits behind Cloudflare bot protection that challenges server-side posts, so email delivery is unreliable; Slack is the supported path. |
 
 ### To-do completion pings (Slack)

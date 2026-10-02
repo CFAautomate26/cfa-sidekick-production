@@ -334,8 +334,8 @@ CREATE INDEX IF NOT EXISTS idx_oneonone_topics
     ON oneonone_topics(leader_id, discussed_at);
 
 -- Recognition / shout-outs, posted by any leader, optionally cross-posted
--- to the team GroupMe (best-effort; groupme_at records the REQUEST, not a
--- confirmed delivery).
+-- to the team Slack channel (best-effort; shared_at records the REQUEST,
+-- not a confirmed delivery).
 CREATE TABLE IF NOT EXISTS shoutouts (
     id INTEGER PRIMARY KEY,
     shout_date TEXT NOT NULL,                   -- YYYY-MM-DD store-local (4am rollover)
@@ -344,7 +344,7 @@ CREATE TABLE IF NOT EXISTS shoutouts (
     message TEXT NOT NULL,
     author TEXT,
     created_at TEXT NOT NULL,
-    groupme_at TEXT                             -- NULL = kept in-app only
+    shared_at TEXT                              -- NULL = kept in-app only
 );
 CREATE INDEX IF NOT EXISTS idx_shoutouts_date ON shoutouts(shout_date, id);
 
@@ -1326,9 +1326,9 @@ def open_topic_count(leader_id: int | None) -> int:
 # ---------------------------------------------------------------------------
 
 def add_shoutout(member_name: str, value_tag: str | None, message: str,
-                 by: str, groupme: bool = False) -> int | None:
+                 by: str, share: bool = False) -> int | None:
     """Post recognition for a team member. Returns the new row id, or None
-    when name or message is empty. groupme stamps that a cross-post was
+    when name or message is empty. share stamps that a Slack cross-post was
     REQUESTED (delivery is best-effort, handled by the route)."""
     member_name = " ".join((member_name or "").split())
     message = (message or "").strip()
@@ -1338,10 +1338,10 @@ def add_shoutout(member_name: str, value_tag: str | None, message: str,
     with closing(connect()) as conn, conn:
         cur = conn.execute(
             "INSERT INTO shoutouts (shout_date, member_name, value_tag, "
-            "message, author, created_at, groupme_at) VALUES (?,?,?,?,?,?,?)",
+            "message, author, created_at, shared_at) VALUES (?,?,?,?,?,?,?)",
             (today_local(), member_name,
              value_tag if value_tag in SHOUTOUT_VALUES else None,
-             message, by, stamp, stamp if groupme else None),
+             message, by, stamp, stamp if share else None),
         )
         return cur.lastrowid
 

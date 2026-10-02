@@ -50,9 +50,10 @@ SHIFT_NOTIFY_EMAIL = os.getenv("SHIFT_NOTIFY_EMAIL", "").strip()
 SHIFT_NOTIFY_SLACK_CHANNEL = os.getenv("SHIFT_NOTIFY_SLACK_CHANNEL", "").strip()
 SHIFT_NOTIFY_SLACK_MENTION = os.getenv("SHIFT_NOTIFY_SLACK_MENTION", "").strip()
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
-# Shout-out cross-posts reuse the team GroupMe bot's id. Read here, not from
-# app.py — this blueprint must never import the bot module (fault isolation).
-GROUPME_BOT_ID = os.getenv("GROUPME_BOT_ID", "").strip()
+# Shout-out cross-posts go to the team Slack channel with the same bot token
+# as the coverage flow (the bot must be invited to the channel). Empty
+# channel disables the cross-post.
+SHIFT_SHOUTOUT_SLACK_CHANNEL = os.getenv("SHIFT_SHOUTOUT_SLACK_CHANNEL", "").strip()
 
 # In-process login throttle: 5 wrong PINs locks that name for 10 minutes.
 # Resets on redeploy and is per-worker — fine for one small gunicorn service.
@@ -957,40 +958,51 @@ def oneonone_action(leader_id):
 # Shout-outs (recognition)
 # ---------------------------------------------------------------------------
 
-def send_shoutout_groupme(shoutout: dict) -> None:
-    """Cross-post a shout-out to the team GroupMe. Best-effort: failures
-    are logged and never surface to the person posting."""
-    if not GROUPME_BOT_ID:
-        print("ERROR: GROUPME_BOT_ID is missing, cannot cross-post the shout-out.")
+def send_shoutout_slack(shoutout: dict) -> None:
+    """Cross-post a shout-out to the team Slack channel, with the same bot
+    token as the coverage flow. Best-effort: failures are logged and never
+    surface to the person posting."""
+    if not SLACK_BOT_TOKEN:
+        print("ERROR: SLACK_BOT_TOKEN is missing, cannot cross-post the shout-out.")
         return
-    lines = [f"🌟 SHOUT-OUT: {shoutout['member_name']} 🌟"]
+
+    # Slack mrkdwn: &, < and > must be escaped or a message could inject a
+    # real mention (same rule as the to-do completion ping).
+    def esc(text):
+        return (str(text).replace("&", "&amp;")
+                .replace("<", "&lt;").replace(">", "&gt;"))
+
+    lines = [f"🌟 *SHOUT-OUT: {esc(shoutout['member_name'])}* 🌟"]
     if shoutout.get("value_tag"):
         lines.append(shift_db.SHOUTOUT_VALUE_LABELS.get(
             shoutout["value_tag"], shoutout["value_tag"]))
-    lines.append(f"“{shoutout['message']}”")
-    lines.append(f"— {shoutout['author']}")
+    lines.append(f"“{esc(shoutout['message'])}”")
+    lines.append(f"— {esc(shoutout['author'])}")
     try:
         resp = requests.post(
-            "https://api.groupme.com/v3/bots/post",
-            json={"bot_id": GROUPME_BOT_ID, "text": "\n".join(lines)[:995]},
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+            json={"channel": SHIFT_SHOUTOUT_SLACK_CHANNEL,
+                  "text": "\n".join(lines), "unfurl_links": False},
             timeout=15,
         )
-        print(f"Shout-out GroupMe status: {resp.status_code}, "
+        # Slack answers 200 even for errors — the body tells the story.
+        print(f"Shout-out Slack status: {resp.status_code}, "
               f"body: {resp.text[:300]}")
     except Exception as e:
-        print(f"Error cross-posting shout-out to GroupMe: {e}")
+        print(f"Error cross-posting shout-out to Slack: {e}")
 
 
 def _notify_shoutout(shoutout_id: int) -> None:
-    """Fire the GroupMe cross-post in the background — best-effort end to
+    """Fire the Slack cross-post in the background — best-effort end to
     end, same shape as _notify_completion."""
     try:
-        if not GROUPME_BOT_ID:
+        if not SHIFT_SHOUTOUT_SLACK_CHANNEL:
             return
         shoutout = shift_db.get_shoutout(shoutout_id)
-        if not shoutout or not shoutout["groupme_at"]:
+        if not shoutout or not shoutout["shared_at"]:
             return
-        thread = threading.Thread(target=send_shoutout_groupme,
+        thread = threading.Thread(target=send_shoutout_slack,
                                   args=(shoutout,), daemon=True)
         thread.start()
         if current_app.config.get("TESTING"):
@@ -1011,7 +1023,7 @@ def shoutouts():
         feed=shift_db.shoutout_feed(value_tag=tag),
         value=tag,
         suggest=suggest,
-        groupme_on=bool(GROUPME_BOT_ID),
+        share_on=bool(SLACK_BOT_TOKEN and SHIFT_SHOUTOUT_SLACK_CHANNEL),
         counts=shift_db.shoutout_counts() if is_admin() else None,
         SHOUTOUT_VALUES=shift_db.SHOUTOUT_VALUES,
         SHOUTOUT_VALUE_LABELS=shift_db.SHOUTOUT_VALUE_LABELS,
@@ -1023,16 +1035,17 @@ def shoutout_create():
     value = request.form.get("value_tag")
     if value not in shift_db.SHOUTOUT_VALUES:
         value = None
-    groupme = request.form.get("groupme") == "1" and bool(GROUPME_BOT_ID)
+    share = (request.form.get("share") == "1"
+             and bool(SLACK_BOT_TOKEN and SHIFT_SHOUTOUT_SLACK_CHANNEL))
     member_name = request.form.get("member_name", "")
     sid = shift_db.add_shoutout(member_name, value,
                                 request.form.get("message", ""),
-                                current_name(), groupme=groupme)
+                                current_name(), share=share)
     if sid is None:
         flash("A shout-out needs a name and a message.")
         return redirect(url_for("shift.shoutouts"))
     shift_db.add_member(member_name)   # autosuggest learns new names
-    if groupme:
+    if share:
         _notify_shoutout(sid)
     flash("Posted 🎉")
     return redirect(url_for("shift.shoutouts") + f"#shout-{sid}")

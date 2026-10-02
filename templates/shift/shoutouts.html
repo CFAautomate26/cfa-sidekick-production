@@ -22,13 +22,13 @@
     <label class="field" for="s-msg">What happened</label>
     <textarea id="s-msg" name="message" required style="min-height:70px;"
       placeholder="e.g. Ran a guest's forgotten sauces out to the parking lot in the rain"></textarea>
-    {% if groupme_on %}
+    {% if share_on %}
     <label style="display:flex; gap:8px; align-items:center; margin-top:10px; font-size:14px;">
-      <input type="checkbox" name="groupme" value="1" checked style="width:auto; accent-color:var(--cfa-red);">
-      📣 Share to the team GroupMe
+      <input type="checkbox" name="share" value="1" checked style="width:auto; accent-color:var(--cfa-red);">
+      📣 Share to the team Slack
     </label>
     {% else %}
-    <div class="sub">GroupMe cross-posting isn't configured — shout-outs stay in-app.</div>
+    <div class="sub">Slack cross-posting isn't configured — shout-outs stay in-app.</div>
     {% endif %}
     <div style="margin-top:12px;">
       <button class="pill primary" type="submit">Post it 🌟</button>
@@ -73,10 +73,10 @@
   </div>
   <div style="font-size:14px; margin-top:6px; white-space:pre-line;">{{ s.message }}</div>
   <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
-    <div class="progress-note" style="margin:0;">{{ s.author }} · {{ s.created_at }}{{ ' · 📣 GroupMe' if s.groupme_at }}</div>
+    <div class="progress-note" style="margin:0;">{{ s.author }} · {{ s.created_at }}{{ ' · 📣 Slack' if s.shared_at }}</div>
     {% if shift_is_admin or s.author == shift_name %}
     <form method="post" action="{{ url_for('shift.shoutout_delete', shoutout_id=s.id) }}"
-          onsubmit="return confirm('Delete this shout-out? (The GroupMe post, if shared, stays.)');">
+          onsubmit="return confirm('Delete this shout-out? (The Slack post, if shared, stays.)');">
       <button class="pill small ghost" type="submit">Delete</button>
     </form>
     {% endif %}
