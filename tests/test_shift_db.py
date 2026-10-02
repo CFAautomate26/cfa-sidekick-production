@@ -4,6 +4,7 @@ Each test gets a fresh temp database via the isolated_db fixture, which
 re-points shift_db.DB_PATH before init_db() runs.
 """
 
+import json
 import os
 import sys
 
@@ -356,6 +357,9 @@ def test_import_rejects_garbage_without_touching_data(isolated_db):
         # FK-inconsistent: run item pointing at a run that doesn't exist
         '{"format": 1, "checklist_run_items": [{"id": 1, "run_id": 999, '
         '"label": "x", "critical": 0, "sort": 0, "done": 0}]}',
+        # FK-inconsistent: team-member 1:1 topic for a roster row that isn't there
+        '{"format": 1, "oneonone_member_topics": [{"id": 1, "member_id": 999, '
+        '"topic": "x", "created_at": "2026-10-01 09:00"}]}',
     ]
     for raw in bad_payloads:
         assert shift_db.import_json(raw) is not None, raw
@@ -672,6 +676,216 @@ def test_oneonone_and_shoutouts_survive_export_import(isolated_db):
     assert shift_db.shoutout_feed()[0]["member_name"] == "Avery"
     assert shift_db.goals_by_status("active",
                                     leader_id=maya["id"])[0]["id"] == gid
+
+
+# --- team-member 1:1s (Operator-only) ---------------------------------------
+
+def _member_id(name):
+    return next(m["id"] for m in shift_db.roster(include_inactive=True)
+                if m["name"] == name)
+
+
+def test_migration_adds_member_oneonone_table(tmp_path, monkeypatch):
+    monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "prod.db"))
+    shift_db.init_db()
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]
+    shift_db.add_oneonone_topic(maya["id"], "Open topic", "Maya")
+    shift_db.add_oneonone_topic(maya["id"], "Discussed topic", "Operator")
+    t = shift_db.oneonone_for_leader(maya["id"])[0][1]
+    shift_db.set_topic_discussed(t["id"], True, "kept", "Operator")
+    # Simulate the pre-upgrade production DB: no member table, no index.
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("DROP TABLE oneonone_member_topics")
+    with shift_db.closing(shift_db.connect()) as conn:
+        before = [tuple(r) for r in conn.execute(
+            "SELECT * FROM oneonone_topics ORDER BY id")]
+
+    shift_db.init_db()
+    shift_db.init_db()   # idempotent
+
+    with shift_db.closing(shift_db.connect()) as conn:
+        after = [tuple(r) for r in conn.execute(
+            "SELECT * FROM oneonone_topics ORDER BY id")]
+        names = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master")}
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert after == before                       # leader 1:1 data untouched
+    assert {"oneonone_member_topics", "idx_oneonone_member_topics"} <= names
+    shift_db.add_member("Avery")
+    assert shift_db.add_member_topic(_member_id("Avery"), "Works", "Operator")
+
+
+def test_member_topics_fk_is_cascade(isolated_db):
+    # CASCADE is restore-critical: import_json clears team_members first.
+    with shift_db.closing(shift_db.connect()) as conn:
+        fks = [dict(r) for r in conn.execute(
+            "PRAGMA foreign_key_list(oneonone_member_topics)")]
+    assert len(fks) == 1
+    assert fks[0]["table"] == "team_members" and fks[0]["on_delete"] == "CASCADE"
+
+
+def test_member_oneonone_lifecycle(isolated_db):
+    shift_db.add_member("Avery")
+    av = _member_id("Avery")
+
+    assert not shift_db.add_member_topic(av, "   ", "Operator")
+    assert not shift_db.add_member_topic(999999, "Ghost", "Operator")
+    assert shift_db.add_member_topic(av, "  Cross-train   breading ", "Operator")
+    assert shift_db.add_member_topic(av, "Interested in leading", "Operator")
+
+    agenda, history = shift_db.oneonone_for_member(av)
+    assert [t["topic"] for t in agenda] == ["Cross-train breading",
+                                            "Interested in leading"]
+    assert not history and not agenda[0]["carried"]
+
+    t1 = agenda[0]
+    assert shift_db.set_member_topic_discussed(t1["id"], True, " shadow Sat ",
+                                               "Operator")
+    agenda, history = shift_db.oneonone_for_member(av)
+    assert [t["topic"] for t in agenda] == ["Interested in leading"]
+    assert history[0]["date"] == shift_db.today_local()
+    assert history[0]["topics"][0]["outcome_note"] == "shadow Sat"
+    assert not agenda[0]["carried"]                     # same business day
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE oneonone_member_topics SET created_at=? WHERE id=?",
+                     ("2020-01-01 10:00", agenda[0]["id"]))
+    assert shift_db.oneonone_for_member(av)[0][0]["carried"]
+
+    # Guarded flip, reopen clears all four stamps, delete guarded
+    assert not shift_db.set_member_topic_discussed(t1["id"], True, "x", "Operator")
+    assert shift_db.set_member_topic_discussed(t1["id"], False, "", "Operator")
+    fresh = shift_db.get_member_topic(t1["id"])
+    assert fresh["discussed_at"] is None and fresh["discussed_by"] is None \
+        and fresh["discussed_on"] is None and fresh["outcome_note"] is None
+    assert shift_db.set_member_topic_discussed(t1["id"], True, "", "Operator")
+    assert not shift_db.delete_member_topic(t1["id"])   # history now
+    t2 = shift_db.oneonone_for_member(av)[0][0]
+    assert shift_db.delete_member_topic(t2["id"])
+    assert shift_db.get_member_topic(t2["id"]) is None
+
+
+def test_member_threads_isolated_from_leader_threads(isolated_db):
+    # Fresh DB: leader Maya and roster member Avery are BOTH id 1.
+    shift_db.add_leader("Maya", "4721")
+    shift_db.add_member("Avery")
+    maya = shift_db.leaders()[0]
+    av = _member_id("Avery")
+    assert maya["id"] == av == 1
+
+    shift_db.add_member_topic(av, "Operator-only note", "Operator")
+    member_tid = shift_db.oneonone_for_member(av)[0][0]["id"]
+    assert shift_db.oneonone_for_leader(maya["id"]) == ([], [])
+    assert shift_db.open_topic_count(maya["id"]) == 0
+    assert shift_db.oneonone_summary()[0]["open"] == 0
+    # The leader-side helpers can never see or delete the member row
+    assert shift_db.get_topic(member_tid) is None
+    assert not shift_db.delete_topic(member_tid)
+    assert not shift_db.set_topic_discussed(member_tid, True, "", "Maya")
+    assert shift_db.get_member_topic(member_tid)["discussed_at"] is None
+
+    shift_db.add_oneonone_topic(maya["id"], "Shared topic", "Maya")
+    shift_db.add_oneonone_topic(maya["id"], "Second shared", "Maya")
+    leader_tid = shift_db.oneonone_for_leader(maya["id"])[0][1]["id"]
+    assert leader_tid != member_tid
+    assert shift_db.get_member_topic(leader_tid) is None
+
+
+def test_member_oneonone_index_grouping(isolated_db):
+    for n in ["Avery", "Blake", "Casey", "Drew", "maya", "Riley"]:
+        shift_db.add_member(n)
+    shift_db.add_leader("Maya", "4721")
+    shift_db.add_leader("Riley", "5151")
+    riley_login = next(l for l in shift_db.leaders() if l["name"] == "Riley")
+    shift_db.set_leader_active(riley_login["id"], False)
+
+    shift_db.add_member_topic(_member_id("Blake"), "Open one", "Operator")
+    shift_db.add_member_topic(_member_id("Avery"), "Done one", "Operator")
+    t = shift_db.oneonone_for_member(_member_id("Avery"))[0][0]
+    shift_db.set_member_topic_discussed(t["id"], True, "", "Operator")
+    shift_db.add_member_topic(_member_id("Casey"), "Former's topic", "Operator")
+    shift_db.set_member_active(_member_id("Casey"), False)
+    shift_db.set_member_active(_member_id("Drew"), False)   # no history
+
+    idx = shift_db.member_oneonone_index()
+    assert [r["name"] for r in idx["threads"]] == ["Blake", "Avery"]  # open first
+    assert idx["threads"][0]["open"] == 1
+    everyone = [r["name"] for r in idx["everyone"]]
+    # Roster 'maya' matches an active leader login → lives under Leaders;
+    # Riley's login is deactivated → an ordinary team member again.
+    assert everyone == ["Avery", "Blake", "Riley"]
+    assert all(r["initial"] == r["name"][0].upper() for r in idx["everyone"])
+    assert [r["name"] for r in idx["former"]] == ["Casey"]   # Drew absent
+    riley = next(r for r in idx["everyone"] if r["name"] == "Riley")
+    assert riley["leader_id"] is None
+
+    # A pre-promotion member thread stays listed, tagged with the login
+    shift_db.add_member_topic(_member_id("maya"), "Before promotion", "Operator")
+    row = next(r for r in shift_db.member_oneonone_index()["threads"]
+               if r["name"] == "maya")
+    assert row["leader_id"] == next(l["id"] for l in shift_db.leaders()
+                                    if l["name"] == "Maya")
+
+
+def test_oneonone_people_and_resolve(isolated_db):
+    for n in ["Avery", "maya", "Old Timer"]:
+        shift_db.add_member(n)
+    shift_db.set_member_active(_member_id("Old Timer"), False)
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]
+
+    people = shift_db.oneonone_people()
+    assert [(p["kind"], p["name"]) for p in people] == [
+        ("member", "Avery"), ("leader", "Maya")]           # one Maya, no Old Timer
+
+    assert shift_db.oneonone_resolve("  MAYA ") == ("leader", maya["id"])
+    assert shift_db.oneonone_resolve("avery") == ("member", _member_id("Avery"))
+    assert shift_db.oneonone_resolve("old   timer") == \
+        ("member", _member_id("Old Timer"))
+    roster_size = len(shift_db.roster(include_inactive=True))
+    assert shift_db.oneonone_resolve("nobody") is None
+    assert shift_db.oneonone_resolve("   ") is None
+    assert len(shift_db.roster(include_inactive=True)) == roster_size  # no phantoms
+
+    shift_db.set_leader_active(maya["id"], False)
+    assert shift_db.oneonone_resolve("maya") == ("member", _member_id("maya"))
+
+
+def test_member_oneonone_survives_export_import(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]
+    shift_db.add_oneonone_topic(maya["id"], "Leader topic", "Maya")
+    shift_db.add_member("Avery")
+    av = _member_id("Avery")
+    shift_db.add_member_topic(av, "Open member topic", "Operator")
+    shift_db.add_member_topic(av, "Discussed member topic", "Operator")
+    t = shift_db.oneonone_for_member(av)[0][1]
+    shift_db.set_member_topic_discussed(t["id"], True, "great talk", "Operator")
+    raw = shift_db.export_json()
+    assert "Open member topic" in raw
+
+    shift_db.delete_member_topic(shift_db.oneonone_for_member(av)[0][0]["id"])
+    # DELETE FROM team_members must cascade cleanly, not abort the restore
+    assert shift_db.import_json(raw) is None
+    agenda, history = shift_db.oneonone_for_member(av)
+    assert [x["topic"] for x in agenda] == ["Open member topic"]
+    assert history[0]["topics"][0]["outcome_note"] == "great talk"
+    assert history[0]["topics"][0]["member_id"] == av
+    assert shift_db.oneonone_for_leader(maya["id"])[0][0]["topic"] == "Leader topic"
+
+
+def test_old_backup_without_member_section_restores(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]
+    shift_db.add_oneonone_topic(maya["id"], "Leader topic", "Maya")
+    shift_db.add_member("Avery")
+    payload = json.loads(shift_db.export_json())
+    del payload["oneonone_member_topics"]               # pre-release backup
+    shift_db.add_member_topic(_member_id("Avery"), "After backup", "Operator")
+    assert shift_db.import_json(json.dumps(payload)) is None
+    assert shift_db.oneonone_for_leader(maya["id"])[0][0]["topic"] == "Leader topic"
+    assert shift_db.oneonone_for_member(_member_id("Avery")) == ([], [])
 
 
 # --- shout-outs --------------------------------------------------------------

@@ -339,6 +339,31 @@ CREATE TABLE IF NOT EXISTS oneonone_topics (
 CREATE INDEX IF NOT EXISTS idx_oneonone_topics
     ON oneonone_topics(leader_id, discussed_at);
 
+-- Operator-only 1:1 threads with roster team members (they have no login).
+-- Same shape and semantics as oneonone_topics, but visible to the Operator
+-- master login ONLY: never leaders, never admin-role leaders. A separate
+-- table so the live oneonone_topics table is never rebuilt and no
+-- leader-facing query or route can ever select these rows.
+-- ON DELETE CASCADE is restore-critical: import_json runs DELETE FROM
+-- team_members under foreign_keys=ON before re-inserting these rows
+-- (NO ACTION would abort restores; SET NULL violates NOT NULL). The roster
+-- is deactivate-only — a hard delete of team_members would erase 1:1
+-- history. Growth/coaching topics ONLY: conduct, discipline, attendance,
+-- wage, and health content never goes in this database.
+CREATE TABLE IF NOT EXISTS oneonone_member_topics (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
+    topic TEXT NOT NULL,
+    added_by TEXT,
+    created_at TEXT NOT NULL,
+    discussed_at TEXT,                          -- NULL = still on the agenda
+    discussed_by TEXT,
+    discussed_on TEXT,                          -- YYYY-MM-DD business date (4am rollover)
+    outcome_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_oneonone_member_topics
+    ON oneonone_member_topics(member_id, discussed_at);
+
 -- Recognition / shout-outs, posted by any leader, optionally cross-posted
 -- to the team Slack channel (best-effort; shared_at records the REQUEST,
 -- not a confirmed delivery).
@@ -485,7 +510,9 @@ def init_db() -> None:
 def _migrate(conn) -> None:
     """Additive column migrations for existing databases — executescript's
     CREATE TABLE IF NOT EXISTS only shapes brand-new tables. Runs under
-    init_db's write lock so concurrent workers can't double-ALTER."""
+    init_db's write lock so concurrent workers can't double-ALTER.
+    executescript(SCHEMA) runs FIRST, so never put an index in SCHEMA on a
+    column this function ALTERs in — old databases would fail to boot."""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(guest_recoveries)")}
     for col_def in ("contacted_at TEXT", "contacted_by TEXT", "contact_note TEXT"):
         if col_def.split()[0] not in cols:
@@ -1214,44 +1241,55 @@ def _business_date(stamp: str) -> str:
         return (stamp or "")[:10]
 
 
-def add_oneonone_topic(leader_id: int, topic: str, by: str) -> bool:
-    """Add a talking point to a leader's shared agenda. Returns False for
-    an empty topic or unknown leader."""
+# kind -> (topic table, owner column, owner table). These are the ONLY
+# identifiers ever interpolated into the 1:1 SQL below; an unknown kind is a
+# programming error (KeyError), never reachable from request data.
+_ONEONONE_KINDS = {
+    "leader": ("oneonone_topics", "leader_id", "leaders"),
+    "member": ("oneonone_member_topics", "member_id", "team_members"),
+}
+
+
+def _add_topic(kind: str, owner_id: int, topic: str, by: str) -> bool:
+    """Add a talking point to an agenda. Returns False for an empty topic
+    or an unknown owner."""
+    table, col, owner = _ONEONONE_KINDS[kind]
     topic = " ".join((topic or "").split())
     if not topic:
         return False
     with closing(connect()) as conn, conn:
         if not conn.execute(
-            "SELECT 1 FROM leaders WHERE id=?", (leader_id,)
+            f"SELECT 1 FROM {owner} WHERE id=?", (owner_id,)
         ).fetchone():
             return False
         conn.execute(
-            "INSERT INTO oneonone_topics (leader_id, topic, added_by, created_at) "
+            f"INSERT INTO {table} ({col}, topic, added_by, created_at) "
             "VALUES (?,?,?,?)",
-            (leader_id, topic, by, now_stamp()),
+            (owner_id, topic, by, now_stamp()),
         )
     return True
 
 
-def oneonone_for_leader(leader_id: int, meetings: int = 12) \
+def _topics_for(kind: str, owner_id: int, meetings: int = 12) \
         -> tuple[list[dict], list[dict]]:
     """(agenda, history). agenda: undiscussed topics, longest-waiting first,
     each flagged carried=True when it survived at least one past 1:1.
     history: [{'date', 'topics'}] newest meeting first, capped at
     `meetings` distinct dates. One transaction so a check-off landing
     mid-read can't show a topic in both lists."""
+    table, col, _ = _ONEONONE_KINDS[kind]
     with closing(connect()) as conn:
         conn.execute("BEGIN")
         agenda = [dict(r) for r in conn.execute(
-            "SELECT * FROM oneonone_topics WHERE leader_id=? "
+            f"SELECT * FROM {table} WHERE {col}=? "
             "AND discussed_at IS NULL ORDER BY created_at, id",
-            (leader_id,),
+            (owner_id,),
         ).fetchall()]
         discussed = [dict(r) for r in conn.execute(
-            "SELECT * FROM oneonone_topics WHERE leader_id=? "
+            f"SELECT * FROM {table} WHERE {col}=? "
             "AND discussed_at IS NOT NULL "
             "ORDER BY discussed_on DESC, discussed_at, id",
-            (leader_id,),
+            (owner_id,),
         ).fetchall()]
         conn.commit()
     last_met = max((t["discussed_on"] for t in discussed if t["discussed_on"]),
@@ -1270,23 +1308,25 @@ def oneonone_for_leader(leader_id: int, meetings: int = 12) \
     return agenda, history
 
 
-def get_topic(topic_id: int) -> dict | None:
+def _get_topic(kind: str, topic_id: int) -> dict | None:
+    table = _ONEONONE_KINDS[kind][0]
     with closing(connect()) as conn:
         row = conn.execute(
-            "SELECT * FROM oneonone_topics WHERE id=?", (topic_id,)
+            f"SELECT * FROM {table} WHERE id=?", (topic_id,)
         ).fetchone()
     return dict(row) if row else None
 
 
-def set_topic_discussed(topic_id: int, discussed: bool, note: str,
-                        by: str) -> bool:
+def _set_discussed(kind: str, topic_id: int, discussed: bool, note: str,
+                   by: str) -> bool:
     """Check a topic off during the 1:1 (or reopen it). Guarded flip like
     set_recovery_resolved: only rows in the opposite state change, so the
     first stamp wins. Reopening clears all four columns."""
+    table = _ONEONONE_KINDS[kind][0]
     guard = "IS NULL" if discussed else "IS NOT NULL"
     with closing(connect()) as conn, conn:
         cur = conn.execute(
-            "UPDATE oneonone_topics SET discussed_at=?, discussed_by=?, "
+            f"UPDATE {table} SET discussed_at=?, discussed_by=?, "
             f"discussed_on=?, outcome_note=? WHERE id=? AND discussed_at {guard}",
             (now_stamp() if discussed else None,
              by if discussed else None,
@@ -1297,15 +1337,165 @@ def set_topic_discussed(topic_id: int, discussed: bool, note: str,
         return cur.rowcount > 0
 
 
-def delete_topic(topic_id: int) -> bool:
+def _delete_topic(kind: str, topic_id: int) -> bool:
     """Remove an undiscussed topic. Discussed topics are meeting history
     and can only leave via reopen — guarded at the SQL level."""
+    table = _ONEONONE_KINDS[kind][0]
     with closing(connect()) as conn, conn:
         cur = conn.execute(
-            "DELETE FROM oneonone_topics WHERE id=? AND discussed_at IS NULL",
+            f"DELETE FROM {table} WHERE id=? AND discussed_at IS NULL",
             (topic_id,),
         )
         return cur.rowcount > 0
+
+
+# Leader agendas — shared between each leader and the Operator.
+
+def add_oneonone_topic(leader_id: int, topic: str, by: str) -> bool:
+    return _add_topic("leader", leader_id, topic, by)
+
+
+def oneonone_for_leader(leader_id: int, meetings: int = 12) \
+        -> tuple[list[dict], list[dict]]:
+    return _topics_for("leader", leader_id, meetings)
+
+
+def get_topic(topic_id: int) -> dict | None:
+    return _get_topic("leader", topic_id)
+
+
+def set_topic_discussed(topic_id: int, discussed: bool, note: str,
+                        by: str) -> bool:
+    return _set_discussed("leader", topic_id, discussed, note, by)
+
+
+def delete_topic(topic_id: int) -> bool:
+    return _delete_topic("leader", topic_id)
+
+
+# Team-member threads — the Operator master login's alone.
+
+def add_member_topic(member_id: int, topic: str, by: str) -> bool:
+    return _add_topic("member", member_id, topic, by)
+
+
+def oneonone_for_member(member_id: int, meetings: int = 12) \
+        -> tuple[list[dict], list[dict]]:
+    return _topics_for("member", member_id, meetings)
+
+
+def get_member_topic(topic_id: int) -> dict | None:
+    return _get_topic("member", topic_id)
+
+
+def set_member_topic_discussed(topic_id: int, discussed: bool, note: str,
+                               by: str) -> bool:
+    return _set_discussed("member", topic_id, discussed, note, by)
+
+
+def delete_member_topic(topic_id: int) -> bool:
+    return _delete_topic("member", topic_id)
+
+
+def get_member(member_id: int) -> dict | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT id, name, role, active, created_at FROM team_members "
+            "WHERE id=?", (member_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def active_leader_named(name: str) -> dict | None:
+    """The active leader login with this name (case-insensitive), if any.
+    Matched against `leaders`, never team_members.role — nothing writes
+    role='leader' there, and lineup_assign resets it to 'team'."""
+    name = " ".join((name or "").split())
+    if not name:
+        return None
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT id, name, role FROM leaders "
+            "WHERE active=1 AND name=? COLLATE NOCASE", (name,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def oneonone_people() -> list[dict]:
+    """Everyone the Operator can open a 1:1 with, for the picker: active
+    leader logins (kind 'leader') plus active roster members who aren't
+    also an active leader (one entry per person)."""
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            """
+            SELECT 'leader' AS kind, id, name FROM leaders WHERE active=1
+            UNION ALL
+            SELECT 'member', m.id, m.name FROM team_members m
+            WHERE m.active=1 AND NOT EXISTS (
+                SELECT 1 FROM leaders ld
+                WHERE ld.active=1 AND ld.name = m.name COLLATE NOCASE)
+            ORDER BY name COLLATE NOCASE
+            """
+        ).fetchall()]
+
+
+def oneonone_resolve(name: str) -> tuple[str, int] | None:
+    """Exact (case-insensitive) name -> ('leader', id) for an active leader
+    login, else ('member', id) for any roster row (active or not), else
+    None. Never creates roster rows: a typo must not add a phantom team
+    member to lineup autosuggest."""
+    name = " ".join((name or "").split())
+    if not name:
+        return None
+    leader = active_leader_named(name)
+    if leader:
+        return ("leader", leader["id"])
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT id FROM team_members WHERE name=? COLLATE NOCASE", (name,)
+        ).fetchone()
+    return ("member", row["id"]) if row else None
+
+
+def member_oneonone_index() -> dict:
+    """The Operator's team-member section: {'threads', 'everyone', 'former'}.
+    threads: active members with any 1:1 topic, open agendas first then
+    longest since a 1:1. everyone: every active member (A–Z, with an
+    `initial` for letter dividers). former: deactivated members who still
+    have 1:1 history. A roster name matching an active leader login is
+    skipped unless an older member thread exists (that person lives under
+    Leaders)."""
+    with closing(connect()) as conn:
+        rows = [dict(r) for r in conn.execute(
+            """
+            SELECT m.id, m.name, m.active, COUNT(t.id) AS topics,
+                   COUNT(CASE WHEN t.id IS NOT NULL AND t.discussed_at IS NULL
+                              THEN 1 END) AS open,
+                   MAX(t.discussed_on) AS last_met,
+                   (SELECT ld.id FROM leaders ld WHERE ld.active=1
+                    AND ld.name = m.name COLLATE NOCASE) AS leader_id
+            FROM team_members m
+            LEFT JOIN oneonone_member_topics t ON t.member_id = m.id
+            GROUP BY m.id
+            HAVING m.active = 1 OR COUNT(t.id) > 0
+            ORDER BY m.name COLLATE NOCASE
+            """
+        ).fetchall()]
+    threads, everyone, former = [], [], []
+    for r in rows:
+        first = r["name"][:1].upper()
+        r["initial"] = first if first.isalpha() else "#"
+        if r["leader_id"] and not r["topics"]:
+            continue
+        if not r["active"]:
+            former.append(r)
+            continue
+        everyone.append(r)
+        if r["topics"]:
+            threads.append(r)
+    threads.sort(key=lambda r: (r["open"] == 0, r["last_met"] or "",
+                                r["name"].casefold()))
+    return {"threads": threads, "everyone": everyone, "former": former}
 
 
 def oneonone_summary() -> list[dict]:
@@ -1813,7 +2003,7 @@ EXPORT_TABLES = [
     "checklist_runs", "checklist_run_items", "goals", "goal_updates",
     "positions", "lineup_assignments", "shift_notes", "announcements",
     "announcement_reads", "course_lessons", "lesson_progress", "leader_tasks",
-    "guest_recoveries", "oneonone_topics", "shoutouts",
+    "guest_recoveries", "oneonone_topics", "oneonone_member_topics", "shoutouts",
 ]
 
 

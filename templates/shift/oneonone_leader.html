@@ -1,4 +1,5 @@
 {% extends "shift/base.html" %}
+{% from "shift/_oneonone_macros.html" import agenda_list, history_list with context %}
 {% block title %}{{ leader.name }} — 1:1{% endblock %}
 {% block content %}
 <h1 class="page">{{ leader.name }} — 1:1</h1>
@@ -57,41 +58,7 @@ wage, and health conversations never go in this app.</div>
   </form>
 </details>
 
-<div class="section-label" id="agenda">Agenda · {{ agenda | length }}</div>
-{% if agenda %}
-<div class="card" style="padding: 4px 14px;">
-  {% for t in agenda %}
-  <details id="topic-{{ t.id }}" style="padding: 10px 0; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <summary style="list-style:none; cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
-      <span class="checkmark">✓</span>
-      <span style="flex:1; font-size:15px;">{{ t.topic }}
-        {% if t.carried %}<span class="note-cat">carried</span>{% endif %}
-        <span class="meta" style="display:block; font-size:12px; color:var(--soft);">
-          added by {{ t.added_by }} · {{ t.created_at[:10] }}</span>
-      </span>
-    </summary>
-    <div style="padding: 10px 0 4px 36px;">
-      <form method="post" action="{{ url_for('shift.oneonone_topic_toggle', topic_id=t.id) }}">
-        <input type="hidden" name="discussed" value="1">
-        <input type="text" name="note" placeholder="Outcome — what we decided…">
-        <div class="pillrow" style="margin-top:8px;">
-          <button class="pill small primary" type="submit">✓ Discussed</button>
-        </div>
-      </form>
-      {% if shift_is_operator or t.added_by == shift_name %}
-      <form method="post" action="{{ url_for('shift.oneonone_topic_delete', topic_id=t.id) }}"
-            onsubmit="return confirm('Remove this talking point?');" style="margin-top:8px;">
-        <button class="pill small ghost" type="submit">Remove</button>
-      </form>
-      {% endif %}
-    </div>
-  </details>
-  {% endfor %}
-</div>
-{% else %}
-<div class="empty">Nothing on the agenda — add talking points as they come up
-between meetings.</div>
-{% endif %}
+{{ agenda_list(agenda, 'shift.oneonone_topic_toggle', 'shift.oneonone_topic_delete') }}
 
 <details class="compose" id="actions">
   <summary>+ Action item → their to-dos</summary>
@@ -108,32 +75,10 @@ between meetings.</div>
   </form>
 </details>
 
-{% if history %}
-<div class="section-label">🗓 Past 1:1s</div>
-{% for m in history %}
-<details class="card" style="margin-bottom:10px;">
-  <summary style="cursor:pointer; font-weight:700; font-size:15px;">{{ m.date }}
-    <span style="font-weight:400; color:var(--soft);">· {{ m.topics | length }} topic{{ 's' if m.topics | length != 1 }}</span></summary>
-  {% for t in m.topics %}
-  <div style="display:flex; gap:10px; padding:8px 0; align-items:flex-start; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <span class="checkmark" style="background:var(--good); border-color:var(--good); color:#fff; flex:none;">✓</span>
-    <div style="flex:1;">
-      <div style="font-size:14px;">{{ t.topic }}</div>
-      {% if t.outcome_note %}<div style="font-size:13px; color:var(--soft);">📝 {{ t.outcome_note }}</div>{% endif %}
-      <div class="progress-note">added by {{ t.added_by }} · discussed by {{ t.discussed_by }} {{ t.discussed_at[11:] }}</div>
-    </div>
-    <form method="post" action="{{ url_for('shift.oneonone_topic_toggle', topic_id=t.id) }}">
-      <input type="hidden" name="discussed" value="0">
-      <button class="pill small ghost" type="submit">Reopen</button>
-    </form>
-  </div>
-  {% endfor %}
-</details>
-{% endfor %}
-{% endif %}
+{{ history_list(history, 'shift.oneonone_topic_toggle') }}
 
 {% if shift_is_operator %}
-<a class="pill small ghost" style="margin-top:12px; display:inline-block;" href="{{ url_for('shift.oneonone') }}">← All leaders</a>
+<a class="pill small ghost" style="margin-top:12px; display:inline-block;" href="{{ url_for('shift.oneonone') }}">← All 1:1s</a>
 {% endif %}
 <div class="sub">This page is visible to {{ leader.name }} and the Operator only.</div>
 {% endblock %}

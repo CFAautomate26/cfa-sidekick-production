@@ -46,7 +46,8 @@ def test_bots_unaffected(client):
 def test_requires_login(client):
     for path in ["/shift/", "/shift/checklists", "/shift/lineup", "/shift/goals",
                  "/shift/notes", "/shift/roster", "/shift/history", "/shift/more",
-                 "/shift/recovery", "/shift/oneonone", "/shift/shoutouts"]:
+                 "/shift/recovery", "/shift/oneonone", "/shift/shoutouts",
+                 "/shift/oneonone/member/1"]:
         resp = client.get(path)
         assert resp.status_code == 302, path
         assert "/shift/login" in resp.headers["Location"]
@@ -763,6 +764,15 @@ def test_backups_and_pin_resets_are_operator_only(client):
 
     login_operator(client)
     assert b"private growth topic" in client.get("/shift/admin/export").data
+    shift_db.add_member("Avery")
+    av = next(m for m in shift_db.roster() if m["name"] == "Avery")
+    client.post(f"/shift/oneonone/member/{av['id']}/topics",
+                data={"topic": "operator-only coaching note"})
+    assert b"operator-only coaching note" in client.get("/shift/admin/export").data
+    client.post("/shift/logout")
+    login_leader(client, name="Dana", pin="5555")
+    assert client.get("/shift/admin/export",
+                      follow_redirects=False).status_code == 302
 
 
 def test_restore_invalidates_leader_sessions(client):
@@ -778,6 +788,197 @@ def test_restore_invalidates_leader_sessions(client):
     resp = client.get("/shift/", follow_redirects=False)
     assert resp.status_code == 302
     assert "/shift/login" in resp.headers["Location"]
+
+
+# --- team-member 1:1s (Operator-only) ---------------------------------------
+
+def _roster_id(name):
+    return next(m["id"] for m in shift_db.roster(include_inactive=True)
+                if m["name"] == name)
+
+
+def test_member_oneonone_operator_only(client):
+    make_leader(client)                                   # Maya, lead
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    shift_db.add_member("Avery")
+    av = _roster_id("Avery")
+    assert av == maya["id"]                               # same numeric id
+    login_operator(client)
+    client.post(f"/shift/oneonone/member/{av}/topics",
+                data={"topic": "Cross-train breading"})
+    tid = shift_db.oneonone_for_member(av)[0][0]["id"]
+    client.post("/shift/logout")
+
+    for name, pin in [("Maya", "4721"), ("Dana", "5555")]:
+        login_leader(client, name=name, pin=pin)
+        resp = client.get(f"/shift/oneonone/member/{av}", follow_redirects=False)
+        assert resp.status_code == 302, name
+        assert b"Cross-train" not in client.get(
+            f"/shift/oneonone/member/{av}", follow_redirects=True).data
+        for url, data in [
+            (f"/shift/oneonone/member/{av}/topics", {"topic": "sneaky"}),
+            (f"/shift/oneonone/member/topic/{tid}/toggle", {"discussed": "1"}),
+            (f"/shift/oneonone/member/topic/{tid}/delete", {}),
+            # The leader route with a member topic id only ever touches
+            # oneonone_topics.
+            (f"/shift/oneonone/topic/{tid}/toggle", {"discussed": "1"}),
+            (f"/shift/oneonone/topic/{tid}/delete", {}),
+        ]:
+            assert client.post(url, data=data).status_code == 302, (name, url)
+        agenda, history = shift_db.oneonone_for_member(av)
+        assert [t["topic"] for t in agenda] == ["Cross-train breading"] \
+            and not history, name
+        # ?q= on the index never looks anything up for a leader
+        resp = client.get("/shift/oneonone?q=Avery", follow_redirects=False)
+        own = next(l for l in shift_db.leaders() if l["name"] == name)
+        assert resp.headers["Location"].endswith(f"/shift/oneonone/{own['id']}")
+        page = client.get("/shift/oneonone?q=Avery", follow_redirects=True).data
+        assert b"Avery" not in page and b"Cross-train" not in page
+        for path in ["/shift/", "/shift/more", "/shift/roster"]:
+            page = client.get(path).data
+            assert b"Cross-train" not in page, (name, path)
+        assert b"/shift/oneonone/member/" not in client.get("/shift/roster").data
+        client.post("/shift/logout")
+
+
+def test_member_topic_routes(client):
+    shift_db.add_member("Avery")
+    av = _roster_id("Avery")
+    login_operator(client)
+    resp = client.post(f"/shift/oneonone/member/{av}/topics",
+                       data={"topic": "Wants weekend closes"})
+    assert resp.headers["Location"].endswith("#agenda")
+    resp = client.post(f"/shift/oneonone/member/{av}/topics",
+                       data={"topic": "   "}, follow_redirects=True)
+    assert b"needs some words" in resp.data
+    page = client.get(f"/shift/oneonone/member/{av}").data
+    assert b"Wants weekend closes" in page
+    assert b"never go in this app" in page
+    assert b"Only you (the Operator)" in page
+
+    tid = shift_db.oneonone_for_member(av)[0][0]["id"]
+    resp = client.post(f"/shift/oneonone/member/topic/{tid}/toggle",
+                       data={"discussed": "1", "note": "two closes a week"})
+    assert resp.headers["Location"].endswith("#agenda")
+    page = client.get(f"/shift/oneonone/member/{av}").data
+    assert b"Past 1:1s" in page and b"two closes a week" in page
+    resp = client.post(f"/shift/oneonone/member/topic/{tid}/toggle",
+                       data={"discussed": "1"}, follow_redirects=True)
+    assert b"Already marked discussed by Operator" in resp.data
+    resp = client.post(f"/shift/oneonone/member/topic/{tid}/toggle",
+                       data={"discussed": "0"})
+    assert resp.headers["Location"].endswith(f"#topic-{tid}")
+    assert shift_db.get_member_topic(tid)["discussed_at"] is None
+
+    client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "Drop me"})
+    drop = next(t for t in shift_db.oneonone_for_member(av)[0]
+                if t["topic"] == "Drop me")
+    client.post(f"/shift/oneonone/member/topic/{drop['id']}/delete")
+    assert shift_db.get_member_topic(drop["id"]) is None
+    client.post(f"/shift/oneonone/member/topic/{tid}/toggle", data={"discussed": "1"})
+    resp = client.post(f"/shift/oneonone/member/topic/{tid}/delete",
+                       follow_redirects=True)
+    assert b"part of meeting history" in resp.data
+    assert shift_db.get_member_topic(tid)
+
+    # Stale ids and unknown members never 500
+    for url in ["/shift/oneonone/member/topic/999999/toggle",
+                "/shift/oneonone/member/topic/999999/delete",
+                "/shift/oneonone/member/999999/topics"]:
+        assert client.post(url, data={"discussed": "1", "topic": "x"}).status_code == 302
+    resp = client.get("/shift/oneonone/member/999999", follow_redirects=True)
+    assert b"isn&#39;t on the roster" in resp.data or b"isn't on the roster" in resp.data
+
+
+def test_oneonone_index_picker(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    for n in ["Avery", "maya", "Blake"]:
+        shift_db.add_member(n)
+    login_operator(client)
+    page = client.get("/shift/oneonone").data.decode()
+    assert "Leaders · shared agendas" in page and "Team members" in page
+    assert '<option value="Avery">' in page and '<option value="Blake">' in page
+    # Roster 'maya' + leader 'Maya' → exactly one option, labelled Leader
+    assert page.lower().count('<option value="maya"') == 1
+    assert '<option value="Maya" label="Leader">' in page
+
+    resp = client.get("/shift/oneonone?q=avery", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/member/{_roster_id('Avery')}")
+    resp = client.get("/shift/oneonone?q=%20MAYA%20", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/{maya['id']}")
+    page = client.get("/shift/oneonone?q=av").data
+    assert f"/shift/oneonone/member/{_roster_id('Avery')}".encode() in page
+    roster_size = len(shift_db.roster(include_inactive=True))
+    page = client.get("/shift/oneonone?q=nobody").data
+    assert b"No one matches" in page
+    assert len(shift_db.roster(include_inactive=True)) == roster_size
+
+    client.post(f"/shift/oneonone/member/{_roster_id('Blake')}/topics",
+                data={"topic": "Check in"})
+    page = client.get("/shift/oneonone").data.decode()
+    team = page[page.index('id="team"'):]
+    assert "Blake" in team and "● 1 waiting" in team
+
+
+def test_member_page_defers_to_leader_login(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    shift_db.add_member("Maya")
+    mid = _roster_id("Maya")
+    login_operator(client)
+    resp = client.get(f"/shift/oneonone/member/{mid}", follow_redirects=False)
+    assert resp.headers["Location"].endswith(f"/shift/oneonone/{maya['id']}")
+    resp = client.post(f"/shift/oneonone/member/{mid}/topics",
+                       data={"topic": "Shadow file"}, follow_redirects=True)
+    assert b"has a leader login" in resp.data
+    assert shift_db.oneonone_for_member(mid) == ([], [])
+
+    # Pre-promotion history still opens, with the banner and no compose form
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("INSERT INTO oneonone_member_topics (member_id, topic, "
+                     "added_by, created_at) VALUES (?,?,?,?)",
+                     (mid, "From before", "Operator", "2026-01-01 10:00"))
+    page = client.get(f"/shift/oneonone/member/{mid}").data
+    assert b"From before" in page and b"has a leader login" in page
+    assert b"+ Add a talking point" not in page
+
+
+def test_member_page_content(client):
+    shift_db.add_member("Avery")
+    av = _roster_id("Avery")
+    login_operator(client)
+    page = client.get(f"/shift/oneonone/member/{av}").data
+    for leader_only in [b"Their goals", b"Course", b"Action item"]:
+        assert leader_only not in page
+    shift_db.set_member_active(av, False)
+    page = client.get(f"/shift/oneonone/member/{av}").data
+    assert b"active roster" in page
+
+
+def test_roster_1on1_link_operator_only(client):
+    make_leader(client)
+    shift_db.add_member("Avery")
+    login_operator(client)
+    assert b"/shift/oneonone/member/" in client.get("/shift/roster").data
+    client.post("/shift/logout")
+    login_leader(client)
+    assert b"/shift/oneonone/member/" not in client.get("/shift/roster").data
+
+
+def test_leader_more_badge_ignores_member_topics(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    shift_db.add_member("Avery")
+    login_operator(client)
+    for t in ["One", "Two", "Three"]:
+        client.post(f"/shift/oneonone/member/{_roster_id('Avery')}/topics",
+                    data={"topic": t})
+    client.post("/shift/logout")
+    login_leader(client)
+    assert b"on your agenda" not in client.get("/shift/more").data
+    assert shift_db.open_topic_count(maya["id"]) == 0
 
 
 # --- shout-outs ---------------------------------------------------------------

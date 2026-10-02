@@ -1,0 +1,44 @@
+{% extends "shift/base.html" %}
+{% from "shift/_oneonone_macros.html" import agenda_list, history_list with context %}
+{% block title %}{{ member.name }} — 1:1{% endblock %}
+{% block content %}
+<h1 class="page">{{ member.name }} — 1:1</h1>
+<div class="sub">Team member · {{ agenda | length }} on the agenda · last 1:1
+  {{ history[0].date if history else 'never' }}</div>
+<div class="sub">🔒 Only you (the Operator) can see this page — {{ member.name }}
+has no login, and leaders (admins included) never see team-member 1:1s.</div>
+<div class="sub">Growth &amp; coaching topics only — conduct, discipline,
+attendance, wage, and health conversations never go in this app.</div>
+
+{% if not member.active %}
+<div class="flash">{{ member.name }} isn't on the active roster. Restore them
+under <a href="{{ url_for('shift.roster') }}">Team roster</a> to show them in
+the picker again.</div>
+{% endif %}
+
+{% if leader %}
+<a class="card tap" href="{{ url_for('shift.oneonone_leader', leader_id=leader.id) }}">
+  <h2>{{ leader.name }} has a leader login →</h2>
+  <div class="progress-note">New topics go on your shared 1:1. This page keeps
+  the private history from before.</div>
+</a>
+{% else %}
+<details class="compose" {{ 'open' if not agenda }}>
+  <summary>+ Add a talking point</summary>
+  <form method="post" action="{{ url_for('shift.oneonone_member_topic_add', member_id=member.id) }}" class="card">
+    <label class="field" for="t-topic">Topic</label>
+    <input type="text" id="t-topic" name="topic" required
+           placeholder="e.g. Wants to learn breading">
+    <div style="margin-top:12px;">
+      <button class="pill primary" type="submit">Add</button>
+    </div>
+  </form>
+</details>
+{% endif %}
+
+{{ agenda_list(agenda, 'shift.oneonone_member_topic_toggle', 'shift.oneonone_member_topic_delete', delete_any=True) }}
+
+{{ history_list(history, 'shift.oneonone_member_topic_toggle') }}
+
+<a class="pill small ghost" style="margin-top:12px; display:inline-block;" href="{{ url_for('shift.oneonone') }}#team">← All 1:1s</a>
+{% endblock %}

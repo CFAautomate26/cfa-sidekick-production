@@ -63,6 +63,20 @@ the leadership team:
   only — not to other leaders, and not to admin-role leaders either.**
   Growth and operational topics only; conduct/discipline/wage/health
   conversations never go in this app.
+  **Team members too:** the Operator's 1:1 page has a type-any-name picker
+  (with the roster as autosuggest) and a browsable roster list, so a 1:1
+  can be opened with anyone on the team roster, not just leaders. A
+  team-member 1:1 works the same way — talking points between meetings,
+  check-offs with outcome notes, carried topics, past-meeting history —
+  minus goals, course, and to-dos (those are leader features). **These are
+  visible to the Operator master login only**: team members have no
+  login, and leaders (admin-role included) never see them. Typing a name
+  that has a leader login opens the shared leader agenda instead (one
+  thread per person). Each roster member also gets a 🤝 1:1 shortcut on
+  the Team roster page (Operator only). Growth and coaching only —
+  conduct, attendance, discipline, wage, medical, and accommodation
+  matters stay in the `docs/legal-counsel/` process. Two people with the
+  same name need distinct roster entries (e.g. "Sam K." and "Sam T.").
 - **Shout-outs** — any leader recognizes a team member in ~20 seconds:
   name (roster autosuggest), an optional value tag (2nd-mile service,
   speed, food safety, teamwork, hospitality, cleanliness), and what
@@ -160,7 +174,8 @@ scale.
   the service (the endpoint answers 401 without it — there is deliberately
   no default), and since the backup carries guest recovery contact info,
   only store it with services you'd trust with the database itself —
-  from this release that includes every leader's 1:1 agendas and notes.
+  that includes every leader's 1:1 agendas and notes, and the Operator's
+  private team-member 1:1 notes.
 - **PII aging**: phone/email on recoveries resolved more than 90 days ago
   are cleared automatically (next time the recovery page loads), so guest
   contact info doesn't accumulate forever in the DB or in new backups.
@@ -170,7 +185,11 @@ scale.
   restore. Every leader's signed-in session is also invalidated (a restore
   can renumber leader accounts, and a stale cookie must never attach to a
   different leader). Don't restore a new backup onto a rolled-back old
-  build — the old code wouldn't restore the newer tables it deleted. Course progress and everything else comes back as it was.
+  build — the old code wouldn't restore the newer tables it deleted (for
+  team-member 1:1s, a restore on a build from before they existed
+  permanently deletes them: clearing the roster cascades). Restoring a
+  backup taken before team-member 1:1s existed clears them too, so take
+  a fresh backup first. Course progress and everything else comes back as it was.
 
 ## Security model (know its limits)
 
