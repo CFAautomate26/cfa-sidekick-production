@@ -39,13 +39,17 @@ DATA_AT_RISK = (
     os.getenv("ENV", "production") == "production" and not os.getenv("SHIFT_DB_PATH")
 )
 
-# Where to-do completion emails go (same FormSubmit path as the /apply form,
-# so the default address is already activated there). Set SHIFT_NOTIFY_EMAIL
-# to "" to disable completion emails entirely.
-SHIFT_NOTIFY_EMAIL = os.getenv(
-    "SHIFT_NOTIFY_EMAIL",
-    os.getenv("APPLICATION_EMAIL", "joshua.huesser@cfafranchisee.ca"),
-).strip()
+# Where to-do completion notifications go. Slack is the reliable path:
+# SHIFT_NOTIFY_SLACK_CHANNEL names a channel the CFA Sidekick Slack bot has
+# been invited to (posted with the same SLACK_BOT_TOKEN the coverage bot
+# uses), and SHIFT_NOTIFY_SLACK_MENTION optionally @-mentions a Slack user
+# ID so the post triggers a real phone notification. Email rides FormSubmit,
+# whose Cloudflare front bot-challenges server-side posts, so it's opt-in:
+# set SHIFT_NOTIFY_EMAIL explicitly to also send email.
+SHIFT_NOTIFY_EMAIL = os.getenv("SHIFT_NOTIFY_EMAIL", "").strip()
+SHIFT_NOTIFY_SLACK_CHANNEL = os.getenv("SHIFT_NOTIFY_SLACK_CHANNEL", "").strip()
+SHIFT_NOTIFY_SLACK_MENTION = os.getenv("SHIFT_NOTIFY_SLACK_MENTION", "").strip()
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
 
 # In-process login throttle: 5 wrong PINs locks that name for 10 minutes.
 # Resets on redeploy and is per-worker — fine for one small gunicorn service.
@@ -275,6 +279,8 @@ def today():
         notes=shift_db.notes_for_date(day)[:3],
         my_tasks=shift_db.open_tasks_for_leader(leader_id) if leader_id else [],
         my_leader_id=leader_id,
+        open_recoveries=shift_db.open_recoveries(),
+        RECOVERY_ISSUE_LABELS=shift_db.RECOVERY_ISSUE_LABELS,
     )
 
 
@@ -583,7 +589,8 @@ def roster_toggle(member_id):
 
 @shift_bp.route("/more")
 def more():
-    return render_template("shift/more.html")
+    return render_template("shift/more.html",
+                           open_recoveries=shift_db.open_recovery_count())
 
 
 # ---------------------------------------------------------------------------
@@ -689,9 +696,50 @@ def todo_assign(leader_id):
     return redirect(url_for("shift.todo_leader", leader_id=leader_id))
 
 
+def send_completion_slack(task: dict, leader_name: str, remaining: int) -> None:
+    """Ping the Operator in Slack that a to-do was completed, using the same
+    bot token as the coverage bot (needs chat:write and the bot invited to
+    the SHIFT_NOTIFY_SLACK_CHANNEL channel). Best-effort: failures are
+    logged and never surface to the person tapping the checkmark."""
+    if not SLACK_BOT_TOKEN:
+        print("ERROR: SLACK_BOT_TOKEN is missing, cannot send the to-do "
+              "completion Slack ping.")
+        return
+    # Slack mrkdwn: &, < and > must be escaped or a task title could inject
+    # a real mention/link (e.g. "<!channel>").
+    def esc(text):
+        return (str(text).replace("&", "&amp;")
+                .replace("<", "&lt;").replace(">", "&gt;"))
+
+    name = esc(leader_name)
+    mention = f"<@{SHIFT_NOTIFY_SLACK_MENTION}> " if SHIFT_NOTIFY_SLACK_MENTION else ""
+    lines = [f"{mention}✅ *{name}* completed a to-do: *{esc(task['title'])}*"]
+    if task.get("due_date"):
+        lines.append(f"Due: {esc(task['due_date'])}")
+    lines.append(f"{remaining} still open for {name}" if remaining
+                 else f"That was {name}'s last open to-do 🎉")
+    base_url = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+    if base_url:
+        lines.append(f"<{base_url}/shift/todo/{task['leader_id']}|Open their to-do list>")
+    try:
+        resp = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+            json={"channel": SHIFT_NOTIFY_SLACK_CHANNEL,
+                  "text": "\n".join(lines), "unfurl_links": False},
+            timeout=15,
+        )
+        # Slack answers 200 even for errors — the body's ok/error field is
+        # what tells the story in the Render logs.
+        print(f"To-do completion Slack status: {resp.status_code}, "
+              f"body: {resp.text[:300]}")
+    except Exception as e:
+        print(f"Error sending to-do completion Slack ping: {e}")
+
+
 def send_completion_email(task: dict, leader_name: str, remaining: int) -> None:
-    """Email the Operator that a to-do was completed, via FormSubmit —
-    the same delivery path as the /apply form. Best-effort: failures are
+    """Email the Operator that a to-do was completed, via FormSubmit.
+    Opt-in (see SHIFT_NOTIFY_EMAIL above). Best-effort: failures are
     logged and never surface to the person tapping the checkmark."""
     payload = {
         "_subject": f"To-do completed: {task['title']}",
@@ -715,28 +763,35 @@ def send_completion_email(task: dict, leader_name: str, remaining: int) -> None:
 
 
 def _notify_completion(task_id: int) -> None:
-    """Fire the completion email in the background. Best-effort end to end:
-    the snapshot reads and thread spawn are guarded too, so nothing in the
-    notify path can turn an already-committed completion into an error
-    page for the person tapping the checkmark."""
+    """Fire the completion notifications (Slack and/or email, whichever is
+    configured) in the background. Best-effort end to end: the snapshot
+    reads and thread spawn are guarded too, so nothing in the notify path
+    can turn an already-committed completion into an error page for the
+    person tapping the checkmark."""
     try:
-        if not SHIFT_NOTIFY_EMAIL:
+        slack_on = bool(SHIFT_NOTIFY_SLACK_CHANNEL)
+        email_on = bool(SHIFT_NOTIFY_EMAIL)
+        if not (slack_on or email_on):
             return
         task = shift_db.get_task(task_id)
         if not task or not task["completed_at"]:
             return
         leader = shift_db.get_leader(task["leader_id"])
+        leader_name = leader["name"] if leader else "(removed)"
         remaining = len(shift_db.tasks_for_leader(task["leader_id"])[0])
-        thread = threading.Thread(
-            target=send_completion_email,
-            args=(task, leader["name"] if leader else "(removed)", remaining),
-            daemon=True,
-        )
+
+        def _send():
+            if slack_on:
+                send_completion_slack(task, leader_name, remaining)
+            if email_on:
+                send_completion_email(task, leader_name, remaining)
+
+        thread = threading.Thread(target=_send, daemon=True)
         thread.start()
         if current_app.config.get("TESTING"):
             thread.join(timeout=5)
     except Exception as e:
-        print(f"Error preparing to-do completion email: {e}")
+        print(f"Error preparing to-do completion notification: {e}")
 
 
 @shift_bp.route("/todo/task/<int:task_id>/toggle", methods=["POST"])
@@ -747,7 +802,7 @@ def todo_toggle(task_id):
         return redirect(url_for("shift.today"))
     done = request.form.get("done") == "1"
     shift_db.set_task_done(task_id, done, current_name())
-    # Email the Operator when a LEADER checks something off — not when the
+    # Notify the Operator when a LEADER checks something off — not when the
     # Operator marks it done themself during a review.
     if done and session.get("shift_leader_id"):
         _notify_completion(task_id)
@@ -763,6 +818,77 @@ def todo_delete(task_id):
         shift_db.delete_task(task_id)
     return redirect(url_for("shift.todo_leader", leader_id=task["leader_id"])
                     if task else url_for("shift.todo"))
+
+
+# ---------------------------------------------------------------------------
+# Guest recovery
+# ---------------------------------------------------------------------------
+
+@shift_bp.route("/recovery")
+def recovery():
+    # Opportunistic PII hygiene: contact info ages out of long-resolved rows.
+    shift_db.purge_old_recovery_contacts()
+    open_recs, resolved_recs = shift_db.recovery_feed()
+    return render_template(
+        "shift/recovery.html",
+        open_recs=open_recs,
+        resolved_recs=resolved_recs,
+        issue_counts=shift_db.recovery_issue_counts() if is_admin() else [],
+        RECOVERY_ISSUES=shift_db.RECOVERY_ISSUES,
+        RECOVERY_ISSUE_LABELS=shift_db.RECOVERY_ISSUE_LABELS,
+        RECOVERY_REMEDIES=shift_db.RECOVERY_REMEDIES,
+        RECOVERY_REMEDY_LABELS=shift_db.RECOVERY_REMEDY_LABELS,
+    )
+
+
+@shift_bp.route("/recovery", methods=["POST"])
+def recovery_create():
+    issue = request.form.get("issue", "")
+    remedy = request.form.get("remedy", "")
+    rid = shift_db.add_recovery(
+        guest_name=request.form.get("guest_name", ""),
+        guest_phone=request.form.get("guest_phone", ""),
+        guest_email=request.form.get("guest_email", ""),
+        issue=issue if issue in shift_db.RECOVERY_ISSUES else "other",
+        remedy=remedy if remedy in shift_db.RECOVERY_REMEDIES else "other",
+        details=request.form.get("details", ""),
+        follow_up=request.form.get("follow_up") == "1",
+        by=current_name(),
+        resolved_now=request.form.get("resolved_now") == "1",
+    )
+    if rid is None:
+        flash("A recovery needs the guest's name.")
+        return redirect(url_for("shift.recovery"))
+    flash("Logged. Make it right!")
+    return redirect(url_for("shift.recovery") + f"#rec-{rid}")
+
+
+@shift_bp.route("/recovery/<int:recovery_id>/resolve", methods=["POST"])
+def recovery_resolve(recovery_id):
+    resolved = request.form.get("resolved") == "1"
+    ok = shift_db.set_recovery_resolved(
+        recovery_id, resolved, request.form.get("note", ""), current_name())
+    if not ok:
+        # Either the row is gone, or another leader beat them to the flip —
+        # in which case the first resolver's stamp and note are kept.
+        rec = shift_db.get_recovery(recovery_id)
+        if rec:
+            if rec["resolved_at"]:
+                flash(f"Already resolved by {rec['resolved_by'] or 'someone'} "
+                      "— nothing changed.")
+            else:
+                flash("Already reopened — nothing changed.")
+            return redirect(url_for("shift.recovery") + f"#rec-{recovery_id}")
+        flash("That recovery doesn't exist any more.")
+        return redirect(url_for("shift.recovery"))
+    return redirect(url_for("shift.recovery") + f"#rec-{recovery_id}")
+
+
+@shift_bp.route("/recovery/<int:recovery_id>/delete", methods=["POST"])
+@admin_required
+def recovery_delete(recovery_id):
+    shift_db.delete_recovery(recovery_id)
+    return redirect(url_for("shift.recovery"))
 
 
 # ---------------------------------------------------------------------------
@@ -823,6 +949,24 @@ def admin_leader_toggle(leader_id):
 def admin_leader_reset_pin(leader_id):
     error = shift_db.reset_leader_pin(leader_id, request.form.get("pin", ""))
     flash(error if error else "PIN updated.")
+    return redirect(url_for("shift.admin"))
+
+
+@shift_bp.route("/admin/leaders/<int:leader_id>/role", methods=["POST"])
+@admin_required
+def admin_leader_role(leader_id):
+    role = request.form.get("role", "")
+    leader = shift_db.get_leader(leader_id)
+    # Without the Operator master PIN, admin leaders are the only way into
+    # this page — demoting the last one would lock the whole store out.
+    if (role == "lead" and leader and leader["role"] == "admin"
+            and leader["active"] and not SHIFT_ADMIN_PIN
+            and shift_db.active_admin_count() <= 1):
+        flash("That's the only admin login and SHIFT_ADMIN_PIN isn't set — "
+              "demoting them would lock everyone out of this page.")
+        return redirect(url_for("shift.admin"))
+    if leader and shift_db.set_leader_role(leader_id, role):
+        flash(f"{leader['name']} is now {'an admin' if role == 'admin' else 'a lead'}.")
     return redirect(url_for("shift.admin"))
 
 

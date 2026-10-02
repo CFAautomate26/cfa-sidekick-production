@@ -541,6 +541,195 @@ def test_course_progress_survives_export_import(isolated_db):
     assert shift_db.leader_course_summary()[0]["done"] == 1
 
 
+# --- guest recovery --------------------------------------------------------
+
+def test_recovery_lifecycle(isolated_db):
+    # Name is whitespace-collapsed; unknown enums coerce to "other"
+    rid = shift_db.add_recovery("  Jordan   Lee ", "(519) 555-0142", "",
+                                "bogus-issue", "bogus-remedy",
+                                " cold fries ", True, "Riya")
+    assert rid
+    assert shift_db.add_recovery("   ", "", "", "order-error", "refund",
+                                 "", False, "Riya") is None
+
+    rec = shift_db.get_recovery(rid)
+    assert rec["guest_name"] == "Jordan Lee"
+    assert rec["issue"] == "other" and rec["remedy"] == "other"
+    assert rec["details"] == "cold fries"
+    assert rec["follow_up"] == 1 and rec["logged_by"] == "Riya"
+
+    open_recs, resolved = shift_db.recovery_feed()
+    assert [r["id"] for r in open_recs] == [rid] and not resolved
+    assert open_recs[0]["age_days"] == 0 and not open_recs[0]["stale"]
+    assert open_recs[0]["phone_digits"] == "5195550142"
+    assert shift_db.open_recovery_count() == 1
+
+    # Resolve stamps who/when/note; reopen clears all three
+    assert shift_db.set_recovery_resolved(rid, True, " called, card mailed ", "Neha")
+    rec = shift_db.get_recovery(rid)
+    assert rec["resolved_at"] and rec["resolved_by"] == "Neha"
+    assert rec["resolution_note"] == "called, card mailed"
+    open_recs, resolved = shift_db.recovery_feed()
+    assert not open_recs and resolved[0]["id"] == rid
+
+    assert shift_db.set_recovery_resolved(rid, False, "", "Neha")
+    rec = shift_db.get_recovery(rid)
+    assert rec["resolved_at"] is None and rec["resolved_by"] is None \
+        and rec["resolution_note"] is None
+    assert not shift_db.set_recovery_resolved(999999, True, "", "Neha")
+
+    shift_db.delete_recovery(rid)
+    assert shift_db.get_recovery(rid) is None
+
+
+def test_recovery_open_queue_oldest_first_and_stale(isolated_db):
+    rid_old = shift_db.add_recovery("Old Guest", "", "", "wait-time",
+                                    "free-entree-card", "", False, "Riya")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE guest_recoveries SET recovery_date=? WHERE id=?",
+                     ("2020-01-01", rid_old))
+    rid_new = shift_db.add_recovery("New Guest", "", "", "service",
+                                    "refund", "", False, "Riya")
+    open_recs, _ = shift_db.recovery_feed()
+    assert [r["id"] for r in open_recs] == [rid_old, rid_new]
+    assert open_recs[0]["stale"] and open_recs[0]["age_days"] >= 2
+    # phone-less rows render the "can't call back" path
+    assert open_recs[0]["phone_digits"] == ""
+
+
+def test_recovery_double_resolve_keeps_first_stamp(isolated_db):
+    rid = shift_db.add_recovery("Jordan", "", "", "service", "refund",
+                                "", False, "Riya")
+    assert shift_db.set_recovery_resolved(rid, True, "called, cards mailed", "Maya")
+    # Second resolve from a stale page is a no-op, not an overwrite
+    assert not shift_db.set_recovery_resolved(rid, True, "", "Devon")
+    rec = shift_db.get_recovery(rid)
+    assert rec["resolved_by"] == "Maya"
+    assert rec["resolution_note"] == "called, cards mailed"
+    # Reopening an already-open row is likewise a no-op
+    assert shift_db.set_recovery_resolved(rid, False, "", "Devon")
+    assert not shift_db.set_recovery_resolved(rid, False, "", "Maya")
+
+
+def test_recovery_phone_plus_prefix(isolated_db):
+    rid = shift_db.add_recovery("Intl Guest", "+1 519-555-0142", "",
+                                "service", "refund", "", False, "Riya")
+    rec = shift_db.recovery_feed()[0][0]
+    assert rec["id"] == rid and rec["phone_digits"] == "+15195550142"
+
+
+def test_recovery_stale_flips_at_exactly_two_days(isolated_db):
+    from datetime import date, timedelta
+    rid = shift_db.add_recovery("G", "", "", "service", "refund", "",
+                                False, "Riya")
+    today = date.fromisoformat(shift_db.today_local())
+    for days_ago, expect_stale in [(1, False), (2, True)]:
+        with shift_db.closing(shift_db.connect()) as conn, conn:
+            conn.execute("UPDATE guest_recoveries SET recovery_date=? WHERE id=?",
+                         ((today - timedelta(days=days_ago)).isoformat(), rid))
+        rec = shift_db.recovery_feed()[0][0]
+        assert rec["stale"] is expect_stale, f"{days_ago}d open"
+        assert rec["age_days"] == days_ago
+
+
+def test_recovery_corrupt_date_is_graceful(isolated_db):
+    rid = shift_db.add_recovery("G", "", "", "service", "refund", "",
+                                False, "Riya")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE guest_recoveries SET recovery_date=? WHERE id=?",
+                     ("01/02/2020", rid))
+    rec = shift_db.recovery_feed()[0][0]   # no ValueError
+    assert rec["age_days"] == 0 and not rec["stale"]
+
+
+def test_recovery_contact_purge_after_90_days(isolated_db):
+    old = shift_db.add_recovery("Old", "519-555-0001", "old@x.ca", "service",
+                                "refund", "", False, "Riya", resolved_now=True)
+    fresh = shift_db.add_recovery("Fresh", "519-555-0002", "", "service",
+                                  "refund", "", False, "Riya", resolved_now=True)
+    still_open = shift_db.add_recovery("Open", "519-555-0003", "", "service",
+                                       "refund", "", False, "Riya")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE guest_recoveries SET resolved_at=? WHERE id=?",
+                     ("2020-01-01 09:00", old))
+    assert shift_db.purge_old_recovery_contacts() == 1
+    purged = shift_db.get_recovery(old)
+    assert purged["guest_phone"] is None and purged["guest_email"] is None
+    assert purged["guest_name"] == "Old"              # history row survives
+    assert shift_db.get_recovery(fresh)["guest_phone"] == "519-555-0002"
+    assert shift_db.get_recovery(still_open)["guest_phone"] == "519-555-0003"
+    assert shift_db.purge_old_recovery_contacts() == 0  # idempotent
+
+
+def test_active_admin_count(isolated_db):
+    assert shift_db.active_admin_count() == 0
+    shift_db.add_leader("Dana", "5555", role="admin")
+    shift_db.add_leader("Maya", "4721", role="lead")
+    assert shift_db.active_admin_count() == 1
+    dana = next(l for l in shift_db.leaders() if l["name"] == "Dana")
+    shift_db.set_leader_active(dana["id"], False)
+    assert shift_db.active_admin_count() == 0
+
+
+def test_recovery_resolved_now_skips_open_queue(isolated_db):
+    rid = shift_db.add_recovery("Sam", "", "sam@x.ca", "food-quality",
+                                "remade-now", "", False, "Riya",
+                                resolved_now=True)
+    open_recs, resolved = shift_db.recovery_feed()
+    assert not open_recs
+    assert resolved[0]["id"] == rid and resolved[0]["resolved_by"] == "Riya"
+    assert shift_db.open_recovery_count() == 0
+
+
+def test_recovery_issue_counts_windowed(isolated_db):
+    for _ in range(2):
+        shift_db.add_recovery("G", "", "", "order-error", "refund", "",
+                              False, "Riya")
+    shift_db.add_recovery("G", "", "", "wait-time", "refund", "", False, "Riya")
+    old = shift_db.add_recovery("G", "", "", "catering", "refund", "",
+                                False, "Riya")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE guest_recoveries SET recovery_date=? WHERE id=?",
+                     ("2020-01-01", old))
+    counts = shift_db.recovery_issue_counts(days=28)
+    assert counts[0] == {"issue": "order-error", "count": 2}
+    assert {"issue": "wait-time", "count": 1} in counts
+    assert all(c["issue"] != "catering" for c in counts)
+
+    # "Last 28 days" means exactly 28 dates including today: a row 27 days
+    # back is in, 28 days back is out.
+    from datetime import date, timedelta
+    today = date.fromisoformat(shift_db.today_local())
+    for days_back, issue in [(27, "cleanliness"), (28, "spill-accident")]:
+        rid = shift_db.add_recovery("B", "", "", issue, "refund", "",
+                                    False, "Riya")
+        with shift_db.closing(shift_db.connect()) as conn, conn:
+            conn.execute("UPDATE guest_recoveries SET recovery_date=? WHERE id=?",
+                         ((today - timedelta(days=days_back)).isoformat(), rid))
+    counts = shift_db.recovery_issue_counts(days=28)
+    assert {"issue": "cleanliness", "count": 1} in counts
+    assert all(c["issue"] != "spill-accident" for c in counts)
+
+
+def test_recoveries_survive_export_import(isolated_db):
+    rid = shift_db.add_recovery("Jordan", "519-555-0142", "", "order-error",
+                                "free-entree-card", "order #88", True, "Riya")
+    raw = shift_db.export_json()
+    shift_db.delete_recovery(rid)
+    assert shift_db.import_json(raw) is None
+    open_recs, _ = shift_db.recovery_feed()
+    assert open_recs[0]["guest_name"] == "Jordan"
+    assert open_recs[0]["follow_up"] == 1
+
+    # A pre-recovery backup (no guest_recoveries section) restores cleanly
+    # to an empty table.
+    import json as _json
+    payload = _json.loads(raw)
+    del payload["guest_recoveries"]
+    assert shift_db.import_json(_json.dumps(payload)) is None
+    assert shift_db.open_recovery_count() == 0
+
+
 def test_recent_dates_shape(isolated_db):
     dates = shift_db.recent_dates(3)
     assert len(dates) == 3

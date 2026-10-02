@@ -27,10 +27,21 @@ the leadership team:
   screen the moment they sign in, they check them off from their to-do
   page (stamped who/when), and admins see open/overdue counts per leader
   with a full completed history. When a leader completes a task, the
-  Operator gets an email (via the same FormSubmit path as the /apply
-  form) — address configurable with `SHIFT_NOTIFY_EMAIL`, set it empty
-  to turn completion emails off. Completions the Operator records
-  themself don't email.
+  Operator gets a **Slack ping** in a private channel (posted by the same
+  Slack bot as the coverage flow, with an @-mention so the phone buzzes) —
+  see "To-do completion pings" below. An email copy via FormSubmit is
+  opt-in with `SHIFT_NOTIFY_EMAIL` (FormSubmit's Cloudflare front
+  bot-challenges server-side posts, so treat email as unreliable).
+  Completions the Operator records themself don't notify.
+- **Guest recovery** — when a guest has a bad experience, any leader logs
+  the guest's name and phone/email, what went wrong (order error, food
+  quality, wait, service…), and the make-it-right remedy being provided
+  (remade on the spot, refund, free entrée card, dessert/drink, catering
+  credit…), plus whether the guest expects a call-back. Open recoveries
+  sit on everyone's Today screen until someone resolves them (stamped
+  who/when, with a note on how it was closed); admins also get a 28-day
+  what-keeps-going-wrong breakdown. Guest name + contact only — never
+  payment/card info; injury or damage claims go to the Operator directly.
 - **Leadership development** — the Operator's course (from the "Leadership
   Development" folder on Drive: Mindset 101, Leading Others, Leading Teams,
   Leading Organization) tracked per leader. Admins see every leader's
@@ -53,7 +64,26 @@ GroupMe and Slack bots keep running untouched.
 | `SHIFT_DB_PATH` | **Strongly recommended** | Where the SQLite database lives. Point it at a persistent disk (see below) or data is wiped on every deploy. |
 | `FLASK_SECRET_KEY` | Recommended | Signs session cookies. If unset, a stable key is derived from the `SCHEDULE_SECRET` + `SHIFT_ADMIN_PIN` env vars (sessions survive deploys); if none of the three is set, a random per-boot key is used and logins reset each deploy. Generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`. |
 | `SHIFT_TZ` | No | Store timezone; defaults to `America/Toronto`. |
-| `SHIFT_NOTIFY_EMAIL` | No | Where to-do completion emails go. Defaults to `APPLICATION_EMAIL` (the Operator). Set to an empty string to disable completion emails. |
+| `SHIFT_NOTIFY_SLACK_CHANNEL` | For completion pings | Slack channel ID the to-do completion pings post to. The CFA Sidekick Slack bot (`SLACK_BOT_TOKEN`) must be invited to it. Empty (default) disables the pings. Production: `C0C51833JAH` (#sidekick-alerts). |
+| `SHIFT_NOTIFY_SLACK_MENTION` | No | Slack user ID to @-mention in each ping so it triggers a phone notification. Production: `U05R80802EB` (the Operator). |
+| `SHIFT_NOTIFY_EMAIL` | No | Opt-in email copy of completion notifications, via FormSubmit. Off by default — FormSubmit sits behind Cloudflare bot protection that challenges server-side posts, so email delivery is unreliable; Slack is the supported path. |
+
+### To-do completion pings (Slack)
+
+When a leader checks off an assigned to-do, the app posts to a private
+Slack channel using the same bot token as the coverage bot (scope
+`chat:write`). One-time setup:
+
+1. Create (or pick) a private channel — production uses **#sidekick-alerts**.
+2. In that channel: `/invite @CFA Sidekick`.
+3. On Render set `SHIFT_NOTIFY_SLACK_CHANNEL` to the channel ID (channel →
+   name at the top → About → Channel ID) and `SHIFT_NOTIFY_SLACK_MENTION`
+   to the Operator's Slack member ID, then deploy.
+
+Every ping shows who completed what, the due date, how many to-dos that
+leader still has open, and a link to their to-do page. Failures are logged
+(`To-do completion Slack status: …` in Render logs) and never shown to the
+leader tapping the checkmark.
 
 ## The persistent disk (do this before rollout)
 
@@ -88,10 +118,18 @@ scale.
 ## Backups
 
 - **Manual**: Admin → *Download backup (JSON)* — everything except PINs.
+  Backups now include guest recovery rows (guest names + contact info), so
+  treat exported files with the same care as the database itself.
 - **Automated**: `GET /scheduled/shift-backup?token=<SCHEDULE_SECRET>`
   returns the same JSON. Point a free cron pinger (e.g. cron-job.org) at it
   daily and keep the response, following the same token convention as the
-  other `/scheduled` endpoints.
+  other `/scheduled` endpoints. `SCHEDULE_SECRET` must be explicitly set on
+  the service (the endpoint answers 401 without it — there is deliberately
+  no default), and since the backup carries guest recovery contact info,
+  only store it with services you'd trust with the database itself.
+- **PII aging**: phone/email on recoveries resolved more than 90 days ago
+  are cleared automatically (next time the recovery page loads), so guest
+  contact info doesn't accumulate forever in the DB or in new backups.
 - **Restore**: Admin → *Restore from a backup file* (tick the confirmation
   box). Leader accounts come back with **locked PINs** (PIN hashes never
   leave the database) — reset each leader's PIN in the admin page after a

@@ -22,7 +22,10 @@ Canada.
 - `shift_app.py` + `shift_db.py` — the shift leading app at `/shift`
   (Huddle-style: daily checklists with who-did-what stamps, position
   lineups, goals, shift notes, announcements with read receipts,
-  per-leader assigned to-dos under `/shift/todo`, and per-leader
+  per-leader assigned to-dos under `/shift/todo`, a guest recovery log
+  under `/shift/recovery` (guest + issue + make-it-right remedy, open
+  queue on the Today screen until resolved; guest name/contact only —
+  never payment info), and per-leader
   leadership-course tracking under `/shift/development` — course
   structure pinned from Drive in `shift_course.py`). Blueprint
   registers fault-isolated so it can never take down the bots. Storage is
@@ -34,8 +37,11 @@ Canada.
   `FLASK_SECRET_KEY` (optional; falls back to a key derived from the
   `SCHEDULE_SECRET`/`SHIFT_ADMIN_PIN` env vars, or a random per-boot key if
   neither is set), `SHIFT_TZ` (default America/Toronto),
-  `SHIFT_NOTIFY_EMAIL` (to-do completion emails; defaults to
-  `APPLICATION_EMAIL`, empty string disables). Never store
+  `SHIFT_NOTIFY_SLACK_CHANNEL` + `SHIFT_NOTIFY_SLACK_MENTION` (to-do
+  completion pings to a private Slack channel via `SLACK_BOT_TOKEN`;
+  empty channel disables), `SHIFT_NOTIFY_EMAIL` (opt-in email copy via
+  FormSubmit — unreliable, Cloudflare bot-challenges server-side posts;
+  off by default). Never store
   HR/discipline/wage/medical content in it. The office QR poster in
   `assets/shift-qr/` points at the live `/shift` URL;
   `scripts/generate_shift_qr.py` regenerates it (pass a different URL as

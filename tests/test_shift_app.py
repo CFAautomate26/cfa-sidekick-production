@@ -45,7 +45,8 @@ def test_bots_unaffected(client):
 
 def test_requires_login(client):
     for path in ["/shift/", "/shift/checklists", "/shift/lineup", "/shift/goals",
-                 "/shift/notes", "/shift/roster", "/shift/history", "/shift/more"]:
+                 "/shift/notes", "/shift/roster", "/shift/history", "/shift/more",
+                 "/shift/recovery"]:
         resp = client.get(path)
         assert resp.status_code == 302, path
         assert "/shift/login" in resp.headers["Location"]
@@ -111,6 +112,41 @@ def test_demoted_admin_loses_admin_on_next_request(client):
     resp = client.get("/shift/admin")
     assert resp.status_code == 302
     assert shift_db.get_leader(leader_id)["role"] == "lead"
+
+
+def test_promote_leader_to_admin(client):
+    make_leader(client)  # Maya, role lead
+    leader_id = shift_db.leaders()[0]["id"]
+
+    # The Operator promotes her through the admin route
+    login_operator(client)
+    client.post(f"/shift/admin/leaders/{leader_id}/role", data={"role": "admin"})
+    assert shift_db.get_leader(leader_id)["role"] == "admin"
+    client.post("/shift/logout")
+
+    # Her very next request carries admin (no re-login needed): sign in,
+    # demote via db, confirm loss; then promote via db, confirm gain.
+    login_leader(client)
+    assert client.get("/shift/admin").status_code == 200
+    shift_db.set_leader_role(leader_id, "lead")
+    assert client.get("/shift/admin").status_code == 302
+    shift_db.set_leader_role(leader_id, "admin")
+    assert client.get("/shift/admin").status_code == 200
+
+    # Bogus roles are rejected
+    assert not shift_db.set_leader_role(leader_id, "owner")
+    assert shift_db.get_leader(leader_id)["role"] == "admin"
+
+
+def test_lead_cannot_change_roles(client):
+    make_leader(client)
+    make_leader(client, name="Devon", pin="8888")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    login_leader(client, name="Devon", pin="8888")
+    resp = client.post(f"/shift/admin/leaders/{maya['id']}/role",
+                       data={"role": "admin"})
+    assert resp.status_code == 302
+    assert shift_db.get_leader(maya["id"])["role"] == "lead"
 
 
 def test_ack_deleted_announcement_route_is_graceful(client):
@@ -532,20 +568,198 @@ def test_todo_other_leader_blocked(client):
                        data={"done": "1"}).status_code == 302
 
 
-# --- to-do completion emails ------------------------------------------------
+# --- guest recovery ---------------------------------------------------------
+
+def test_recovery_create_resolve_flow(client):
+    make_leader(client)
+    login_leader(client)
+
+    resp = client.post("/shift/recovery", data={
+        "guest_name": "Jordan Lee", "guest_phone": "519-555-0142",
+        "issue": "not-a-real-issue", "remedy": "free-entree-card",
+        "details": "Order #88 missing entrée", "follow_up": "1",
+    })
+    assert resp.status_code == 302
+    assert "#rec-" in resp.headers["Location"]
+
+    page = client.get("/shift/recovery").data
+    assert b"Jordan Lee" in page and b"519-555-0142" in page
+    rec = shift_db.recovery_feed()[0][0]
+    assert rec["issue"] == "other"            # coerced, not stored raw
+    assert rec["logged_by"] == "Maya"
+
+    # Shows on the Today dashboard until resolved
+    assert b"Jordan Lee" in client.get("/shift/").data
+
+    resp = client.post(f"/shift/recovery/{rec['id']}/resolve",
+                       data={"resolved": "1", "note": "called, cards mailed"})
+    assert resp.headers["Location"].endswith(f"#rec-{rec['id']}")
+    done = shift_db.get_recovery(rec["id"])
+    assert done["resolved_by"] == "Maya" and done["resolution_note"]
+    assert b"Jordan Lee" not in client.get("/shift/").data
+
+    # Reopen puts it back in the queue
+    client.post(f"/shift/recovery/{rec['id']}/resolve", data={"resolved": "0"})
+    assert shift_db.open_recovery_count() == 1
+
+
+def test_recovery_resolved_now_route(client):
+    make_leader(client)
+    login_leader(client)
+    client.post("/shift/recovery", data={
+        "guest_name": "Sam", "issue": "food-quality", "remedy": "remade-now",
+        "resolved_now": "1",
+    })
+    assert shift_db.open_recovery_count() == 0
+    assert shift_db.recovery_feed()[1][0]["guest_name"] == "Sam"
+
+
+def test_recovery_empty_name_flashes(client):
+    login_operator(client)
+    resp = client.post("/shift/recovery", data={"guest_name": "   "},
+                       follow_redirects=True)
+    assert resp.status_code == 200
+    assert b"needs the guest" in resp.data
+    assert shift_db.open_recovery_count() == 0
+
+
+def test_recovery_delete_is_admin_only(client):
+    make_leader(client)
+    login_leader(client)
+    client.post("/shift/recovery", data={"guest_name": "Jordan",
+                                         "issue": "service", "remedy": "refund"})
+    rec = shift_db.recovery_feed()[0][0]
+    resp = client.post(f"/shift/recovery/{rec['id']}/delete")
+    assert resp.status_code == 302
+    assert shift_db.get_recovery(rec["id"])   # lead can't delete
+    client.post("/shift/logout")
+
+    login_operator(client)
+    client.post(f"/shift/recovery/{rec['id']}/delete")
+    assert shift_db.get_recovery(rec["id"]) is None
+
+
+def test_recovery_stale_id_graceful(client):
+    login_operator(client)
+    assert client.post("/shift/recovery/999999/resolve",
+                       data={"resolved": "1"}).status_code == 302
+    assert client.post("/shift/recovery/999999/delete").status_code == 302
+
+
+def test_recovery_operator_create_and_resolve(client):
+    login_operator(client)
+    client.post("/shift/recovery", data={
+        "guest_name": "Pat", "issue": "wait-time", "remedy": "free-dessert-drink",
+    })
+    rec = shift_db.recovery_feed()[0][0]
+    assert rec["logged_by"] == "Operator"
+    client.post(f"/shift/recovery/{rec['id']}/resolve",
+                data={"resolved": "1", "note": "spoke in person"})
+    assert shift_db.get_recovery(rec["id"])["resolved_by"] == "Operator"
+
+
+def test_recovery_double_resolve_route_flashes(client):
+    make_leader(client)
+    login_operator(client)
+    client.post("/shift/recovery", data={"guest_name": "Jordan",
+                                         "issue": "service", "remedy": "refund"})
+    rec = shift_db.recovery_feed()[0][0]
+    client.post(f"/shift/recovery/{rec['id']}/resolve",
+                data={"resolved": "1", "note": "mailed cards"})
+    client.post("/shift/logout")
+
+    # Maya resolves from a stale page: first stamp survives, she's told
+    login_leader(client)
+    resp = client.post(f"/shift/recovery/{rec['id']}/resolve",
+                       data={"resolved": "1"}, follow_redirects=True)
+    assert b"Already resolved by Operator" in resp.data
+    kept = shift_db.get_recovery(rec["id"])
+    assert kept["resolved_by"] == "Operator"
+    assert kept["resolution_note"] == "mailed cards"
+
+
+def test_recovery_today_card_truncates(client):
+    make_leader(client)
+    login_leader(client)
+    for n in range(5):
+        client.post("/shift/recovery", data={"guest_name": f"Guest{n}",
+                                             "issue": "service", "remedy": "refund"})
+    page = client.get("/shift/").data
+    for n in range(3):
+        assert f"Guest{n}".encode() in page
+    assert b"Guest3" not in page and b"Guest4" not in page
+    assert b"+2 more" in page
+    assert b"5 guests waiting" in page
+
+
+def test_recovery_more_badge_counts_open(client):
+    make_leader(client)
+    login_leader(client)
+    assert b"open" not in client.get("/shift/more").data.split(b"Guest recovery")[1][:120]
+    client.post("/shift/recovery", data={"guest_name": "Jordan",
+                                         "issue": "service", "remedy": "refund"})
+    assert "● 1 open".encode() in client.get("/shift/more").data
+
+
+def test_recovery_textual_phone_still_shown(client):
+    login_operator(client)
+    client.post("/shift/recovery", data={
+        "guest_name": "Maria", "guest_phone": "ask for Maria at pickup",
+        "issue": "order-error", "remedy": "remade-now",
+    })
+    page = client.get("/shift/recovery").data
+    assert b"ask for Maria at pickup" in page       # visible, just not a tel: link
+    assert b"tel:" not in page
+    assert "no contact on file".encode() not in page
+
+
+def test_demote_last_admin_blocked_without_pin(client, monkeypatch):
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    dana = shift_db.leaders()[0]
+    login_leader(client, name="Dana", pin="5555")
+    monkeypatch.setattr(shift_app, "SHIFT_ADMIN_PIN", "")
+
+    resp = client.post(f"/shift/admin/leaders/{dana['id']}/role",
+                       data={"role": "lead"}, follow_redirects=True)
+    assert b"lock everyone out" in resp.data
+    assert shift_db.get_leader(dana["id"])["role"] == "admin"
+
+    # With a second admin (or the master PIN back), demotion works again
+    shift_db.add_leader("Backup", "7777", role="admin")
+    client.post(f"/shift/admin/leaders/{dana['id']}/role", data={"role": "lead"})
+    assert shift_db.get_leader(dana["id"])["role"] == "lead"
+
+
+def test_recovery_admin_sees_issue_radar(client):
+    make_leader(client)
+    login_leader(client)
+    client.post("/shift/recovery", data={"guest_name": "G1",
+                                         "issue": "order-error", "remedy": "refund"})
+    assert b"Last 28 days" not in client.get("/shift/recovery").data
+    client.post("/shift/logout")
+    login_operator(client)
+    assert b"Last 28 days" in client.get("/shift/recovery").data
+
+
+# --- to-do completion notifications (Slack + opt-in email) ------------------
 
 @pytest.fixture()
-def sent_emails(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        "shift_app.send_completion_email",
-        lambda task, leader_name, remaining: calls.append(
-            {"task": task, "leader": leader_name, "remaining": remaining}),
-    )
-    return calls
+def notifications(monkeypatch):
+    """Arm both notification channels and capture what each would send."""
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_CHANNEL", "C123TEST")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_EMAIL", "op@example.com")
+    sent = {"slack": [], "email": []}
+
+    def capture(kind):
+        return lambda task, leader_name, remaining: sent[kind].append(
+            {"task": task, "leader": leader_name, "remaining": remaining})
+
+    monkeypatch.setattr("shift_app.send_completion_slack", capture("slack"))
+    monkeypatch.setattr("shift_app.send_completion_email", capture("email"))
+    return sent
 
 
-def test_leader_completion_emails_operator(client, sent_emails):
+def test_leader_completion_notifies_operator(client, notifications):
     make_leader(client)
     leader = shift_db.leaders()[0]
     login_operator(client)
@@ -557,28 +771,46 @@ def test_leader_completion_emails_operator(client, sent_emails):
     task = shift_db.tasks_for_leader(leader["id"])[0][0]
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
 
-    assert len(sent_emails) == 1
-    assert sent_emails[0]["leader"] == "Maya"
-    assert sent_emails[0]["task"]["title"] == "Task A"
-    assert sent_emails[0]["task"]["completed_by"] == "Maya"
-    assert sent_emails[0]["remaining"] == 1
+    for sent in (notifications["slack"], notifications["email"]):
+        assert len(sent) == 1
+        assert sent[0]["leader"] == "Maya"
+        assert sent[0]["task"]["title"] == "Task A"
+        assert sent[0]["task"]["completed_by"] == "Maya"
+        assert sent[0]["remaining"] == 1
 
     # Reopening sends nothing
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "0"})
-    assert len(sent_emails) == 1
+    assert len(notifications["slack"]) == 1
+    assert len(notifications["email"]) == 1
 
 
-def test_operator_completion_sends_no_email(client, sent_emails):
+def test_slack_only_when_email_unset(client, notifications, monkeypatch):
+    # The production shape: Slack channel configured, email left disabled.
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_EMAIL", "")
+    make_leader(client)
+    leader = shift_db.leaders()[0]
+    login_operator(client)
+    client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Slack me"})
+    client.post("/shift/logout")
+    login_leader(client)
+    task = shift_db.tasks_for_leader(leader["id"])[0][0]
+    client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
+    assert len(notifications["slack"]) == 1
+    assert not notifications["email"]
+
+
+def test_operator_completion_sends_nothing(client, notifications):
     make_leader(client)
     leader = shift_db.leaders()[0]
     login_operator(client)
     client.post(f"/shift/todo/{leader['id']}/assign", data={"title": "Reviewed live"})
     task = shift_db.tasks_for_leader(leader["id"])[0][0]
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
-    assert not sent_emails
+    assert not notifications["slack"]
+    assert not notifications["email"]
 
 
-def test_notify_failure_never_breaks_the_tap(client, sent_emails, monkeypatch):
+def test_notify_failure_never_breaks_the_tap(client, notifications, monkeypatch):
     make_leader(client)
     leader = shift_db.leaders()[0]
     login_operator(client)
@@ -594,10 +826,12 @@ def test_notify_failure_never_breaks_the_tap(client, sent_emails, monkeypatch):
     resp = client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
     assert resp.status_code == 302             # the tap still succeeds
     assert shift_db.get_task(task["id"])["completed_at"]
-    assert not sent_emails                     # email quietly skipped
+    assert not notifications["slack"]          # both quietly skipped
+    assert not notifications["email"]
 
 
-def test_notify_disabled_by_empty_env(client, sent_emails, monkeypatch):
+def test_notify_disabled_by_empty_env(client, notifications, monkeypatch):
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_CHANNEL", "")
     monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_EMAIL", "")
     make_leader(client)
     leader = shift_db.leaders()[0]
@@ -607,7 +841,79 @@ def test_notify_disabled_by_empty_env(client, sent_emails, monkeypatch):
     login_leader(client)
     task = shift_db.tasks_for_leader(leader["id"])[0][0]
     client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
-    assert not sent_emails
+    assert not notifications["slack"]
+    assert not notifications["email"]
+
+
+def test_slack_ping_payload(monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_CHANNEL", "C123TEST")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_MENTION", "U05R80802EB")
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://app.example.com")
+
+    posted = {}
+
+    def fake_post(url, **kwargs):
+        posted["url"] = url
+        posted.update(kwargs)
+
+        class R:
+            status_code = 200
+            text = '{"ok": true}'
+        return R()
+
+    monkeypatch.setattr(shift_app.requests, "post", fake_post)
+    shift_app.send_completion_slack(
+        {"title": "Clean ice machine", "due_date": "2026-10-01", "leader_id": 7},
+        "Riya", 2)
+
+    assert posted["url"] == "https://slack.com/api/chat.postMessage"
+    assert posted["headers"]["Authorization"] == "Bearer xoxb-test"
+    body = posted["json"]
+    assert body["channel"] == "C123TEST"
+    assert body["text"].startswith("<@U05R80802EB> ")   # the ping that buzzes
+    assert "*Riya*" in body["text"]
+    assert "*Clean ice machine*" in body["text"]
+    assert "Due: 2026-10-01" in body["text"]
+    assert "2 still open for Riya" in body["text"]
+    assert "https://app.example.com/shift/todo/7" in body["text"]
+
+
+def test_slack_ping_without_token_or_extras(monkeypatch, capsys):
+    # No mention, no external URL, no due date — message still well-formed;
+    # and with no token at all, nothing is posted.
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_CHANNEL", "C123TEST")
+    monkeypatch.setattr(shift_app, "SHIFT_NOTIFY_SLACK_MENTION", "")
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+
+    posted = {}
+
+    def fake_post(url, **kwargs):
+        posted.update(kwargs)
+
+        class R:
+            status_code = 200
+            text = '{"ok": true}'
+        return R()
+
+    monkeypatch.setattr(shift_app.requests, "post", fake_post)
+    shift_app.send_completion_slack({"title": "Solo", "leader_id": 3}, "Aron", 0)
+    assert posted["json"]["text"].startswith("✅ *Aron*")
+    assert "last open to-do" in posted["json"]["text"]
+
+    # mrkdwn injection in a title is escaped, never a live mention
+    posted.clear()
+    shift_app.send_completion_slack(
+        {"title": "Tell <!channel> & co", "leader_id": 3}, "Aron", 0)
+    assert "<!channel>" not in posted["json"]["text"]
+    assert "&lt;!channel&gt; &amp; co" in posted["json"]["text"]
+
+    posted.clear()
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "")
+    shift_app.send_completion_slack({"title": "Solo", "leader_id": 3}, "Aron", 0)
+    assert not posted
+    assert "SLACK_BOT_TOKEN is missing" in capsys.readouterr().out
 
 
 # --- backup ----------------------------------------------------------------

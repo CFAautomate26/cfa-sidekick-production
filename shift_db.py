@@ -44,6 +44,31 @@ NOTE_CATEGORIES = ["general", "win", "issue", "equipment", "staffing", "guest", 
 
 GOAL_PERIODS = ["daily", "weekly", "monthly", "one-time"]
 
+RECOVERY_ISSUES = ["order-error", "food-quality", "wait-time", "service",
+                   "cleanliness", "spill-accident", "catering", "other"]
+RECOVERY_ISSUE_LABELS = {
+    "order-error": "Order error (wrong / missing item)",
+    "food-quality": "Food quality",
+    "wait-time": "Long wait",
+    "service": "Service issue",
+    "cleanliness": "Cleanliness",
+    "spill-accident": "Spill / accident",
+    "catering": "Catering problem",
+    "other": "Other",
+}
+RECOVERY_REMEDIES = ["remade-now", "refund", "free-entree-card",
+                     "free-dessert-drink", "catering-credit", "apology-only",
+                     "other"]
+RECOVERY_REMEDY_LABELS = {
+    "remade-now": "Remade / replaced on the spot",
+    "refund": "Refund (at the register — no card info here)",
+    "free-entree-card": "Free entrée card (next visit)",
+    "free-dessert-drink": "Free dessert / drink",
+    "catering-credit": "Catering credit",
+    "apology-only": "Apology accepted — nothing owed",
+    "other": "Other (spell it out in details)",
+}
+
 
 def now_local() -> datetime:
     return datetime.now(STORE_TZ)
@@ -250,6 +275,29 @@ CREATE TABLE IF NOT EXISTS leader_tasks (
     completed_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_leader_tasks ON leader_tasks(leader_id, completed_at);
+
+-- Guest recovery log: a make-it-right promise to a guest, tracked until the
+-- guest has been taken care of. Guest name + phone/email ONLY — never
+-- payment/card info, and never HR/discipline/medical content (per CLAUDE.md
+-- those stay out of this DB; injury claims go to the Operator directly).
+CREATE TABLE IF NOT EXISTS guest_recoveries (
+    id INTEGER PRIMARY KEY,
+    recovery_date TEXT NOT NULL,                -- YYYY-MM-DD store-local (4am rollover)
+    guest_name TEXT NOT NULL,
+    guest_phone TEXT,                           -- as typed; rendered as a digits-only tel: link
+    guest_email TEXT,
+    issue TEXT NOT NULL DEFAULT 'other',        -- one of RECOVERY_ISSUES
+    remedy TEXT NOT NULL DEFAULT 'other',       -- one of RECOVERY_REMEDIES
+    details TEXT,                               -- what happened / order # / exactly what was promised
+    follow_up INTEGER NOT NULL DEFAULT 0,       -- 1 = guest expects a call-back
+    logged_by TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,                           -- NULL = promise still outstanding
+    resolved_by TEXT,
+    resolution_note TEXT                        -- e.g. "called, card mailed"
+);
+CREATE INDEX IF NOT EXISTS idx_recoveries_status
+    ON guest_recoveries(resolved_at, recovery_date);
 
 CREATE INDEX IF NOT EXISTS idx_run_items_run ON checklist_run_items(run_id);
 CREATE INDEX IF NOT EXISTS idx_lineup_date ON lineup_assignments(lineup_date, daypart);
@@ -856,6 +904,27 @@ def reset_leader_pin(leader_id: int, pin: str) -> str | None:
     return None
 
 
+def set_leader_role(leader_id: int, role: str) -> bool:
+    """Promote/demote an existing leader. The before_request role refresh
+    makes the change effective on their next request, no re-login needed."""
+    if role not in ("lead", "admin"):
+        return False
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE leaders SET role=? WHERE id=?", (role, leader_id)
+        )
+        return cur.rowcount > 0
+
+
+def active_admin_count() -> int:
+    """Active admin leader accounts — the lockout guard when the Operator
+    master PIN isn't configured."""
+    with closing(connect()) as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM leaders WHERE role='admin' AND active=1"
+        ).fetchone()[0]
+
+
 # ---------------------------------------------------------------------------
 # Leadership development course
 # ---------------------------------------------------------------------------
@@ -1037,6 +1106,152 @@ def leader_task_summary() -> list[dict]:
             """,
             (today,),
         ).fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Guest recovery
+# ---------------------------------------------------------------------------
+
+def _annotate_recovery(r: dict) -> dict:
+    """Adds age_days (business days open, 4am rollover honored via
+    today_local), stale (open 2+ days — the queue's overdue analog), and
+    phone_digits (digits plus a leading '+' kept, for a safe tel: href)."""
+    try:
+        age = (date.fromisoformat(today_local())
+               - date.fromisoformat(r["recovery_date"])).days
+    except ValueError:
+        age = 0
+    r["age_days"] = max(0, age)
+    r["stale"] = r["age_days"] >= 2
+    phone = (r["guest_phone"] or "").strip()
+    digits = "".join(c for c in phone if c.isdigit())
+    r["phone_digits"] = ("+" + digits if phone.startswith("+") else digits) \
+        if digits else ""
+    return r
+
+
+def add_recovery(guest_name: str, guest_phone: str, guest_email: str,
+                 issue: str, remedy: str, details: str, follow_up: bool,
+                 by: str, resolved_now: bool = False) -> int | None:
+    """Log a recovery. Returns the new row id, or None for an empty guest
+    name. Unknown issue/remedy values are stored as 'other' (double-guard
+    under the route's coercion). resolved_now stamps the resolution in the
+    same INSERT, so handled-on-the-spot never shows in the open queue."""
+    guest_name = " ".join((guest_name or "").split())
+    if not guest_name:
+        return None
+    stamp = now_stamp()
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "INSERT INTO guest_recoveries (recovery_date, guest_name, "
+            "guest_phone, guest_email, issue, remedy, details, follow_up, "
+            "logged_by, created_at, resolved_at, resolved_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (today_local(), guest_name,
+             (guest_phone or "").strip() or None,
+             (guest_email or "").strip() or None,
+             issue if issue in RECOVERY_ISSUES else "other",
+             remedy if remedy in RECOVERY_REMEDIES else "other",
+             (details or "").strip() or None,
+             1 if follow_up else 0, by, stamp,
+             stamp if resolved_now else None,
+             by if resolved_now else None),
+        )
+        return cur.lastrowid
+
+
+def recovery_feed(resolved_limit: int = 50) -> tuple[list[dict], list[dict]]:
+    """(open, resolved): open oldest-first so the longest-waiting guest is
+    on top; resolved newest-first, capped. Both reads share one transaction
+    (same reason as export_json) so a resolve landing between them can't
+    show the same recovery in both lists."""
+    with closing(connect()) as conn:
+        conn.execute("BEGIN")
+        open_recs = [_annotate_recovery(dict(r)) for r in conn.execute(
+            "SELECT * FROM guest_recoveries WHERE resolved_at IS NULL "
+            "ORDER BY recovery_date, id"
+        ).fetchall()]
+        resolved = [dict(r) for r in conn.execute(
+            "SELECT * FROM guest_recoveries WHERE resolved_at IS NOT NULL "
+            "ORDER BY resolved_at DESC, id DESC LIMIT ?",
+            (resolved_limit,),
+        ).fetchall()]
+        conn.commit()
+    return open_recs, resolved
+
+
+def open_recoveries() -> list[dict]:
+    """All open recoveries, oldest first, annotated — for the Today card."""
+    return recovery_feed()[0]
+
+
+def open_recovery_count() -> int:
+    with closing(connect()) as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM guest_recoveries WHERE resolved_at IS NULL"
+        ).fetchone()[0]
+
+
+def get_recovery(recovery_id: int) -> dict | None:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT * FROM guest_recoveries WHERE id=?", (recovery_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def set_recovery_resolved(recovery_id: int, resolved: bool, note: str,
+                          by: str) -> bool:
+    """Resolve or reopen. Reopening clears all three resolution columns so
+    no stale stamp survives. Only flips rows in the opposite state, so two
+    leaders resolving from stale pages can't overwrite each other's
+    who/when/note stamp. Returns False for an unknown id or a no-op flip."""
+    guard = "IS NULL" if resolved else "IS NOT NULL"
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE guest_recoveries SET resolved_at=?, resolved_by=?, "
+            f"resolution_note=? WHERE id=? AND resolved_at {guard}",
+            (now_stamp() if resolved else None,
+             by if resolved else None,
+             ((note or "").strip() or None) if resolved else None,
+             recovery_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_recovery(recovery_id: int) -> None:
+    with closing(connect()) as conn, conn:
+        conn.execute("DELETE FROM guest_recoveries WHERE id=?", (recovery_id,))
+
+
+def recovery_issue_counts(days: int = 28) -> list[dict]:
+    """[{'issue', 'count'}] for recent recoveries, biggest first — the
+    Operator's repeat-issue radar on the recovery page. The window is
+    exactly `days` business dates including today (hence days - 1)."""
+    since = (date.fromisoformat(today_local())
+             - timedelta(days=days - 1)).isoformat()
+    with closing(connect()) as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT issue, COUNT(*) AS count FROM guest_recoveries "
+            "WHERE recovery_date>=? GROUP BY issue ORDER BY count DESC, issue",
+            (since,),
+        ).fetchall()]
+
+
+def purge_old_recovery_contacts(days: int = 90) -> int:
+    """Clear guest phone/email on recoveries resolved more than `days` ago
+    (the row itself — name, issue, remedy, outcome — stays for history).
+    Called on every recovery-page view, so old contact info ages out of the
+    database and future backups without any cron. Returns rows purged."""
+    cutoff = (date.fromisoformat(today_local()) - timedelta(days=days)).isoformat()
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE guest_recoveries SET guest_phone=NULL, guest_email=NULL "
+            "WHERE resolved_at IS NOT NULL AND resolved_at < ? "
+            "AND (guest_phone IS NOT NULL OR guest_email IS NOT NULL)",
+            (cutoff,),
+        )
+        return cur.rowcount
 
 
 # ---------------------------------------------------------------------------
@@ -1224,6 +1439,7 @@ EXPORT_TABLES = [
     "checklist_runs", "checklist_run_items", "goals", "goal_updates",
     "positions", "lineup_assignments", "shift_notes", "announcements",
     "announcement_reads", "course_lessons", "lesson_progress", "leader_tasks",
+    "guest_recoveries",
 ]
 
 
