@@ -68,7 +68,9 @@
   .card {
     background: var(--card); border: 1px solid var(--line);
     border-radius: 14px; padding: 14px; margin-bottom: 12px;
+    overflow-wrap: anywhere; /* a pasted URL must never widen the page */
   }
+  .card [style*="flex:1"] { min-width: 0; }
   .card h2 { font-size: 15px; margin-bottom: 8px; }
   .card h2 a { text-decoration: none; }
   .card.tap { display: block; text-decoration: none; }

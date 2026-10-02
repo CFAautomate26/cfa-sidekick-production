@@ -639,7 +639,7 @@ def test_oneonone_topic_routes(client):
     # Discuss with a note during the meeting; race flashes; reopen
     resp = client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
                        data={"discussed": "1", "note": "fixed the lockbox"})
-    assert resp.headers["Location"].endswith(f"#topic-{operator_topic['id']}")
+    assert resp.headers["Location"].endswith("#agenda")   # keeps the meeting flowing
     assert b"Past 1:1s" in client.get(f"/shift/oneonone/{maya['id']}").data
     resp = client.post(f"/shift/oneonone/topic/{operator_topic['id']}/toggle",
                        data={"discussed": "1"}, follow_redirects=True)
@@ -696,6 +696,88 @@ def test_goal_leader_tag_via_route(client):
     assert b"Solo breakfast open" not in client.get("/shift/").data
     assert b"Store goal" in client.get("/shift/").data
     assert b"Solo breakfast open" in client.get(f"/shift/oneonone/{maya['id']}").data
+
+
+def test_tagged_goals_private_to_leader_and_operator(client):
+    make_leader(client)
+    make_leader(client, name="Devon", pin="8888")
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    login_operator(client)
+    client.post("/shift/goals", data={"title": "Confidence on window",
+                                      "period": "monthly",
+                                      "leader_id": str(maya["id"])})
+    gid = shift_db.goals_by_status("active", leader_id=maya["id"])[0]["id"]
+    client.post("/shift/logout")
+
+    # Another lead — and even an admin-role leader — can't see or touch it
+    for name, pin in [("Devon", "8888"), ("Dana", "5555")]:
+        login_leader(client, name=name, pin=pin)
+        assert b"Confidence on window" not in client.get("/shift/goals").data
+        assert client.get(f"/shift/goals/{gid}",
+                          follow_redirects=False).status_code == 302
+        client.post(f"/shift/goals/{gid}/status", data={"status": "archived"})
+        assert shift_db.goal_with_updates(gid)[0]["status"] == "active"
+        client.post(f"/shift/goals/{gid}/update", data={"note": "snooping"})
+        assert not shift_db.goal_with_updates(gid)[1]
+        # A lead can't tag a goal to someone else — it lands store-wide
+        client.post("/shift/goals", data={"title": f"Planted by {name}",
+                                          "period": "weekly",
+                                          "leader_id": str(maya["id"])})
+        planted = [g for g in shift_db.goals_by_status("active")
+                   if g["title"] == f"Planted by {name}"]
+        assert planted[0]["leader_id"] is None
+        client.post("/shift/logout")
+
+    # Maya herself sees and updates it
+    login_leader(client)
+    assert b"Confidence on window" in client.get("/shift/goals").data
+    assert client.get(f"/shift/goals/{gid}").status_code == 200
+    client.post(f"/shift/goals/{gid}/update", data={"note": "getting there"})
+    assert shift_db.goal_with_updates(gid)[1][0]["note"] == "getting there"
+
+
+def test_backups_and_pin_resets_are_operator_only(client):
+    make_leader(client)
+    make_leader(client, name="Dana", pin="5555", role="admin")
+    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
+    login_operator(client)
+    client.post(f"/shift/oneonone/{maya['id']}/topics",
+                data={"topic": "private growth topic"})
+    client.post("/shift/logout")
+
+    # Dana is an admin, but backups carry 1:1 content and PIN resets allow
+    # impersonation — both bounce her to the admin page.
+    login_leader(client, name="Dana", pin="5555")
+    assert client.get("/shift/admin").status_code == 200
+    resp = client.get("/shift/admin/export", follow_redirects=False)
+    assert resp.status_code == 302
+    resp = client.post("/shift/admin/import", data={"confirm": "1"},
+                       follow_redirects=False)
+    assert resp.status_code == 302
+    client.post(f"/shift/admin/leaders/{maya['id']}/reset-pin",
+                data={"pin": "9876"})
+    client.post("/shift/logout")
+    assert login_leader(client).status_code == 302     # Maya's PIN unchanged
+    client.post("/shift/logout")
+
+    login_operator(client)
+    assert b"private growth topic" in client.get("/shift/admin/export").data
+
+
+def test_restore_invalidates_leader_sessions(client):
+    make_leader(client)
+    login_operator(client)
+    raw = client.get("/shift/admin/export").data
+    client.post("/shift/logout")
+
+    login_leader(client)
+    assert client.get("/shift/").status_code == 200
+    assert shift_db.import_json(raw.decode()) is None
+    # Her 30-day cookie predates the restore: next request re-logs-in
+    resp = client.get("/shift/", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "/shift/login" in resp.headers["Location"]
 
 
 # --- shout-outs ---------------------------------------------------------------
@@ -782,13 +864,15 @@ def test_shoutout_slack_payload(client, monkeypatch):
         class R:
             status_code = 200
             text = '{"ok": true}'
+
+            def json(self):
+                return {"ok": True}
         return R()
 
     monkeypatch.setattr(shift_app.requests, "post", fake_post)
-    shift_app.send_shoutout_slack({
-        "member_name": "Avery <&> P", "value_tag": "speed",
-        "message": "Tell <!channel> nothing", "author": "Maya",
-    })
+    sid = shift_db.add_shoutout("Avery <&> P", "speed",
+                                "Tell <!channel> nothing", "Maya", share=True)
+    shift_app.send_shoutout_slack(shift_db.get_shoutout(sid))
     assert posted["url"] == "https://slack.com/api/chat.postMessage"
     assert posted["headers"]["Authorization"] == "Bearer xoxb-test"
     body = posted["json"]
@@ -796,6 +880,44 @@ def test_shoutout_slack_payload(client, monkeypatch):
     assert "SHOUT-OUT: Avery &lt;&amp;&gt; P" in body["text"]
     assert "⚡ Speed of service" in body["text"]
     assert "<!channel>" not in body["text"]            # mrkdwn injection escaped
+    # ok:true marks real delivery — that's what the 📣 badge renders from
+    assert shift_db.get_shoutout(sid)["delivered_at"]
+
+
+def test_shoutout_badge_honest_on_failed_delivery(client, monkeypatch):
+    monkeypatch.setattr(shift_app, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(shift_app, "SHIFT_SHOUTOUT_SLACK_CHANNEL", "C123TEAM")
+
+    def fake_post(url, **kwargs):
+        class R:
+            status_code = 200
+            text = '{"ok": false, "error": "not_in_channel"}'
+
+            def json(self):
+                return {"ok": False, "error": "not_in_channel"}
+        return R()
+
+    monkeypatch.setattr(shift_app.requests, "post", fake_post)
+    login_operator(client)
+    client.post("/shift/shoutouts", data={"member_name": "Sam",
+                                          "message": "Clutch", "share": "1"})
+    shout = shift_db.shoutout_feed()[0]
+    assert shout["shared_at"] and shout["delivered_at"] is None
+    assert "📣 Slack".encode() not in client.get("/shift/shoutouts").data
+
+
+def test_shoutout_never_resurrects_departed_member(client, slack_shares):
+    login_operator(client)
+    shift_db.add_member("Sam Kennedy", role="leader")
+    sam = next(m for m in shift_db.roster() if m["name"] == "Sam Kennedy")
+    shift_db.set_member_active(sam["id"], False)
+    client.post("/shift/shoutouts", data={
+        "member_name": "Sam Kennedy", "message": "Thanks for the years!",
+    })
+    kept = next(m for m in shift_db.roster(include_inactive=True)
+                if m["name"] == "Sam Kennedy")
+    assert kept["active"] == 0 and kept["role"] == "leader"
+    assert shift_db.shoutout_feed()[0]["member_name"] == "Sam Kennedy"
 
 
 def test_shoutout_slack_failure_never_breaks_post(client, monkeypatch):

@@ -131,8 +131,8 @@
   </div>
   {% if r.contact_note %}<div style="font-size:14px; color:var(--soft); margin-top:4px;">{{ r.contact_note }}</div>{% endif %}
   {% if r.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:4px;">{{ r.details }}</div>{% endif %}
-  <div class="progress-note">📞 contacted {{ r.contacted_at }} by {{ r.contacted_by }}{% if r.age_days %} ·
-    <span {% if r.age_days >= 7 %}class="critical-flag"{% endif %}>waiting {{ r.age_days }}d</span>{% endif %}</div>
+  <div class="progress-note">📞 contacted {{ r.contacted_at }} by {{ r.contacted_by }}{% if r.waiting_days %} ·
+    <span {% if r.waiting_days >= 7 %}class="critical-flag"{% endif %}>waiting {{ r.waiting_days }}d</span>{% endif %}</div>
   <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-top:8px;">
     <details style="flex:1;">
       <summary class="pill small primary" style="cursor:pointer; display:inline-block;">They came back ✓</summary>

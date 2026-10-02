@@ -121,6 +121,11 @@ def require_login():
         if not leader or not leader["active"]:
             session.clear()
             return redirect(url_for("shift.login"))
+        # A backup restore can renumber leader ids; sessions minted before
+        # the restore must re-login rather than attach to a different row.
+        if session.get("shift_epoch", "") != shift_db.session_epoch():
+            session.clear()
+            return redirect(url_for("shift.login"))
         session["shift_role"] = leader["role"]
     return None
 
@@ -251,6 +256,7 @@ def login():
                 session["shift_name"] = leader["name"]
                 session["shift_role"] = leader["role"]
                 session["shift_leader_id"] = leader["id"]
+                session["shift_epoch"] = shift_db.session_epoch()
                 return _safe_next()
             error = "Wrong name or PIN."
             _record_fail(name)
@@ -424,10 +430,16 @@ def goals():
     status = request.args.get("status", "active")
     if status not in ("active", "achieved", "archived"):
         status = "active"
+    # Leader-tagged goals are 1:1 material: each is listed only for its
+    # leader and the Operator. Store-wide goals stay shared.
+    visible = [g for g in shift_db.goals_by_status(status)
+               if not g["leader_id"] or _can_view_oneonone(g["leader_id"])]
+    taggable = [l for l in shift_db.leaders()
+                if _is_operator() or l["id"] == session.get("shift_leader_id")]
     return render_template("shift/goals.html", status=status,
-                           goals=shift_db.goals_by_status(status),
+                           goals=visible,
                            periods=shift_db.GOAL_PERIODS,
-                           leaders=shift_db.leaders())
+                           leaders=taggable)
 
 
 @shift_bp.route("/goals", methods=["POST"])
@@ -455,16 +467,30 @@ def goal_create():
         period=period,
         due_date=_optional_date(request.form.get("due_date")),
         created_by=current_name(),
-        leader_id=_optional_int(request.form.get("leader_id")),
+        leader_id=_taggable_leader_id(request.form.get("leader_id")),
     )
     return redirect(url_for("shift.goal_detail", goal_id=goal_id))
+
+
+def _taggable_leader_id(raw: str | None) -> int | None:
+    """A leader tag the current session may set: the Operator tags anyone,
+    a leader only themselves; anything else becomes a store-wide goal."""
+    lid = _optional_int(raw)
+    return lid if lid is not None and _can_view_oneonone(lid) else None
+
+
+def _goal_hidden(goal: dict) -> bool:
+    return bool(goal.get("leader_id")
+                and not _can_view_oneonone(goal["leader_id"]))
 
 
 @shift_bp.route("/goals/<int:goal_id>")
 def goal_detail(goal_id):
     goal, updates = shift_db.goal_with_updates(goal_id)
-    if not goal:
-        flash("That goal doesn't exist.")
+    if not goal or _goal_hidden(goal):
+        flash("That goal doesn't exist."
+              if not goal else
+              "That's a personal goal — it's between that leader and the Operator.")
         return redirect(url_for("shift.goals"))
     return render_template("shift/goal_detail.html", goal=goal, updates=updates)
 
@@ -472,8 +498,8 @@ def goal_detail(goal_id):
 @shift_bp.route("/goals/<int:goal_id>/update", methods=["POST"])
 def goal_update(goal_id):
     goal, _ = shift_db.goal_with_updates(goal_id)
-    if not goal:
-        flash("That goal doesn't exist.")
+    if not goal or _goal_hidden(goal):
+        flash("That goal doesn't exist or isn't yours to update.")
         return redirect(url_for("shift.goals"))
     value_raw = (request.form.get("value") or "").strip()
     note = (request.form.get("note") or "").strip()
@@ -491,6 +517,10 @@ def goal_update(goal_id):
 
 @shift_bp.route("/goals/<int:goal_id>/status", methods=["POST"])
 def goal_status(goal_id):
+    goal, _ = shift_db.goal_with_updates(goal_id)
+    if not goal or _goal_hidden(goal):
+        flash("That goal doesn't exist or isn't yours to change.")
+        return redirect(url_for("shift.goals"))
     status = request.form.get("status", "")
     if status in ("active", "achieved", "archived"):
         shift_db.set_goal_status(goal_id, status)
@@ -627,6 +657,20 @@ def _can_view_development(leader_id: int) -> bool:
 def _is_operator() -> bool:
     """The master-PIN login: admin role with no leader row behind it."""
     return is_admin() and not session.get("shift_leader_id")
+
+
+def operator_required(view):
+    """Stricter than admin_required: backups carry every leader's private
+    1:1 content, and PIN resets allow impersonation — both belong to the
+    Operator master login alone."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not _is_operator():
+            flash("That action is for the Operator master login.")
+            return redirect(url_for("shift.admin") if is_admin()
+                            else url_for("shift.today"))
+        return view(*args, **kwargs)
+    return wrapped
 
 
 def _can_view_oneonone(leader_id: int) -> bool:
@@ -918,8 +962,12 @@ def oneonone_topic_toggle(topic_id):
             flash("That topic doesn't exist any more.")
             return redirect(url_for("shift.oneonone_leader",
                                     leader_id=topic["leader_id"]))
+    # A discussed topic has moved to the history section (no per-row anchor
+    # there), so land on the agenda to keep the meeting flowing; a reopened
+    # topic is back on the agenda where its anchor exists.
+    anchor = "#agenda" if discussed else f"#topic-{topic_id}"
     return redirect(url_for("shift.oneonone_leader",
-                            leader_id=topic["leader_id"]) + f"#topic-{topic_id}")
+                            leader_id=topic["leader_id"]) + anchor)
 
 
 @shift_bp.route("/oneonone/topic/<int:topic_id>/delete", methods=["POST"])
@@ -989,6 +1037,11 @@ def send_shoutout_slack(shoutout: dict) -> None:
         # Slack answers 200 even for errors — the body tells the story.
         print(f"Shout-out Slack status: {resp.status_code}, "
               f"body: {resp.text[:300]}")
+        try:
+            if resp.json().get("ok"):
+                shift_db.mark_shoutout_delivered(shoutout["id"])
+        except ValueError:
+            pass
     except Exception as e:
         print(f"Error cross-posting shout-out to Slack: {e}")
 
@@ -1027,6 +1080,7 @@ def shoutouts():
         counts=shift_db.shoutout_counts() if is_admin() else None,
         SHOUTOUT_VALUES=shift_db.SHOUTOUT_VALUES,
         SHOUTOUT_VALUE_LABELS=shift_db.SHOUTOUT_VALUE_LABELS,
+        SHOUTOUT_VALUE_SHORT=shift_db.SHOUTOUT_VALUE_SHORT,
     )
 
 
@@ -1044,7 +1098,9 @@ def shoutout_create():
     if sid is None:
         flash("A shout-out needs a name and a message.")
         return redirect(url_for("shift.shoutouts"))
-    shift_db.add_member(member_name)   # autosuggest learns new names
+    # Autosuggest learns genuinely new names only — never reactivates or
+    # re-roles an existing (possibly departed) roster member.
+    shift_db.add_member(member_name, touch_existing=False)
     if share:
         _notify_shoutout(sid)
     flash("Posted 🎉")
@@ -1209,7 +1265,7 @@ def admin_leader_toggle(leader_id):
 
 
 @shift_bp.route("/admin/leaders/<int:leader_id>/reset-pin", methods=["POST"])
-@admin_required
+@operator_required
 def admin_leader_reset_pin(leader_id):
     error = shift_db.reset_leader_pin(leader_id, request.form.get("pin", ""))
     flash(error if error else "PIN updated.")
@@ -1305,7 +1361,7 @@ def admin_template_toggle(template_id):
 
 
 @shift_bp.route("/admin/export")
-@admin_required
+@operator_required
 def admin_export():
     payload = shift_db.export_json()
     return Response(payload, mimetype="application/json", headers={
@@ -1315,7 +1371,7 @@ def admin_export():
 
 
 @shift_bp.route("/admin/import", methods=["POST"])
-@admin_required
+@operator_required
 def admin_import():
     if request.form.get("confirm") != "1":
         flash("Tick the confirmation box to restore — it replaces current data.")

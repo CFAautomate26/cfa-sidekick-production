@@ -46,7 +46,7 @@
         <input type="date" id="g-due" name="due_date">
       </div>
     </div>
-    <label class="field" for="g-leader">For a leader (optional — shows on their 1:1 page)</label>
+    <label class="field" for="g-leader">For a leader (optional — a personal goal, visible only to them and the Operator)</label>
     <select id="g-leader" name="leader_id">
       <option value="">— whole store —</option>
       {% for l in leaders %}<option value="{{ l.id }}" {{ 'selected' if request.args.get('leader_id') == l.id|string }}>{{ l.name }}</option>{% endfor %}

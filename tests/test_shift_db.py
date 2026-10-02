@@ -564,7 +564,14 @@ def test_oneonone_topic_lifecycle(isolated_db):
     assert history[0]["date"] == shift_db.today_local()
     assert history[0]["topics"][0]["outcome_note"] == "hire two"
     assert history[0]["topics"][0]["discussed_by"] == "Operator"
-    # The surviving topic predates the last meeting → carried
+    # Added the same business day as the meeting → NOT carried (the badge
+    # means "survived a previous 1:1", not "existed on meeting day")...
+    assert not agenda[0]["carried"]
+    # ...but a topic created before the last meeting day is carried.
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE oneonone_topics SET created_at=? WHERE id=?",
+                     ("2020-01-01 10:00", agenda[0]["id"]))
+    agenda, _ = shift_db.oneonone_for_leader(maya["id"])
     assert agenda[0]["carried"]
 
     # Guarded flip: a second discuss is a no-op keeping the first stamp

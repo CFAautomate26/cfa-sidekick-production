@@ -66,6 +66,12 @@ SHOUTOUT_VALUE_LABELS = {
     "food-safety": "🧤 Food safety", "teamwork": "🤝 Teamwork",
     "hospitality": "❤️ Hospitality", "cleanliness": "✨ Cleanliness",
 }
+# Short forms for the filter chip row, so most chips fit a phone width.
+SHOUTOUT_VALUE_SHORT = {
+    "2nd-mile-service": "⭐ 2nd-mile", "speed": "⚡ Speed",
+    "food-safety": "🧤 Safety", "teamwork": "🤝 Teamwork",
+    "hospitality": "❤️ Hospitality", "cleanliness": "✨ Clean",
+}
 
 RECOVERY_REMEDY_LABELS = {
     "remade-now": "Remade / replaced on the spot",
@@ -344,7 +350,8 @@ CREATE TABLE IF NOT EXISTS shoutouts (
     message TEXT NOT NULL,
     author TEXT,
     created_at TEXT NOT NULL,
-    shared_at TEXT                              -- NULL = kept in-app only
+    shared_at TEXT,                             -- NULL = kept in-app only (cross-post REQUESTED)
+    delivered_at TEXT                           -- set by the background post on Slack ok:true
 );
 CREATE INDEX IF NOT EXISTS idx_shoutouts_date ON shoutouts(shout_date, id);
 
@@ -1198,6 +1205,15 @@ def leader_task_summary() -> list[dict]:
 # 1:1 meeting agendas
 # ---------------------------------------------------------------------------
 
+def _business_date(stamp: str) -> str:
+    """A now_stamp() value -> the 4am-rollover business date it belongs to."""
+    try:
+        return (datetime.strptime(stamp, "%Y-%m-%d %H:%M")
+                - timedelta(hours=4)).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return (stamp or "")[:10]
+
+
 def add_oneonone_topic(leader_id: int, topic: str, by: str) -> bool:
     """Add a talking point to a leader's shared agenda. Returns False for
     an empty topic or unknown leader."""
@@ -1241,7 +1257,9 @@ def oneonone_for_leader(leader_id: int, meetings: int = 12) \
     last_met = max((t["discussed_on"] for t in discussed if t["discussed_on"]),
                    default=None)
     for t in agenda:
-        t["carried"] = bool(last_met and t["created_at"][:10] <= last_met)
+        # Strictly before the last meeting's business date: a topic added on
+        # meeting day (before or after the sit-down) was never "carried".
+        t["carried"] = bool(last_met and _business_date(t["created_at"]) < last_met)
     history: list[dict] = []
     for t in discussed:
         if not history or history[-1]["date"] != t["discussed_on"]:
@@ -1371,6 +1389,14 @@ def recent_shoutouts(days: int = 7, limit: int = 3) -> list[dict]:
         ).fetchall()]
 
 
+def mark_shoutout_delivered(shoutout_id: int) -> None:
+    """Called by the background poster once Slack answers ok:true — the
+    feed's '📣 Slack' badge renders from this, not from the request."""
+    with closing(connect()) as conn, conn:
+        conn.execute("UPDATE shoutouts SET delivered_at=? WHERE id=?",
+                     (now_stamp(), shoutout_id))
+
+
 def get_shoutout(shoutout_id: int) -> dict | None:
     with closing(connect()) as conn:
         row = conn.execute(
@@ -1486,6 +1512,15 @@ def recovery_feed(resolved_limit: int = 50) \
             (resolved_limit,),
         ).fetchall()]
         conn.commit()
+    # How long each contacted guest has been expected back — measured from
+    # the contact, not from when the issue was first logged.
+    today = date.fromisoformat(today_local())
+    for r in awaiting:
+        try:
+            r["waiting_days"] = max(0, (today - date.fromisoformat(
+                _business_date(r["contacted_at"]))).days)
+        except ValueError:
+            r["waiting_days"] = 0
     return open_recs, awaiting, resolved
 
 
@@ -1602,8 +1637,11 @@ def roster(include_inactive: bool = False) -> list[dict]:
         return [dict(r) for r in conn.execute(q).fetchall()]
 
 
-def add_member(name: str, role: str = "team") -> bool:
-    """Add (or reactivate) a roster name. Returns False on empty name."""
+def add_member(name: str, role: str = "team", touch_existing: bool = True) -> bool:
+    """Add (or, by default, reactivate) a roster name. touch_existing=False
+    leaves an existing row completely alone — the shout-out path uses it so
+    praising a departed team member can't silently resurrect them onto the
+    active roster or clobber their role."""
     name = " ".join(name.split())
     if not name:
         return False
@@ -1612,10 +1650,11 @@ def add_member(name: str, role: str = "team") -> bool:
             "SELECT id FROM team_members WHERE name=? COLLATE NOCASE", (name,)
         ).fetchone()
         if existing:
-            conn.execute(
-                "UPDATE team_members SET active=1, role=? WHERE id=?",
-                (role, existing["id"]),
-            )
+            if touch_existing:
+                conn.execute(
+                    "UPDATE team_members SET active=1, role=? WHERE id=?",
+                    (role, existing["id"]),
+                )
         else:
             conn.execute(
                 "INSERT INTO team_members (name, role, active, created_at) VALUES (?,?,1,?)",
@@ -1778,6 +1817,17 @@ EXPORT_TABLES = [
 ]
 
 
+def session_epoch() -> str:
+    """Changes on every backup restore; leader sessions minted under an
+    older epoch are invalidated (a restore can renumber leader ids, and a
+    stale 30-day cookie must never re-attach to a different leader)."""
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key='session_epoch'"
+        ).fetchone()
+    return row["value"] if row else ""
+
+
 def export_json() -> str:
     payload: dict = {"exported_at": now_stamp(), "format": 1}
     with closing(connect()) as conn:
@@ -1872,6 +1922,12 @@ def import_json(raw: str) -> str | None:
                             "VALUES ('course_seeded', ?)", (now_stamp(),))
                     else:
                         conn.execute("DELETE FROM meta WHERE key='course_seeded'")
+                    # A restore may renumber leader ids; bump the session
+                    # epoch so every leader's 30-day cookie must re-login
+                    # instead of silently attaching to a different leader.
+                    conn.execute(
+                        "INSERT OR REPLACE INTO meta (key, value) "
+                        "VALUES ('session_epoch', ?)", (secrets.token_hex(8),))
             except _RestoreError as e:
                 return str(e)
     except sqlite3.Error as e:

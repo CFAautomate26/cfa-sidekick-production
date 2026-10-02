@@ -55,8 +55,10 @@ the leadership team:
   optional outcome note, unchecked topics carry forward automatically, and
   past meetings form a browsable thread. Action items drop straight onto
   the leader's to-do list, and the page gathers their personal goals
-  (goals can be tagged to a leader; tagged goals stay off the Today
-  dashboard) and course progress — a one-screen sit-down. **Privacy:
+  (goals can be tagged to a leader; a tagged goal is private to that
+  leader + the Operator everywhere — the Goals tab, its detail page, and
+  the Today dashboard all hide it from everyone else) and course
+  progress — a one-screen sit-down. **Privacy:
   each agenda is visible to that leader and the Operator master login
   only — not to other leaders, and not to admin-role leaders either.**
   Growth and operational topics only; conduct/discipline/wage/health
@@ -145,6 +147,9 @@ scale.
 
 ## Backups
 
+- Backups and leader PIN resets are **Operator-master-login only** (not
+  admin-role leaders): the backup JSON contains every leader's private
+  1:1 content, and a PIN reset would allow logging in as another leader.
 - **Manual**: Admin → *Download backup (JSON)* — everything except PINs.
   Backups now include guest recovery rows (guest names + contact info), so
   treat exported files with the same care as the database itself.
@@ -154,14 +159,18 @@ scale.
   other `/scheduled` endpoints. `SCHEDULE_SECRET` must be explicitly set on
   the service (the endpoint answers 401 without it — there is deliberately
   no default), and since the backup carries guest recovery contact info,
-  only store it with services you'd trust with the database itself.
+  only store it with services you'd trust with the database itself —
+  from this release that includes every leader's 1:1 agendas and notes.
 - **PII aging**: phone/email on recoveries resolved more than 90 days ago
   are cleared automatically (next time the recovery page loads), so guest
   contact info doesn't accumulate forever in the DB or in new backups.
 - **Restore**: Admin → *Restore from a backup file* (tick the confirmation
   box). Leader accounts come back with **locked PINs** (PIN hashes never
   leave the database) — reset each leader's PIN in the admin page after a
-  restore. Course progress and everything else comes back as it was.
+  restore. Every leader's signed-in session is also invalidated (a restore
+  can renumber leader accounts, and a stale cookie must never attach to a
+  different leader). Don't restore a new backup onto a rolled-back old
+  build — the old code wouldn't restore the newer tables it deleted. Course progress and everything else comes back as it was.
 
 ## Security model (know its limits)
 
