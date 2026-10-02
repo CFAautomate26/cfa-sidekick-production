@@ -1447,24 +1447,6 @@ def oneonone_people() -> list[dict]:
         ).fetchall()]
 
 
-def oneonone_resolve(name: str) -> tuple[str, int] | None:
-    """Exact (case-insensitive) name -> ('leader', id) for an active leader
-    login, else ('member', id) for any roster row (active or not), else
-    None. Never creates roster rows: a typo must not add a phantom team
-    member to lineup autosuggest."""
-    name = " ".join((name or "").split())
-    if not name:
-        return None
-    leader = active_leader_named(name)
-    if leader:
-        return ("leader", leader["id"])
-    with closing(connect()) as conn:
-        row = conn.execute(
-            "SELECT id FROM team_members WHERE name=? COLLATE NOCASE", (name,)
-        ).fetchone()
-    return ("member", row["id"]) if row else None
-
-
 def member_oneonone_index() -> dict:
     """The Operator's team-member section: {'threads', 'everyone', 'former'}.
     threads: active members with any 1:1 topic, open agendas first then
