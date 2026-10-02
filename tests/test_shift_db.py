@@ -984,6 +984,14 @@ def test_migration_adds_team_members_slack_id(tmp_path, monkeypatch):
             active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL);
         INSERT INTO team_members (name, created_at) VALUES ('Calla', '2026-09-01 09:00');
+        CREATE TABLE leaders (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            pin_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'lead',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL);
+        INSERT INTO leaders (name, pin_hash, created_at) VALUES ('Riya', 'x', '2026-09-01 09:00');
     """)
     conn.commit()
     conn.close()
@@ -994,6 +1002,11 @@ def test_migration_adds_team_members_slack_id(tmp_path, monkeypatch):
     with shift_db.closing(shift_db.connect()) as c:
         idx = [r["name"] for r in c.execute("PRAGMA index_list(team_members)")]
     assert "idx_team_members_slack" in idx
+    riya = shift_db.leaders()[0]
+    assert riya["name"] == "Riya" and riya["slack_id"] is None
+    with shift_db.closing(shift_db.connect()) as c:
+        idx = [r["name"] for r in c.execute("PRAGMA index_list(leaders)")]
+    assert "idx_leaders_slack" in idx
 
 
 def test_sync_roster_from_slack(isolated_db):
@@ -1015,7 +1028,7 @@ def test_sync_roster_from_slack(isolated_db):
     out = shift_db.sync_roster_from_slack([dict(p) for p in people])
     assert sorted(out["leaders"]) == ["Neha Ambookkan", "Riya Ronny Thomas"]
     assert sorted(out["added"]) == ["Keira Van Dinther", "Tushar"]
-    assert sorted(out["linked"]) == ["Calla", "Shelly Montiyagala"]
+    assert sorted(out["linked"]) == ["Calla → Calla Jonkman", "Shelly Montiyagala"]
     assert out["removed_kept"] == ["Old Hand"]
     assert not out["ambiguous"] and not out["duplicates"]
 
@@ -1059,6 +1072,91 @@ def test_sync_roster_ambiguity_rules(isolated_db):
     assert out["duplicates"] == ["alex kim"]
 
 
+def test_sync_never_pins_a_new_hire_to_a_removed_row(isolated_db):
+    # A former "Sam" (one word, removed, private history) and, later, a
+    # different Sam joins Slack: he must be added, not hidden on the old row.
+    shift_db.add_member("Sam")
+    old_sam = _member_id("Sam")
+    shift_db.add_member_topic(old_sam, "Old private note", "Operator")
+    shift_db.set_member_active(old_sam, False)
+    shift_db.add_member("Mason")                          # removed one-word twin
+    shift_db.set_member_active(_member_id("Mason"), False)
+    out = shift_db.sync_roster_from_slack([
+        _slack_person("UNEW", "Sam Jones"), _slack_person("UMAS", "Mason")])
+    assert out["added"] == ["Sam Jones"]
+    assert out["removed_kept"] == ["Mason"]               # reported, not linked
+    rows = {r["name"]: r for r in shift_db.roster(include_inactive=True)}
+    assert rows["Sam"]["slack_id"] is None and rows["Sam"]["active"] == 0
+    assert rows["Mason"]["slack_id"] is None
+    assert rows["Sam Jones"]["active"] == 1
+    # Restoring the removed Mason later lets the next pull link him
+    shift_db.set_member_active(rows["Mason"]["id"], True)
+    again = shift_db.sync_roster_from_slack([_slack_person("UMAS", "Mason")])
+    assert again["linked"] == ["Mason"]
+
+
+def test_sync_never_links_a_leaders_lineup_row(isolated_db):
+    # Leader "Sammy" (Slack: Samantha Lee, display Sammy) typed herself
+    # into a lineup as "Sammy"; team member Sammy Jones must not take it.
+    shift_db.add_leader("Sammy", "1111")
+    shift_db.add_member("Sammy")
+    out = shift_db.sync_roster_from_slack([
+        _slack_person("ULEAD", "Samantha Lee", "Sammy"),
+        _slack_person("UTM", "Sammy Jones")])
+    assert out["leaders"] == ["Samantha Lee"]             # exact display wins
+    assert out["added"] == ["Sammy Jones"] and not out["ambiguous"]
+    assert next(r for r in shift_db.roster() if r["name"] == "Sammy")["slack_id"] is None
+    assert shift_db.leaders()[0]["slack_id"] == "ULEAD"
+    team = [p["name"] for p in shift_db.oneonone_people() if p["kind"] == "member"]
+    assert team == ["Sammy Jones"]                        # leader listed once
+
+
+def test_sync_exact_display_beats_first_name_collision(isolated_db):
+    shift_db.add_leader("Riya", "1111")
+    out = shift_db.sync_roster_from_slack([
+        _slack_person("URIYA", "Riya Ronny Thomas", "Riya"),
+        _slack_person("USING", "Riya Singh")])
+    assert out["leaders"] == ["Riya Ronny Thomas"] and not out["ambiguous"]
+    assert out["added"] == ["Riya Singh"]
+    picker = [(p["kind"], p["name"]) for p in shift_db.oneonone_people()]
+    assert picker == [("leader", "Riya"), ("member", "Riya Singh")]
+
+
+def test_sync_promotion_hides_the_roster_twin(isolated_db):
+    # Pulled as a team member first; later gets a leader login "Aron"
+    shift_db.sync_roster_from_slack([_slack_person("UARON", "Aron Mathew")])
+    aron_row = _member_id("Aron Mathew")
+    shift_db.add_member_topic(aron_row, "Pre-promotion note", "Operator")
+    shift_db.add_leader("Aron", "1111")
+    out = shift_db.sync_roster_from_slack([_slack_person("UARON", "Aron Mathew")])
+    assert out["leaders"] == ["Aron Mathew"]
+    picker = [(p["kind"], p["name"]) for p in shift_db.oneonone_people()]
+    assert picker == [("leader", "Aron")]                 # listed once
+    member = shift_db.get_member(aron_row)
+    assert shift_db.active_leader_for_member(member)["name"] == "Aron"
+    thread = next(r for r in shift_db.member_oneonone_index()["threads"]
+                  if r["id"] == aron_row)
+    assert thread["leader_id"]                            # "now a leader" tag
+    # The remembered Slack account survives a backup restore
+    raw = shift_db.export_json()
+    assert shift_db.import_json(raw) is None
+    assert next(l for l in shift_db.leaders() if l["name"] == "Aron")["slack_id"] == "UARON"
+
+
+def test_sync_ambiguous_leader_claimants_are_listed_and_reported(isolated_db):
+    shift_db.add_leader("Chloe", "1111")
+    out = shift_db.sync_roster_from_slack([
+        _slack_person("U1", "Chloe Hill"), _slack_person("U2", "Chloe Nguyen")])
+    assert sorted(out["ambiguous"]) == ["Chloe Hill", "Chloe Nguyen"]
+    assert sorted(out["added"]) == ["Chloe Hill", "Chloe Nguyen"]
+    # The fix the flash suggests: Chloe sets her Slack display name
+    out = shift_db.sync_roster_from_slack([
+        _slack_person("U1", "Chloe Hill", "Chloe"), _slack_person("U2", "Chloe Nguyen")])
+    assert out["leaders"] == ["Chloe Hill"] and not out["ambiguous"]
+    team = [p["name"] for p in shift_db.oneonone_people() if p["kind"] == "member"]
+    assert team == ["Chloe Nguyen"]
+
+
 def test_claim_slack_roster_autosync(isolated_db):
     assert not shift_db.claim_slack_roster_autosync()     # never pulled
     shift_db.sync_roster_from_slack([_slack_person("U1", "Avery Sharpe")])
@@ -1090,7 +1188,7 @@ def test_roster_snapshot_seed(isolated_db):
     shift_db.add_member("Calla")                          # typed in a lineup
     out = shift_db.apply_roster_snapshot(shift_roster_seed.PEOPLE)
     assert len(out["leaders"]) == 11 and not out["ambiguous"]
-    assert len(out["added"]) == 26 and out["linked"] == ["Calla"]
+    assert len(out["added"]) == 26 and out["linked"] == ["Calla → Calla Jonkman"]
     team = [p for p in shift_db.oneonone_people() if p["kind"] == "member"]
     assert len(team) == 27                                # the whole team, once
     assert not any("Huesser" in p["name"] for p in team)  # Operator left out

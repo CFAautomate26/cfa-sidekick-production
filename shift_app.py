@@ -1004,14 +1004,20 @@ def _slack_sync_summary(summary: dict, pulled: int) -> str:
     on_roster = len(summary["already"]) + len(summary["linked"])
     if on_roster:
         parts.append(f"{on_roster} already on the roster.")
+    renamed = [x for x in summary["linked"] if "→" in x]
+    if renamed:
+        parts.append("Matched to existing roster names: " + ", ".join(renamed[:8])
+                     + (f" +{len(renamed) - 8} more" if len(renamed) > 8 else "") + ".")
     if summary["leaders"]:
         parts.append(f"{len(summary['leaders'])} have leader logins (they're under Leaders).")
     if summary["removed_kept"]:
         parts.append(f"Left off because you removed them from the roster: "
                      f"{names('removed_kept')} — restore them on Team roster if that was a mistake.")
     if summary["ambiguous"]:
-        parts.append(f"Couldn't tell which of these is a leader login, so they were "
-                     f"added as team members: {names('ambiguous')}.")
+        parts.append(f"Couldn't tell which of these is a leader login, so they're "
+                     f"listed as team members: {names('ambiguous')}. Setting the "
+                     "leader's Slack display name to their login name sorts it "
+                     "out on the next pull.")
     if summary["duplicates"]:
         parts.append(f"Skipped — same name as someone already linked: {names('duplicates')}.")
     return " ".join(parts)
@@ -1020,7 +1026,9 @@ def _slack_sync_summary(summary: dict, pulled: int) -> str:
 @shift_bp.route("/roster/slack-sync", methods=["POST"])
 @operator_required
 def roster_slack_sync():
-    back = (url_for("shift.oneonone") + "#team"
+    # No #team fragment: on a phone it would scroll the result (or the
+    # Slack setup instructions) off-screen above the fold.
+    back = (url_for("shift.oneonone")
             if request.form.get("back") == "oneonone" else url_for("shift.roster"))
     try:
         people = fetch_slack_roster()
@@ -1272,7 +1280,7 @@ def oneonone_member(member_id, holder_id):
         return ctx
     member, holder, holder_leader = ctx
     agenda, history = shift_db.oneonone_for_member(member_id, holder)
-    leader = shift_db.active_leader_named(member["name"])
+    leader = shift_db.active_leader_for_member(member)
     if leader and not agenda and not history:
         # One thread per person: someone with a leader login has a shared
         # agenda with the Operator already.
@@ -1297,7 +1305,7 @@ def oneonone_member_topic_add(member_id, holder_id):
     if not isinstance(ctx, tuple):
         return ctx
     member, holder, _ = ctx
-    leader = shift_db.active_leader_named(member["name"])
+    leader = shift_db.active_leader_for_member(member)
     if leader:
         # A leader's 1:1 is shared with them — a shadow file on the same
         # person would go around that.

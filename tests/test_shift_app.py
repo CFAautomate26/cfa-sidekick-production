@@ -1224,10 +1224,12 @@ def test_roster_slack_sync_route(client, fake_slack):
     shift_db.add_member("Calla")
     login_operator(client)
     resp = client.post("/shift/roster/slack-sync", data={"back": "oneonone"})
-    assert resp.headers["Location"].endswith("/shift/oneonone#team")
+    # No fragment: the result message must stay on screen on a phone
+    assert resp.headers["Location"].endswith("/shift/oneonone")
     page = client.get("/shift/oneonone").data.decode()
     assert "Added 2: Grace Fraser, Tushar." in page
     assert "1 already on the roster." in page
+    assert "Matched to existing roster names: Calla → Calla Jonkman." in page
     assert "1 have leader logins" in page
     picker = page[page.index('<select name="who"'):page.index("</select>")]
     team = picker[picker.index('label="Team members"'):]
