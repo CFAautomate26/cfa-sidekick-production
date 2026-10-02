@@ -24,7 +24,10 @@ Canada.
   lineups, goals, shift notes, announcements with read receipts,
   per-leader assigned to-dos under `/shift/todo` (any leader assigns),
   1:1 meeting agendas under `/shift/oneonone` (private to each leader +
-  the Operator master login — not other admins), team-member shout-outs
+  the Operator master login — not other admins; plus Operator-only 1:1
+  threads with any team-roster member under `/shift/oneonone/member/<id>`,
+  table `oneonone_member_topics`, never visible to leaders or admin-role
+  leaders), team-member shout-outs
   under `/shift/shoutouts` (optional cross-post to the team Slack channel
   via `SLACK_BOT_TOKEN` + `SHIFT_SHOUTOUT_SLACK_CHANNEL`), a guest
   recovery log

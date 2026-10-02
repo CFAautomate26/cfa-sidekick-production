@@ -91,12 +91,14 @@ env var.</div>
 </a>
 
 {% if shift_is_operator %}
-{# Backups hold every leader's private 1:1 content, and PIN resets allow
-   impersonation — Operator master login only. #}
+{# Backups hold every leader's private 1:1 content AND the Operator's
+   team-member 1:1 notes, and PIN resets allow impersonation — Operator
+   master login only. #}
 <div class="section-label">Backup &amp; restore</div>
 <div class="card">
   <a class="pill primary" href="{{ url_for('shift.admin_export') }}">⬇ Download backup (JSON)</a>
-  <div class="progress-note" style="margin-top:8px;">Everything except PINs.
+  <div class="progress-note" style="margin-top:8px;">Everything except PINs —
+  including private 1:1 notes, so keep the file somewhere private.
   Automate it by pointing a free cron pinger at
   <code>/scheduled/shift-backup?token=…</code> — see the setup doc.</div>
   <hr style="border:none; border-top:1px solid var(--line); margin:12px 0;">

@@ -896,11 +896,32 @@ def todo_delete(task_id):
 # 1:1 meeting agendas — private between each leader and the Operator
 # ---------------------------------------------------------------------------
 
+def _oneonone_url(kind: str, subject_id: int) -> str:
+    if kind == "leader":
+        return url_for("shift.oneonone_leader", leader_id=subject_id)
+    return url_for("shift.oneonone_member", member_id=subject_id)
+
+
 @shift_bp.route("/oneonone")
 def oneonone():
     if _is_operator():
+        q = " ".join((request.args.get("q") or "").split())[:80]
+        if q:
+            hit = shift_db.oneonone_resolve(q)
+            if hit:
+                return redirect(_oneonone_url(*hit))
+        people = shift_db.oneonone_people()
+        team = shift_db.member_oneonone_index()
+        matches = []
+        if q:
+            needle = q.casefold()
+            pool = people + [dict(f, kind="member") for f in team["former"]]
+            matches = [p for p in pool if needle in p["name"].casefold()][:20]
         return render_template("shift/oneonone.html",
-                               leaders=shift_db.oneonone_summary())
+                               leaders=shift_db.oneonone_summary(),
+                               team=team, people=people, q=q, matches=matches)
+    # Leaders never see the picker or any lookup — straight to their own
+    # agenda, so ?q= reveals nothing about who exists.
     leader_id = session.get("shift_leader_id")
     if not leader_id:
         flash("Your login isn't linked to a leader profile — ask the Operator.")
@@ -1000,6 +1021,87 @@ def oneonone_action(leader_id):
         flash("A to-do needs a title (and a leader who still exists).")
     return redirect(url_for("shift.oneonone_leader", leader_id=leader_id)
                     + "#actions")
+
+
+# Team-member 1:1s — the Operator master login's alone. Team members have
+# no login, and leaders (admin-role included) never reach these routes:
+# operator_required runs before any lookup. Separate table and URL prefix,
+# so a member topic id can never be acted on through the leader routes.
+
+@shift_bp.route("/oneonone/member/<int:member_id>")
+@operator_required
+def oneonone_member(member_id):
+    member = shift_db.get_member(member_id)
+    if not member:
+        flash("That team member isn't on the roster.")
+        return redirect(url_for("shift.oneonone") + "#team")
+    agenda, history = shift_db.oneonone_for_member(member_id)
+    leader = shift_db.active_leader_named(member["name"])
+    if leader and not agenda and not history:
+        # One thread per person: someone with a leader login has a shared
+        # agenda already.
+        return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
+    return render_template("shift/oneonone_member.html", member=member,
+                           agenda=agenda, history=history, leader=leader)
+
+
+@shift_bp.route("/oneonone/member/<int:member_id>/topics", methods=["POST"])
+@operator_required
+def oneonone_member_topic_add(member_id):
+    member = shift_db.get_member(member_id)
+    if not member:
+        flash("That team member isn't on the roster.")
+        return redirect(url_for("shift.oneonone") + "#team")
+    leader = shift_db.active_leader_named(member["name"])
+    if leader:
+        # A leader's 1:1 is shared with them — an Operator-only shadow file
+        # on the same person would go around that.
+        flash(f"{leader['name']} has a leader login — add it to your shared 1:1 instead.")
+        return redirect(url_for("shift.oneonone_leader", leader_id=leader["id"]))
+    if not shift_db.add_member_topic(member_id, request.form.get("topic", ""),
+                                     current_name()):
+        flash("A talking point needs some words.")
+        return redirect(url_for("shift.oneonone_member", member_id=member_id))
+    return redirect(url_for("shift.oneonone_member", member_id=member_id)
+                    + "#agenda")
+
+
+@shift_bp.route("/oneonone/member/topic/<int:topic_id>/toggle", methods=["POST"])
+@operator_required
+def oneonone_member_topic_toggle(topic_id):
+    # member_id comes from the row, never the form.
+    topic = shift_db.get_member_topic(topic_id)
+    if not topic:
+        flash("That topic doesn't exist any more.")
+        return redirect(url_for("shift.oneonone") + "#team")
+    discussed = request.form.get("discussed") == "1"
+    ok = shift_db.set_member_topic_discussed(
+        topic_id, discussed, request.form.get("note", ""), current_name())
+    if not ok:
+        fresh = shift_db.get_member_topic(topic_id)
+        if fresh:
+            flash(f"Already marked discussed by {fresh['discussed_by'] or 'someone'} "
+                  "— nothing changed." if fresh["discussed_at"]
+                  else "Already back on the agenda — nothing changed.")
+        else:
+            flash("That topic doesn't exist any more.")
+            return redirect(url_for("shift.oneonone_member",
+                                    member_id=topic["member_id"]))
+    anchor = "#agenda" if discussed else f"#topic-{topic_id}"
+    return redirect(url_for("shift.oneonone_member",
+                            member_id=topic["member_id"]) + anchor)
+
+
+@shift_bp.route("/oneonone/member/topic/<int:topic_id>/delete", methods=["POST"])
+@operator_required
+def oneonone_member_topic_delete(topic_id):
+    topic = shift_db.get_member_topic(topic_id)
+    if not topic:
+        flash("That topic doesn't exist any more.")
+        return redirect(url_for("shift.oneonone") + "#team")
+    if not shift_db.delete_member_topic(topic_id):
+        flash("That topic was already discussed — it's part of meeting history now.")
+    return redirect(url_for("shift.oneonone_member", member_id=topic["member_id"]))
 
 
 # ---------------------------------------------------------------------------
@@ -1251,6 +1353,7 @@ def admin_leader_add():
     error = shift_db.add_leader(
         request.form.get("name", ""), request.form.get("pin", ""),
         role="admin" if request.form.get("role") == "admin" else "lead",
+        may_replace=_is_operator(),
     )
     if error:
         flash(error)
