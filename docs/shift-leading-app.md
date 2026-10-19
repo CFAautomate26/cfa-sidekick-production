@@ -24,15 +24,12 @@ the leadership team:
   **Manager check** (a leader taps "I checked this station" — stamped).
   A list **locks when its day/week/month ends** so the numbers reflect
   what was really done; the Operator master login can still correct one.
-  Template edits reach any list nobody has started yet (nothing checked,
-  no owner or manager check), today's included; started lists keep their
-  items. Changing a list's frequency takes effect right away — the new
-  weekly/monthly list appears for the current week/month — and its
-  scorecard starts fresh; an untouched old-frequency list is dropped, as
-  is an untouched current list when a list is retired (a list taken off
-  the schedule before its period ended owes nothing for it). Opening the
-  app on a closed Sunday doesn't start the week's lists (or a month's on
-  a month-end Sunday) — they'd be due with no open day left. History shows a weekly or
+  Template edits show on lists started after the change; a list already
+  started keeps its items. Changing a list's frequency takes effect right
+  away — the new weekly/monthly list appears for the current week/month —
+  and its scorecard starts fresh (an empty old-frequency list drops off).
+  Opening the app on a closed Sunday doesn't start the week's lists (or a
+  month's on a month-end Sunday) — they'd be due with no open day left. History shows a weekly or
   monthly list under the day each item was actually checked, Operator
   corrections included.
 - **Checklist scorecard** (Checklists → 📊, or More) — for every active
@@ -40,12 +37,13 @@ the leadership team:
   3 months, how many periods were fully done, the current streak, how many
   were manager-checked, days nobody opened, a color strip per period, and
   the items most often missed. Counting starts at a list's first day; a
-  day nobody opened counts as nothing done. Sundays (closed) never count,
-  and neither do days a list wasn't on the schedule (retired, or set to
-  another frequency) while the app was in use — opening the app creates
-  every active list's run at once, so a list missing from a day other
-  lists ran on wasn't scheduled then. Holidays the store is closed do
-  count as not opened — read those squares accordingly.
+  day nobody opened counts as nothing done. Sundays (closed) never count.
+  A list owes a day/week/month only if it was active at that frequency
+  at the end of the period's last open day — so retiring a list or moving
+  it to another frequency mid-period cancels that period, and a change
+  made on a Sunday applies from the next week. Manager checks count from
+  the day the button arrived. Holidays the store is closed do count as
+  not opened — read those squares accordingly.
 - **Lineup / setup sheet** — assign team members to positions per daypart,
   with one-tap **copy from yesterday** or **copy from the previous daypart**,
   and name autosuggest from the roster.

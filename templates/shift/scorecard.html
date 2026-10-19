@@ -45,9 +45,11 @@ don't count.</div>
     · {{ w.complete }} of {{ w.periods }} fully done
     {% endif %}
   </div>
+  {% if w.verified_of or w.not_opened %}
   <div class="progress-note" style="margin-top:2px;">
-    ✓ manager-checked {{ w.verified }} of {{ w.periods }}{% if w.not_opened %} · {{ w.not_opened }} not opened{% endif %}
+    {% if w.verified_of %}✓ manager-checked {{ w.verified }} of {{ w.verified_of }}{% endif %}{% if w.verified_of and w.not_opened %} · {% endif %}{% if w.not_opened %}{{ w.not_opened }} not opened{% endif %}
   </div>
+  {% endif %}
   {% if c.most_missed %}
   <div style="margin-top:8px; font-size:13px;">
     <div style="font-weight:700;">Most often missed</div>

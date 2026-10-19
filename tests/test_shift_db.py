@@ -617,6 +617,9 @@ def test_cleaning_seed_upgrades_an_existing_database(tmp_path, monkeypatch):
     assert old["frequency"] == "daily"
     runs = shift_db.runs_for_date("2026-09-30")
     assert runs[0]["frequency"] == "daily" and runs[0]["owner"] is None
+    with shift_db.closing(shift_db.connect()) as conn:     # checks count from now
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key='manager_check_since'").fetchone()
 
 
 def test_periods():
@@ -724,7 +727,7 @@ def test_scorecard_daily_window_is_open_days(isolated_db):
     card = next(c for c in shift_db.checklist_scorecard(today="2026-10-19")
                 if c["name"] == name)
     assert card["window"] == {"periods": 28, "pct": 100, "complete": 28,
-                              "verified": 0, "not_opened": 0}
+                              "verified": 0, "verified_of": 28, "not_opened": 0}
     assert card["recent"]["pct"] == 100 and card["streak"] == 28
 
 
@@ -788,8 +791,12 @@ def test_checklist_runs_survive_export_import(isolated_db):
         del t["frequency"], t["due_weekday"]
     for r in payload["checklist_runs"]:
         del r["frequency"], r["owner"], r["verified_by"], r["verified_at"]
+    del payload["checklist_schedule_log"]
     assert shift_db.import_json(json.dumps(payload)) is None
     assert all(t["frequency"] == "daily" for t in shift_db.all_templates())
+    with shift_db.closing(shift_db.connect()) as conn:     # no Manager check back then
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key='manager_check_since'").fetchone()
 
 
 def test_scorecard_monthly_window_reaches_back_three_months(isolated_db):
@@ -838,6 +845,7 @@ def test_frequency_change_takes_effect_this_period(isolated_db, monkeypatch):
         if d.weekday() != 6:
             shift_db.ensure_runs_for_date(d.isoformat())
         d += timedelta(days=1)
+    monkeypatch.setattr(shift_db, "today_local", lambda: "2026-11-02")
     shift_db.update_template(tid, "Deep clean", "allday", "All",
                              [("Scrub", False), ("Mop", False)], frequency="daily")
     for day in ("2026-11-02", "2026-11-03"):
@@ -845,8 +853,9 @@ def test_frequency_change_takes_effect_this_period(isolated_db, monkeypatch):
     card = next(c for c in shift_db.checklist_scorecard(today="2026-11-04")
                 if c["id"] == tid)
     hist = {h["start"]: h for h in card["history"]}
-    assert not [s for s in hist if "2026-10-22" <= s <= "2026-10-31"]
-    assert all(hist[s]["complete"] for s in ("2026-11-03", "2026-11-02", "2026-10-21",
+    # Oct 21 ended monthly (switched mid-day), so it owed no daily list.
+    assert not [s for s in hist if "2026-10-21" <= s <= "2026-10-31"]
+    assert all(hist[s]["complete"] for s in ("2026-11-03", "2026-11-02",
                                             "2026-10-20", "2026-10-19"))
     assert hist["2026-10-13"]["opened"] is False           # nobody opened the app
 
@@ -944,40 +953,93 @@ def test_closed_sunday_starts_no_spent_period(isolated_db):
     assert [(h["start"], h["complete"]) for h in card["history"]] == [("2026-10-19", True)]
 
 
-def test_edits_and_schedule_changes_settle_untouched_runs(isolated_db, monkeypatch):
-    monkeypatch.setattr(shift_db, "today_local", lambda: "2026-10-21")
-    tid = shift_db.create_template("Patio", "allday", "Patio", [("Sweep", False)],
-                                   frequency="weekly")
-    started = shift_db.create_template("Lobby", "allday", "Lobby", [("Dust", False)])
-    shift_db.ensure_runs_for_date("2026-10-21")
-    _do("2026-10-21", "Lobby", 1)
-
-    def runs(t):
-        with shift_db.closing(shift_db.connect()) as conn:
-            return [(r["frequency"], r["run_date"], r["n"]) for r in conn.execute(
-                "SELECT r.frequency, r.run_date, COUNT(i.id) AS n FROM checklist_runs r "
-                "LEFT JOIN checklist_run_items i ON i.run_id = r.id "
-                "WHERE r.template_id=? GROUP BY r.id ORDER BY r.id", (t,))]
-
-    # An edit reaches the untouched current list, but not a started one.
-    shift_db.update_template(tid, "Patio", "allday", "Patio",
-                             [("Sweep", False), ("Hose", False)], frequency="weekly")
-    shift_db.update_template(started, "Lobby", "allday", "Lobby",
-                             [("Dust", False), ("Mop", False)])
-    assert runs(tid) == [("weekly", "2026-10-19", 2)]
-    assert runs(started) == [("daily", "2026-10-21", 1)]
-    # A mistaken switch to monthly and back leaves no stub behind.
-    shift_db.update_template(tid, "Patio", "allday", "Patio",
-                             [("Sweep", False), ("Hose", False)], frequency="monthly")
-    shift_db.ensure_runs_for_date("2026-10-21")
-    shift_db.update_template(tid, "Patio", "allday", "Patio",
-                             [("Sweep", False), ("Hose", False)], frequency="weekly")
-    shift_db.ensure_runs_for_date("2026-10-21")
-    assert [r[0] for r in runs(tid)] == ["weekly"]
-    # Retiring drops untouched current runs only.
+def test_edits_never_touch_existing_runs(isolated_db):
+    """A page left open must never check a different item: edits and
+    retirements leave existing runs, their items and ids, exactly as is."""
+    today = shift_db.today_local()                         # a current, untouched list
+    shift_db.ensure_runs_for_date(today)
+    run = next(r for r in shift_db.runs_for_date(today)
+               if r["name"] == "Sanitizer & spindles — 6:30 / 8:30")
+    before = [(i["id"], i["label"]) for i in shift_db.run_with_items(run["id"])[1]]
+    tid = next(t["id"] for t in shift_db.all_templates() if t["name"] == run["name"])
+    t, items = shift_db.template_with_items(tid)
+    shift_db.update_template(tid, t["name"], t["daypart"], t["area"],
+                             [("Sanitizer bucket re-made", True)]
+                             + [(i["label"], bool(i["critical"])) for i in items])
     shift_db.set_template_active(tid, False)
-    shift_db.set_template_active(started, False)
-    assert runs(tid) == [] and runs(started) == [("daily", "2026-10-21", 1)]
+    shift_db.set_template_active(tid, True)
+    assert [(i["id"], i["label"]) for i in shift_db.run_with_items(run["id"])[1]] == before
+
+
+def test_schedule_log_decides_what_a_list_owed(isolated_db, monkeypatch):
+    from datetime import date, timedelta
+    clock = {"day": "2026-09-01"}
+    monkeypatch.setattr(shift_db, "today_local", lambda: clock["day"])
+    ids = {t["name"]: t["id"] for t in shift_db.all_templates()}
+
+    def use_app(first, last):                               # open days only
+        d = date.fromisoformat(first)
+        while d <= date.fromisoformat(last):
+            if d.weekday() != 6:
+                shift_db.ensure_runs_for_date(d.isoformat())
+            d += timedelta(days=1)
+
+    def reschedule(name, frequency, day):
+        clock["day"] = day
+        t, items = shift_db.template_with_items(ids[name])
+        shift_db.update_template(t["id"], t["name"], t["daypart"], t["area"],
+                                 [(i["label"], bool(i["critical"])) for i in items],
+                                 frequency=frequency)
+
+    # An ignored week stays a miss even if the list is retired on the Sunday.
+    use_app("2026-10-05", "2026-10-10")
+    clock["day"] = "2026-10-11"
+    shift_db.set_template_active(ids["Drive Thru — Weekly"], False)
+    shift_db.set_template_active(ids["Drive Thru — Weekly"], True)
+    # Retired mid-week (with only an Owner set): that week isn't owed.
+    use_app("2026-10-12", "2026-10-13")
+    weekly = next(r for r in shift_db.runs_for_date("2026-10-13")
+                  if r["name"] == "Dining Room & Washrooms — Weekly")
+    shift_db.set_run_owner(weekly["id"], "Jordan")
+    clock["day"] = "2026-10-14"
+    shift_db.set_template_active(ids["Dining Room & Washrooms — Weekly"], False)
+    use_app("2026-10-14", "2026-10-17")
+    clock["day"] = "2026-10-19"
+    shift_db.set_template_active(ids["Dining Room & Washrooms — Weekly"], True)
+    use_app("2026-10-19", "2026-10-24")
+    cards = {c["name"]: c for c in shift_db.checklist_scorecard(today="2026-10-26")}
+    assert [(h["start"], h["done"]) for h in cards["Drive Thru — Weekly"]["history"]] == [
+        ("2026-10-19", 0), ("2026-10-12", 0), ("2026-10-05", 0)]
+    assert [h["start"] for h in
+            cards["Dining Room & Washrooms — Weekly"]["history"]] == [
+        "2026-10-19", "2026-10-05"]
+
+    # A mistaken switch to monthly and straight back leaves a stub that
+    # never counts, even once the list really goes monthly.
+    reschedule("Drive Thru — Weekly", "monthly", "2026-10-27")
+    use_app("2026-10-27", "2026-10-27")                     # the stub is created
+    reschedule("Drive Thru — Weekly", "weekly", "2026-10-27")
+    use_app("2026-10-28", "2026-11-28")
+    reschedule("Drive Thru — Weekly", "monthly", "2026-12-01")
+    for day in ("2026-12-01", "2026-12-15"):
+        _do(day, "Drive Thru — Weekly")
+    card = next(c for c in shift_db.checklist_scorecard(today="2027-01-04")
+                if c["name"] == "Drive Thru — Weekly")
+    assert [(h["start"], h["complete"]) for h in card["history"]] == [("2026-12-01", True)]
+
+
+def test_manager_checks_count_from_when_the_button_arrived(isolated_db):
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("INSERT INTO meta (key, value) VALUES ('manager_check_since', "
+                     "'2026-10-15')")
+    name = "Sanitizer & spindles — 6:30 / 8:30"
+    for day in ("2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15"):
+        _do(day, name)
+    for day in ("2026-10-16", "2026-10-17"):
+        _do(day, name, verify=True)
+    card = next(c for c in shift_db.checklist_scorecard(today="2026-10-19")
+                if c["name"] == name)
+    assert (card["window"]["verified"], card["window"]["verified_of"]) == (2, 3)
 
 
 def test_a_repeat_check_keeps_the_first_stamp(isolated_db, monkeypatch):
@@ -1095,15 +1157,20 @@ def test_pre_cleaning_backup_restore_seeds_the_lists_back(isolated_db):
                                            if i["template_id"] in keep]
     for t in payload["checklist_templates"]:
         del t["frequency"], t["due_weekday"]
+    del payload["checklist_schedule_log"]                  # didn't exist yet either
     assert shift_db.import_json(json.dumps(payload)) is None
     assert len(shift_db.all_templates()) == SEEDED_LISTS
+    with shift_db.closing(shift_db.connect()) as conn:     # every list has a baseline
+        assert conn.execute(
+            "SELECT COUNT(DISTINCT template_id) FROM checklist_schedule_log").fetchone()[0] \
+            == SEEDED_LISTS
     # A post-cleaning backup the Operator trimmed is restored as-is.
     payload = json.loads(shift_db.export_json())
     payload["checklist_templates"] = [t for t in payload["checklist_templates"]
                                       if t["name"] != "Drive Thru — Weekly"]
-    payload["checklist_template_items"] = [
-        i for i in payload["checklist_template_items"]
-        if i["template_id"] in {t["id"] for t in payload["checklist_templates"]}]
+    kept = {t["id"] for t in payload["checklist_templates"]}
+    for table in ("checklist_template_items", "checklist_schedule_log"):
+        payload[table] = [r for r in payload[table] if r["template_id"] in kept]
     assert shift_db.import_json(json.dumps(payload)) is None
     shift_db.init_db()
     assert len(shift_db.all_templates()) == SEEDED_LISTS - 1

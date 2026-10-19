@@ -27,7 +27,7 @@
     <tr>
       <td style="width:24px;">{{ '✅' if i.done else '▢' }}</td>
       <td>{% if i.critical %}<span class="critical-flag">●</span> {% endif %}{{ i.label }}</td>
-      <td style="color:var(--soft); white-space:nowrap;">{% if i.done %}{{ i.done_by }} · {{ i.done_at[11:] if i.done_at[:10] == day else i.done_at[5:] }}{% endif %}</td>
+      <td style="color:var(--soft); white-space:nowrap;">{% if i.done %}{{ i.done_by }} · {{ check_stamp(i.done_at, day) }}{% endif %}</td>
     </tr>
     {% endfor %}
   </table>

@@ -380,6 +380,27 @@ def test_period_lists_show_on_the_day_each_item_was_done(client, monkeypatch):
     assert escape(ditems[0]["label"]) in page and "2026-10-19: 1/" in page
     page = client.get("/shift/history?date=2026-10-19").data.decode()
     assert "Operator · 10-27 10:00" in page                  # dated, not passed off as 10-19
+    page = client.get(f"/shift/checklists/run/{daily['id']}").data.decode()
+    assert "done by Operator · 10-27 10:00" in page and 'data-stamp-from="5"' in page
+
+
+def test_after_midnight_close_checks_read_as_that_shift(client, monkeypatch):
+    from datetime import datetime
+    clock = {"now": datetime(2026, 10, 19, 22, 30)}
+    monkeypatch.setattr(shift_db, "now_local", lambda: clock["now"])
+    login_operator(client)
+    client.get("/shift/checklists")
+    run = next(r for r in shift_db.runs_for_date("2026-10-19") if r["name"] == "FOH Closing")
+    _, items = shift_db.run_with_items(run["id"])
+    client.post(f"/shift/item/{items[0]['id']}/toggle", data={"done": "1"})
+    clock["now"] = datetime(2026, 10, 20, 1, 15)               # still the 19th's shift
+    client.post(f"/shift/item/{items[1]['id']}/toggle", data={"done": "1"})
+    page = client.get(f"/shift/checklists/run/{run['id']}").data.decode()
+    assert "done by Operator · 01:15" in page and 'data-stamp-from="11"' in page
+    clock["now"] = datetime(2026, 10, 20, 9, 0)
+    history = client.get("/shift/history?date=2026-10-19").data.decode()
+    assert "Operator · 22:30" in history and "Operator · 01:15" in history
+    assert "10-20 01:15" not in history
 
 
 def test_toggle_item_form_flow(client):

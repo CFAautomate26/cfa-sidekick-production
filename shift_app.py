@@ -159,6 +159,7 @@ def inject_shift_globals():
         "FREQUENCY_LABELS": shift_db.FREQUENCY_LABELS,
         "WEEKDAY_LABELS": shift_db.WEEKDAY_LABELS,
         "CLOSED_WEEKDAYS": shift_db.CLOSED_WEEKDAYS,
+        "check_stamp": shift_db.check_stamp,
         "NOTE_CATEGORIES": shift_db.NOTE_CATEGORIES,
         "data_at_risk": DATA_AT_RISK,
         "unread_announcements": (
@@ -1857,9 +1858,11 @@ def admin_template_edit(template_id):
                                  _valid_checklist_daypart(request.form.get("daypart")),
                                  (request.form.get("area") or "All").strip() or "All",
                                  parsed, *_template_schedule())
-        flash("Saved. Lists already started keep their items (history is never "
-              "rewritten); any not started yet — today's included — use the new "
-              "version.")
+        period = {"weekly": "week", "monthly": "month"}.get(
+            shift_db.template_with_items(template_id)[0]["frequency"], "day")
+        flash(f"Saved. A list already started keeps its items (history is never "
+              f"rewritten); the change shows on the next one started — next "
+              f"{period}'s, or this {period}'s if it hasn't been opened yet.")
         return redirect(url_for("shift.admin_templates"))
     return render_template("shift/admin_template_edit.html", template=template,
                            items_text=_items_to_text(items))
