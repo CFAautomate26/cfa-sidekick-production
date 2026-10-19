@@ -27,7 +27,8 @@ the leadership team:
   Template edits show on lists started after the change; a list already
   started keeps its items. Changing a list's frequency takes effect right
   away — the new weekly/monthly list appears for the current week/month —
-  and its scorecard starts fresh (an empty old-frequency list drops off).
+  and its scorecard starts fresh. An old-frequency list — or a retired
+  list's current one — drops off if nothing was checked on it yet.
   Opening the app on a closed Sunday doesn't start the week's lists (or a
   month's on a month-end Sunday) — they'd be due with no open day left. History shows a weekly or
   monthly list under the day each item was actually checked, Operator

@@ -881,9 +881,9 @@ def runs_for_date(run_date: str) -> list[dict]:
     monthly runs whose period contains it — with progress counts, ordered
     daily (by daypart) then weekly then monthly. "scheduled" is False for a
     run whose list was since retired or moved to another frequency; such a
-    weekly/monthly run drops out of its current period while nothing on it
-    is checked — it would otherwise linger (and nag on Today) for the rest
-    of the period. Past periods always show as they were."""
+    run drops out of its current day/week/month while nothing on it is
+    checked — the list no longer owes that period, and it would otherwise
+    linger (and nag on Today). Past periods always show as they were."""
     daypart_order = {d: i for i, d in enumerate(["allday"] + DAYPARTS)}
     freq_order = {f: i for i, f in enumerate(FREQUENCIES)}
     today = today_local()
@@ -912,8 +912,7 @@ def runs_for_date(run_date: str) -> list[dict]:
         run = _decorate_run(dict(row), today)
         run["scheduled"] = bool(run["active"]) and (
             run["frequency"] == run.pop("template_frequency"))
-        if (run["scheduled"] or run["frequency"] == "daily" or run["done"]
-                or not run["is_current"]):
+        if run["scheduled"] or run["done"] or not run["is_current"]:
             runs.append(run)
     runs.sort(key=lambda r: (freq_order.get(r["frequency"], 9),
                              daypart_order.get(r["daypart"], 99), r["sort"], r["id"]))
@@ -1132,7 +1131,7 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
                 "periods": len(rows),
                 "pct": round(sum(r["done"] for r in rows) / total * 100) if total else 0,
                 "complete": sum(1 for r in rows if r["complete"]),
-                "verified": sum(1 for r in rows if r["verified"]),
+                "verified": sum(1 for r in rows if r["verified"] and r["checkable"]),
                 "verified_of": sum(1 for r in rows if r["checkable"]),
                 "not_opened": sum(1 for r in rows if not r["opened"]),
             }
@@ -2925,6 +2924,9 @@ def session_epoch() -> str:
 def export_json() -> str:
     payload: dict = {"exported_at": now_stamp(), "format": 1}
     with closing(connect()) as conn:
+        since = conn.execute(
+            "SELECT value FROM meta WHERE key='manager_check_since'").fetchone()
+        payload["meta"] = {"manager_check_since": since["value"] if since else None}
         # SELECTs run in autocommit by default; an explicit transaction makes
         # the whole export one consistent snapshot (WAL gives repeatable
         # reads), so a write landing mid-export can't orphan child rows.
@@ -2960,6 +2962,10 @@ def import_json(raw: str) -> str | None:
         return "That file is not a CFA Sidekick shift-app backup."
 
     # Validate shape completely before any destructive statement runs.
+    meta = payload.get("meta", {})
+    if not isinstance(meta, dict) or not all(
+            isinstance(v, (str, type(None))) for v in meta.values()):
+        return "Backup section 'meta' is malformed."
     for table in EXPORT_TABLES + ["leaders"]:
         rows = payload.get(table, [])
         if not isinstance(rows, list):
@@ -3027,13 +3033,21 @@ def import_json(raw: str) -> str | None:
                         _seed_cleaning(conn)
                     # Lists restored without schedule history get a baseline,
                     # and runs from before the Manager check existed don't
-                    # count against it.
+                    # count against it: the backup says since when (older
+                    # backups predate the button entirely).
                     _seed_schedule_log(conn)
                     runs = payload.get("checklist_runs", [])
-                    if runs and not any("verified_at" in row for row in runs):
+                    if "manager_check_since" in meta:
+                        since = meta["manager_check_since"]
+                    elif runs and not any("verified_at" in row for row in runs):
+                        since = today_local()
+                    else:
+                        since = None
+                    conn.execute("DELETE FROM meta WHERE key='manager_check_since'")
+                    if since:
                         conn.execute(
-                            "INSERT OR IGNORE INTO meta (key, value) "
-                            "VALUES ('manager_check_since', ?)", (today_local(),))
+                            "INSERT INTO meta (key, value) "
+                            "VALUES ('manager_check_since', ?)", (since,))
                     # A restore may renumber leader ids; bump the session
                     # epoch so every leader's 30-day cookie must re-login
                     # instead of silently attaching to a different leader.

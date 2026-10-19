@@ -791,7 +791,7 @@ def test_checklist_runs_survive_export_import(isolated_db):
         del t["frequency"], t["due_weekday"]
     for r in payload["checklist_runs"]:
         del r["frequency"], r["owner"], r["verified_by"], r["verified_at"]
-    del payload["checklist_schedule_log"]
+    del payload["checklist_schedule_log"], payload["meta"]
     assert shift_db.import_json(json.dumps(payload)) is None
     assert all(t["frequency"] == "daily" for t in shift_db.all_templates())
     with shift_db.closing(shift_db.connect()) as conn:     # no Manager check back then
@@ -911,6 +911,19 @@ def test_retired_period_list_drops_off_until_worked(isolated_db):
     assert names == {"Dining Room & Washrooms — Weekly": False}  # empty one gone; work kept
 
 
+def test_retired_daily_list_leaves_today_unless_started(isolated_db):
+    today = shift_db.today_local()
+    _do(today, "FOH Opening", 1)
+    shift_db.ensure_runs_for_date(today)
+    ids = {t["name"]: t["id"] for t in shift_db.all_templates()}
+    for name in ("FOH Opening", "BOH Opening"):
+        shift_db.set_template_active(ids[name], False)
+    names = {r["name"]: r["scheduled"] for r in shift_db.runs_for_date(today)}
+    assert names.get("FOH Opening") is False and "BOH Opening" not in names
+    shift_db.set_template_active(ids["BOH Opening"], True)     # the run was kept
+    assert "BOH Opening" in {r["name"] for r in shift_db.runs_for_date(today)}
+
+
 def test_off_schedule_period_runs(isolated_db, monkeypatch):
     _do("2026-10-06", "Drive Thru — Weekly", 0)            # a missed past week
     _do("2026-10-20", "Drive Thru — Weekly", 0)            # this week, nothing yet
@@ -1028,18 +1041,29 @@ def test_schedule_log_decides_what_a_list_owed(isolated_db, monkeypatch):
     assert [(h["start"], h["complete"]) for h in card["history"]] == [("2026-12-01", True)]
 
 
-def test_manager_checks_count_from_when_the_button_arrived(isolated_db):
+def test_manager_checks_count_from_when_the_button_arrived(isolated_db, tmp_path,
+                                                         monkeypatch):
     with shift_db.closing(shift_db.connect()) as conn, conn:
         conn.execute("INSERT INTO meta (key, value) VALUES ('manager_check_since', "
                      "'2026-10-15')")
     name = "Sanitizer & spindles — 6:30 / 8:30"
-    for day in ("2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15"):
+    _do("2026-10-12", name, verify=True)                   # back-filled: not counted
+    for day in ("2026-10-13", "2026-10-14", "2026-10-15"):
         _do(day, name)
     for day in ("2026-10-16", "2026-10-17"):
         _do(day, name, verify=True)
-    card = next(c for c in shift_db.checklist_scorecard(today="2026-10-19")
-                if c["name"] == name)
-    assert (card["window"]["verified"], card["window"]["verified_of"]) == (2, 3)
+
+    def checks():
+        card = next(c for c in shift_db.checklist_scorecard(today="2026-10-19")
+                    if c["name"] == name)
+        return card["window"]["verified"], card["window"]["verified_of"]
+    assert checks() == (2, 3)
+    # A backup carries the date, even onto a brand-new database.
+    raw = shift_db.export_json()
+    monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "fresh.db"))
+    shift_db.init_db()
+    assert shift_db.import_json(raw) is None
+    assert checks() == (2, 3)
 
 
 def test_a_repeat_check_keeps_the_first_stamp(isolated_db, monkeypatch):
