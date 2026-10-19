@@ -1699,8 +1699,9 @@ def history():
         run.update(total=summary["total"], done=summary["done"])
         runs.append((run, items))
     # A weekly/monthly list spans many days: it shows under each day its
-    # items were checked (an Operator correction included), with just those.
-    for run_id in shift_db.period_runs_worked_on(day):
+    # items were checked, with just those — as does an Operator correction
+    # to a past list, under the day it was made.
+    for run_id in shift_db.runs_worked_on(day):
         run, items = shift_db.run_with_items(run_id)
         run.update(total=len(items), done=sum(1 for i in items if i["done"]))
         runs.append((run, [i for i in items if i["done"]
@@ -1856,8 +1857,9 @@ def admin_template_edit(template_id):
                                  _valid_checklist_daypart(request.form.get("daypart")),
                                  (request.form.get("area") or "All").strip() or "All",
                                  parsed, *_template_schedule())
-        flash("Saved. Past days keep their history; the change starts tomorrow "
-              "(or the next day that hasn't been opened yet).")
+        flash("Saved. Lists already started keep their items (history is never "
+              "rewritten); any not started yet — today's included — use the new "
+              "version.")
         return redirect(url_for("shift.admin_templates"))
     return render_template("shift/admin_template_edit.html", template=template,
                            items_text=_items_to_text(items))

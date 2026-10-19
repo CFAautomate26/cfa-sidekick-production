@@ -24,10 +24,15 @@ the leadership team:
   **Manager check** (a leader taps "I checked this station" — stamped).
   A list **locks when its day/week/month ends** so the numbers reflect
   what was really done; the Operator master login can still correct one.
-  Changing a list's frequency (Admin → Edit checklist templates) takes
-  effect right away — the new weekly/monthly list appears for the current
-  week/month — and its scorecard starts fresh (the old-frequency run
-  drops off if nothing was checked on it). History shows a weekly or
+  Template edits reach any list nobody has started yet (nothing checked,
+  no owner or manager check), today's included; started lists keep their
+  items. Changing a list's frequency takes effect right away — the new
+  weekly/monthly list appears for the current week/month — and its
+  scorecard starts fresh; an untouched old-frequency list is dropped, as
+  is an untouched current list when a list is retired (a list taken off
+  the schedule before its period ended owes nothing for it). Opening the
+  app on a closed Sunday doesn't start the week's lists (or a month's on
+  a month-end Sunday) — they'd be due with no open day left. History shows a weekly or
   monthly list under the day each item was actually checked, Operator
   corrections included.
 - **Checklist scorecard** (Checklists → 📊, or More) — for every active

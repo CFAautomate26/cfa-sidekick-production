@@ -372,6 +372,14 @@ def test_period_lists_show_on_the_day_each_item_was_done(client, monkeypatch):
     page = client.get("/shift/history?date=2026-10-27").data.decode()
     from html import escape
     assert escape(items[2]["label"]) in page and "Week of Oct 19: 3/" in page
+    daily = next(r for r in shift_db.runs_for_date("2026-10-19")
+                 if r["name"] == "Drive Thru — Daily")
+    _, ditems = shift_db.run_with_items(daily["id"])
+    client.post(f"/shift/item/{ditems[0]['id']}/toggle", data={"done": "1"})  # corrects 10-19
+    page = client.get("/shift/history?date=2026-10-27").data.decode()
+    assert escape(ditems[0]["label"]) in page and "2026-10-19: 1/" in page
+    page = client.get("/shift/history?date=2026-10-19").data.decode()
+    assert "Operator · 10-27 10:00" in page                  # dated, not passed off as 10-19
 
 
 def test_toggle_item_form_flow(client):

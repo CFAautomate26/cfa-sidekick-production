@@ -923,6 +923,93 @@ def test_off_schedule_period_runs(isolated_db, monkeypatch):
             if r["name"] == "Drive Thru — Weekly"] == [past[0]["id"]]
 
 
+def test_closed_sunday_starts_no_spent_period(isolated_db):
+    weekly = lambda d: [r for r in shift_db.runs_for_date(d) if r["frequency"] == "weekly"]
+    shift_db.ensure_runs_for_date("2026-10-11")            # Sunday: the week is spent
+    assert weekly("2026-10-11") == []
+    shift_db.ensure_runs_for_date("2027-01-31")            # Sunday the 31st
+    assert not [r for r in shift_db.runs_for_date("2027-01-31")
+                if r["frequency"] == "monthly"]
+    shift_db.ensure_runs_for_date("2027-01-30")            # Saturday: still open
+    assert len([r for r in shift_db.runs_for_date("2027-01-30")
+                if r["frequency"] == "monthly"]) == 2
+    # A list set up on a Sunday starts with the next week, not a 0% one.
+    tid = shift_db.create_template("Patio", "allday", "Patio", [("Sweep", False)],
+                                   frequency="weekly")
+    shift_db.ensure_runs_for_date("2026-10-18")            # Sunday
+    for day in ("2026-10-19", "2026-10-24"):
+        _do(day, "Patio")
+    card = next(c for c in shift_db.checklist_scorecard(today="2026-10-26")
+                if c["id"] == tid)
+    assert [(h["start"], h["complete"]) for h in card["history"]] == [("2026-10-19", True)]
+
+
+def test_edits_and_schedule_changes_settle_untouched_runs(isolated_db, monkeypatch):
+    monkeypatch.setattr(shift_db, "today_local", lambda: "2026-10-21")
+    tid = shift_db.create_template("Patio", "allday", "Patio", [("Sweep", False)],
+                                   frequency="weekly")
+    started = shift_db.create_template("Lobby", "allday", "Lobby", [("Dust", False)])
+    shift_db.ensure_runs_for_date("2026-10-21")
+    _do("2026-10-21", "Lobby", 1)
+
+    def runs(t):
+        with shift_db.closing(shift_db.connect()) as conn:
+            return [(r["frequency"], r["run_date"], r["n"]) for r in conn.execute(
+                "SELECT r.frequency, r.run_date, COUNT(i.id) AS n FROM checklist_runs r "
+                "LEFT JOIN checklist_run_items i ON i.run_id = r.id "
+                "WHERE r.template_id=? GROUP BY r.id ORDER BY r.id", (t,))]
+
+    # An edit reaches the untouched current list, but not a started one.
+    shift_db.update_template(tid, "Patio", "allday", "Patio",
+                             [("Sweep", False), ("Hose", False)], frequency="weekly")
+    shift_db.update_template(started, "Lobby", "allday", "Lobby",
+                             [("Dust", False), ("Mop", False)])
+    assert runs(tid) == [("weekly", "2026-10-19", 2)]
+    assert runs(started) == [("daily", "2026-10-21", 1)]
+    # A mistaken switch to monthly and back leaves no stub behind.
+    shift_db.update_template(tid, "Patio", "allday", "Patio",
+                             [("Sweep", False), ("Hose", False)], frequency="monthly")
+    shift_db.ensure_runs_for_date("2026-10-21")
+    shift_db.update_template(tid, "Patio", "allday", "Patio",
+                             [("Sweep", False), ("Hose", False)], frequency="weekly")
+    shift_db.ensure_runs_for_date("2026-10-21")
+    assert [r[0] for r in runs(tid)] == ["weekly"]
+    # Retiring drops untouched current runs only.
+    shift_db.set_template_active(tid, False)
+    shift_db.set_template_active(started, False)
+    assert runs(tid) == [] and runs(started) == [("daily", "2026-10-21", 1)]
+
+
+def test_a_repeat_check_keeps_the_first_stamp(isolated_db, monkeypatch):
+    from datetime import datetime
+    run = _do("2026-10-19", "Drive Thru — Weekly", 0)
+    _, items = shift_db.run_with_items(run["id"])
+    monkeypatch.setattr(shift_db, "now_local", lambda: datetime(2026, 10, 19, 13, 0))
+    assert shift_db.set_item_done(items[0]["id"], True, "Maya")
+    monkeypatch.setattr(shift_db, "now_local", lambda: datetime(2026, 10, 21, 15, 0))
+    assert shift_db.set_item_done(items[0]["id"], True, "Ben")   # stale screen
+    item = shift_db.run_with_items(run["id"])[1][0]
+    assert (item["done_by"], item["done_at"]) == ("Maya", "2026-10-19 13:00")
+    assert not shift_db.set_item_done(999999, True, "Ben")
+
+
+def test_weekly_runs_are_evidence_too(isolated_db):
+    """Even with no daily lists at all, a week another weekly list ran
+    proves the app was used: a retired weekly list skips it."""
+    for t in shift_db.all_templates():
+        if t["frequency"] == "daily":
+            shift_db.set_template_active(t["id"], False)
+    ids = {t["name"]: t["id"] for t in shift_db.all_templates()}
+    _do("2026-09-28", "Drive Thru — Weekly")
+    shift_db.set_template_active(ids["Drive Thru — Weekly"], False)
+    _do("2026-10-05", "Dining Room & Washrooms — Weekly")   # app used that week
+    shift_db.set_template_active(ids["Drive Thru — Weekly"], True)
+    _do("2026-10-12", "Drive Thru — Weekly")
+    card = next(c for c in shift_db.checklist_scorecard(today="2026-10-19")
+                if c["name"] == "Drive Thru — Weekly")
+    assert [h["start"] for h in card["history"]] == ["2026-10-12", "2026-09-28"]
+
+
 def test_closed_day_cannot_be_a_due_day(isolated_db):
     tid = shift_db.create_template("Patio", "allday", "Patio", [("Sweep", False)],
                                    frequency="weekly", due_weekday=6)   # Sunday

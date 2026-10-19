@@ -778,15 +778,31 @@ def run_is_current(frequency: str, run_date: str, today: str | None = None) -> b
     return period_start(frequency, today) == run_date
 
 
+def _open_day_left(frequency: str, day: str) -> bool:
+    """Is any day from `day` to the end of its period an open day?"""
+    d = date.fromisoformat(day)
+    end = date.fromisoformat(period_end(frequency, period_start(frequency, day)))
+    while d <= end:
+        if d.weekday() not in CLOSED_WEEKDAYS:
+            return True
+        d += timedelta(days=1)
+    return False
+
+
 def ensure_runs_for_date(run_date: str) -> None:
     """Instantiate a run (with snapshotted items) for every active template
-    that doesn't have one for the period containing run_date yet."""
+    that doesn't have one for the period containing run_date yet. A weekly
+    or monthly run isn't started once no open day is left in its period
+    (opening the app on a closed Sunday would otherwise charge the
+    scorecard a whole week nobody could work)."""
     with closing(connect()) as conn, conn:
         templates = conn.execute(
             "SELECT id, frequency FROM checklist_templates WHERE active=1"
         ).fetchall()
         for t in templates:
             frequency = t["frequency"] if t["frequency"] in FREQUENCIES else "daily"
+            if frequency != "daily" and not _open_day_left(frequency, run_date):
+                continue
             start = period_start(frequency, run_date)
             # INSERT OR IGNORE + UNIQUE(template_id, frequency, run_date)
             # makes concurrent first-loads race-safe.
@@ -859,19 +875,20 @@ def runs_for_date(run_date: str) -> list[dict]:
     return runs
 
 
-def period_runs_worked_on(day: str) -> list[int]:
-    """Weekly/monthly runs with an item checked during business day `day`
-    (4am to 4am), oldest period first — for History."""
+def runs_worked_on(day: str) -> list[int]:
+    """Runs other than `day`'s own daily ones with an item checked during
+    business day `day` (4am to 4am) — weekly/monthly work and Operator
+    corrections to past lists — oldest period first, for History."""
     nxt = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
     with closing(connect()) as conn:
         return [r["id"] for r in conn.execute(
             """
             SELECT DISTINCT r.id, r.run_date FROM checklist_runs r
             JOIN checklist_run_items i ON i.run_id = r.id
-            WHERE r.frequency != 'daily' AND i.done = 1
+            WHERE NOT (r.frequency = 'daily' AND r.run_date = ?) AND i.done = 1
               AND i.done_at >= ? AND i.done_at < ?
             ORDER BY r.run_date, r.id
-            """, (f"{day} 04:00", f"{nxt} 04:00")).fetchall()]
+            """, (day, f"{day} 04:00", f"{nxt} 04:00")).fetchall()]
 
 
 def run_with_items(run_id: int) -> tuple[dict | None, list[dict]]:
@@ -895,13 +912,18 @@ def run_with_items(run_id: int) -> tuple[dict | None, list[dict]]:
 
 
 def set_item_done(item_id: int, done: bool, by: str) -> bool:
-    """Check or uncheck one run item. Returns False if the item is unknown."""
+    """Check or uncheck one run item. A no-op when it's already in that
+    state, so a stale screen can't restamp someone else's earlier check.
+    Returns False if the item is unknown."""
     with closing(connect()) as conn, conn:
-        cur = conn.execute(
-            "UPDATE checklist_run_items SET done=?, done_by=?, done_at=? WHERE id=?",
-            (1 if done else 0, by if done else None, now_stamp() if done else None, item_id),
+        conn.execute(
+            "UPDATE checklist_run_items SET done=?, done_by=?, done_at=? "
+            "WHERE id=? AND done != ?",
+            (1 if done else 0, by if done else None, now_stamp() if done else None,
+             item_id, 1 if done else 0),
         )
-        return cur.rowcount > 0
+        return conn.execute("SELECT 1 FROM checklist_run_items WHERE id=?",
+                            (item_id,)).fetchone() is not None
 
 
 def set_run_owner(run_id: int, owner: str) -> bool:
@@ -988,11 +1010,14 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
         ).fetchall()]
     by_key = {(r["template_id"], r["frequency"], r["run_date"]): r for r in runs}
     app_days = sorted({r["run_date"] for r in runs if r["frequency"] == "daily"})
+    period_runs = {(r["frequency"], r["run_date"]) for r in runs}
 
     def app_used(frequency: str, start: str) -> bool:
-        """Did anyone open the app during this period?"""
+        """Did anyone open the app during this period? (Any list's daily run
+        in it, or another list's run for the same week/month.)"""
         end = period_end(frequency, start)
-        return any(start <= d <= end for d in app_days)
+        return ((frequency, start) in period_runs
+                or any(start <= d <= end for d in app_days))
 
     cards = []
     for t in templates:
@@ -1106,6 +1131,38 @@ def _clean_schedule(frequency: str, due_weekday) -> tuple[str, int | None]:
     return frequency, due_weekday
 
 
+def _settle_untouched_current_runs(conn, template_id: int,
+                                   frequency: str | None) -> None:
+    """A list's runs for the current day/week/month that nobody has touched
+    (nothing checked, no owner, no manager check): ones at `frequency` are
+    re-made from the template's items, so an edit reaches a list nobody has
+    started yet; the rest — all of them when the list is retired — are
+    dropped: a list taken off a schedule before the period ended owes
+    nothing for it, and an empty stub would later score as a miss."""
+    today = today_local()
+    items = conn.execute(
+        "SELECT label, critical, sort FROM checklist_template_items "
+        "WHERE template_id=? ORDER BY sort, id", (template_id,)).fetchall()
+    for r in conn.execute(
+            """
+            SELECT r.id, r.frequency, r.run_date FROM checklist_runs r
+            WHERE r.template_id = ? AND r.owner IS NULL AND r.verified_at IS NULL
+              AND NOT EXISTS (SELECT 1 FROM checklist_run_items i
+                              WHERE i.run_id = r.id AND i.done = 1)
+            """, (template_id,)).fetchall():
+        run_freq = r["frequency"] if r["frequency"] in FREQUENCIES else "daily"
+        if r["run_date"] != period_start(run_freq, today):
+            continue
+        if r["frequency"] != frequency:
+            conn.execute("DELETE FROM checklist_runs WHERE id=?", (r["id"],))
+            continue
+        conn.execute("DELETE FROM checklist_run_items WHERE run_id=?", (r["id"],))
+        conn.executemany(
+            "INSERT INTO checklist_run_items (run_id, label, critical, sort) "
+            "VALUES (?,?,?,?)",
+            [(r["id"], i["label"], i["critical"], i["sort"]) for i in items])
+
+
 def create_template(name: str, daypart: str, area: str,
                     items: list[tuple[str, bool]], frequency: str = "daily",
                     due_weekday: int | None = None) -> int:
@@ -1133,8 +1190,9 @@ def update_template(template_id: int, name: str, daypart: str, area: str,
                     items: list[tuple[str, bool]], frequency: str = "daily",
                     due_weekday: int | None = None) -> None:
     """Replace a template's fields and item list ((label, critical) pairs).
-    Existing runs keep their snapshotted items (and frequency); only future
-    runs pick up the change."""
+    Runs already started keep their snapshotted items (and frequency), so
+    history is never rewritten; untouched current ones follow the change
+    (see _settle_untouched_current_runs)."""
     frequency, due_weekday = _clean_schedule(frequency, due_weekday)
     with closing(connect()) as conn, conn:
         conn.execute(
@@ -1151,6 +1209,7 @@ def update_template(template_id: int, name: str, daypart: str, area: str,
             [(template_id, label, 1 if critical else 0, i)
              for i, (label, critical) in enumerate(items)],
         )
+        _settle_untouched_current_runs(conn, template_id, frequency)
 
 
 def set_template_active(template_id: int, active: bool) -> None:
@@ -1159,6 +1218,8 @@ def set_template_active(template_id: int, active: bool) -> None:
             "UPDATE checklist_templates SET active=? WHERE id=?",
             (1 if active else 0, template_id),
         )
+        if not active:
+            _settle_untouched_current_runs(conn, template_id, None)
 
 
 # ---------------------------------------------------------------------------
