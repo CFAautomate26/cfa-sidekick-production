@@ -244,9 +244,9 @@ def test_today_shows_all_day_cleaning_lists(client):
 
 
 def test_due_period_runs_rules():
-    def run(freq, due=None, done=0, total=4, end="2026-10-25", active=1):
+    def run(freq, due=None, done=0, total=4, end="2026-10-25", scheduled=True):
         return {"frequency": freq, "due_weekday": due, "done": done, "total": total,
-                "period_end": end, "name": f"{freq}-{due}", "active": active}
+                "period_end": end, "name": f"{freq}-{due}", "scheduled": scheduled}
     # 2026-10-21 is a Wednesday (weekday 2)
     due = shift_app._due_period_runs([
         run("weekly", due=1),            # Tuesday → overdue
@@ -254,7 +254,7 @@ def test_due_period_runs_rules():
         run("weekly", due=4),            # Friday → not yet
         run("weekly"),                   # no day → from Saturday
         run("weekly", due=1, done=4),    # finished → never
-        run("weekly", due=0, done=1, active=0),  # retired → never nags
+        run("weekly", due=0, done=1, scheduled=False),  # retired/moved → never nags
         run("monthly", end="2026-10-31"),  # 10 days left → not yet
         run("daily"),
     ], "2026-10-21")
@@ -367,6 +367,11 @@ def test_period_lists_show_on_the_day_each_item_was_done(client, monkeypatch):
     assert items[1]["label"] in tuesday and items[0]["label"] not in tuesday
     wednesday = client.get("/shift/history?date=2026-10-21").data.decode()
     assert "Drive Thru — Weekly" not in wednesday
+    clock["now"] = datetime(2026, 10, 27, 10, 0)                    # next week:
+    client.post(f"/shift/item/{items[2]['id']}/toggle", data={"done": "1"})  # a correction
+    page = client.get("/shift/history?date=2026-10-27").data.decode()
+    from html import escape
+    assert escape(items[2]["label"]) in page and "Week of Oct 19: 3/" in page
 
 
 def test_toggle_item_form_flow(client):

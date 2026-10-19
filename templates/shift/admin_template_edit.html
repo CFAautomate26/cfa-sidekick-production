@@ -24,9 +24,9 @@ and monthly lists run the calendar month; each locks when its period ends.</div>
       <label class="field" for="t-due">Weekly: assigned day</label>
       <select id="t-due" name="due_weekday">
         <option value="">Any day (due by the weekend)</option>
-        {% for d in WEEKDAY_LABELS %}
+        {% for d in WEEKDAY_LABELS %}{% if loop.index0 not in CLOSED_WEEKDAYS %}
         <option value="{{ loop.index0 }}" {{ 'selected' if template and template.due_weekday == loop.index0 }}>{{ d }}</option>
-        {% endfor %}
+        {% endif %}{% endfor %}
       </select>
     </div>
   </div>

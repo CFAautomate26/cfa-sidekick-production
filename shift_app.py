@@ -158,6 +158,7 @@ def inject_shift_globals():
         "CHECKLIST_DAYPARTS": shift_db.CHECKLIST_DAYPARTS,
         "FREQUENCY_LABELS": shift_db.FREQUENCY_LABELS,
         "WEEKDAY_LABELS": shift_db.WEEKDAY_LABELS,
+        "CLOSED_WEEKDAYS": shift_db.CLOSED_WEEKDAYS,
         "NOTE_CATEGORIES": shift_db.NOTE_CATEGORIES,
         "data_at_risk": DATA_AT_RISK,
         "unread_announcements": (
@@ -335,7 +336,7 @@ def _due_period_runs(runs: list[dict], day: str) -> list[dict]:
     weekday = date.fromisoformat(day).weekday()
     due = []
     for r in runs:
-        if (r["frequency"] == "daily" or not r["active"]
+        if (r["frequency"] == "daily" or not r["scheduled"]
                 or (r["total"] and r["done"] == r["total"])):
             continue
         if r["frequency"] == "weekly":
@@ -1692,16 +1693,18 @@ def history():
     day = _valid_date(request.args.get("date"))
     runs = []
     for summary in shift_db.runs_for_date(day):
+        if summary["frequency"] != "daily":
+            continue
         run, items = shift_db.run_with_items(summary["id"])
-        if run["frequency"] != "daily":
-            # A weekly/monthly list spans many days: show only what was
-            # checked on this one, under the day it was actually done.
-            items = [i for i in items if i["done"]
-                     and shift_db.business_date(i["done_at"]) == day]
-            if not items:
-                continue
         run.update(total=summary["total"], done=summary["done"])
         runs.append((run, items))
+    # A weekly/monthly list spans many days: it shows under each day its
+    # items were checked (an Operator correction included), with just those.
+    for run_id in shift_db.period_runs_worked_on(day):
+        run, items = shift_db.run_with_items(run_id)
+        run.update(total=len(items), done=sum(1 for i in items if i["done"]))
+        runs.append((run, [i for i in items if i["done"]
+                           and shift_db.business_date(i["done_at"]) == day]))
     lineups = {dp: shift_db.lineup_for(day, dp) for dp in shift_db.DAYPARTS}
     lineups = {dp: v for dp, v in lineups.items() if v}
     return render_template(
