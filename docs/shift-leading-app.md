@@ -11,6 +11,25 @@ the leadership team:
   item stamps *who* checked it and *when*. Items marked **critical**
   (food-safety / cash) are flagged red until done. Templates are editable in
   the admin area; past days keep their history exactly as it happened.
+- **Station cleaning lists** — the posted wall sheets, built in
+  (`shift_cleaning.py`, seeded once): Dining Room & Washrooms and Drive
+  Thru (daily, weekly, and monthly leadership-audit lists), the Food
+  Safety Daily Commitment as AM and PM lists, and the sanitizer-change /
+  spindle-cleaning times (10:30–8:30, every two hours) split across the
+  dayparts. Lists can be **daily, weekly (Mon–Sun, with an optional
+  assigned day), or monthly**; all-day lists show on Today all day, and a
+  weekly/monthly list appears on Today when it's due (from its assigned
+  day — the weekend if none — or the month's last week) until it's done.
+  Each list carries the paper sheet's **Owner** (roster name) and
+  **Manager check** (a leader taps "I checked this station" — stamped).
+  A list **locks when its day/week/month ends** so the numbers reflect
+  what was really done; the Operator master login can still correct one.
+- **Checklist scorecard** (Checklists → 📊, or More) — for every active
+  list: completion % over the last 7 and 28 days (daily) or 4 weeks / 3
+  months, how many periods were fully done, the current streak, how many
+  were manager-checked, days nobody opened, a color strip per period, and
+  the items most often missed. Counting starts at a list's first day; a
+  day nobody opened counts as nothing done.
 - **Lineup / setup sheet** — assign team members to positions per daypart,
   with one-tap **copy from yesterday** or **copy from the previous daypart**,
   and name autosuggest from the roster.

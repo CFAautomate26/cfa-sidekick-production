@@ -5,7 +5,9 @@
 {% set crit_left = items | selectattr('critical') | rejectattr('done') | list | length %}
 <div data-progress>
   <h1 class="page">{{ run.name }}</h1>
-  <div class="sub">{{ run.run_date }} · {{ DAYPART_LABELS[run.daypart] }} · {{ run.area }}</div>
+  <div class="sub">{{ run.period_label if run.frequency != 'daily' else run.run_date }}
+    · {{ FREQUENCY_LABELS[run.frequency] }}{% if run.frequency == 'daily' %} · {{ DAYPART_LABELS[run.daypart] }}{% endif %}
+    · {{ run.area }}</div>
   <div class="bar {{ 'full' if done_count == items|length and items }}">
     <span style="width: {{ (done_count / items|length * 100) | round if items else 0 }}%"></span>
   </div>
@@ -15,8 +17,51 @@
   </div>
 </div>
 
+{% if not can_edit %}
+<div class="flash">🔒 This list closed when its {{ 'day' if run.frequency == 'daily' else ('week' if run.frequency == 'weekly' else 'month') }}
+ended, so the scorecard shows what was actually done. Only the Operator can correct it.</div>
+{% elif not run.is_current %}
+<div class="flash">This list's period has ended — you're correcting it as the Operator.</div>
+{% endif %}
+
+<div class="card" style="margin-top:12px;">
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <span style="font-weight:700; font-size:14px; flex:0 0 auto;">Owner</span>
+    {% if can_edit %}
+    <form method="post" action="{{ url_for('shift.run_owner', run_id=run.id) }}" class="inline-form" style="flex:1; min-width:200px;">
+      <input type="text" name="owner" value="{{ run.owner or '' }}" list="roster-names"
+             autocomplete="off" placeholder="Who owns this station?">
+      <button class="pill small" type="submit">Save</button>
+    </form>
+    <datalist id="roster-names">{% for n in roster %}<option value="{{ n }}">{% endfor %}</datalist>
+    {% else %}
+    <span style="font-size:14px;">{{ run.owner or '—' }}</span>
+    {% endif %}
+  </div>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+    <span style="font-weight:700; font-size:14px;">Manager check</span>
+    {% if run.verified_by %}
+      <span style="font-size:14px;">✓ {{ run.verified_by }} · {{ run.verified_at[5:] }}</span>
+      {% if can_edit %}
+      <form method="post" action="{{ url_for('shift.run_verify', run_id=run.id) }}">
+        <input type="hidden" name="verified" value="0">
+        <button class="pill small ghost" type="submit">Undo</button>
+      </form>
+      {% endif %}
+    {% elif can_edit %}
+      <form method="post" action="{{ url_for('shift.run_verify', run_id=run.id) }}">
+        <input type="hidden" name="verified" value="1">
+        <button class="pill small primary" type="submit">✓ I checked this station</button>
+      </form>
+    {% else %}
+      <span style="font-size:14px; color:var(--soft);">not checked</span>
+    {% endif %}
+  </div>
+</div>
+
 <div class="card" style="margin-top:12px; padding: 2px 14px;">
   {% for i in items %}
+  {% if can_edit %}
   <form class="item" method="post" action="{{ url_for('shift.toggle_item', item_id=i.id) }}" id="item-{{ i.id }}">
     <input type="hidden" name="done" value="{{ '0' if i.done else '1' }}">
     <button type="submit" class="itemrow {{ 'done' if i.done }}">
@@ -26,8 +71,18 @@
       </span>
     </button>
   </form>
+  {% else %}
+  <div class="itemrow {{ 'done' if i.done }}" id="item-{{ i.id }}"
+       style="display:flex; align-items:flex-start; gap:12px; padding:13px 2px; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
+    <span class="checkmark">✓</span>
+    <span class="label">{% if i.critical %}<span class="crit">● </span>{% endif %}{{ i.label }}
+      <span class="meta">{% if i.done %}done by {{ i.done_by }} · {{ i.done_at[5:] }}{% else %}not done{% endif %}</span>
+    </span>
+  </div>
+  {% endif %}
   {% endfor %}
 </div>
-<div class="sub">Tap a row to check it off — tap again to undo. Every check is
-stamped with your name.</div>
+<div class="sub">{% if can_edit %}Tap a row to check it off — tap again to undo. Every
+check is stamped with your name.{% endif %}
+<a href="{{ url_for('shift.checklist_scorecard') }}">📊 How consistently is this done?</a></div>
 {% endblock %}

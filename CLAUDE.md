@@ -20,7 +20,10 @@ Canada.
 - `app.py` — Flask webhook for GroupMe; OpenAI-backed responses. Team members
   invoke the bot with the `cow:` keyword.
 - `shift_app.py` + `shift_db.py` — the shift leading app at `/shift`
-  (Huddle-style: daily checklists with who-did-what stamps, position
+  (Huddle-style: daily/weekly/monthly checklists with who-did-what stamps,
+  Owner + Manager check, lock-at-period-end, and a consistency scorecard
+  at `/shift/checklists/scorecard` — station cleaning sheets pinned in
+  `shift_cleaning.py`; position
   lineups, goals, shift notes, announcements with read receipts,
   per-leader assigned to-dos under `/shift/todo` (any leader assigns),
   1:1 meeting agendas under `/shift/oneonone` (private to each leader +

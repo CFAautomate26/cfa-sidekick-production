@@ -4,22 +4,34 @@
 <h1 class="page">Checklists</h1>
 <div class="sub">{{ 'Today, ' + day if day == shift_today else day }}</div>
 
-<form method="get" action="{{ url_for('shift.checklists') }}" class="inline-form" style="margin-bottom:14px;">
+<form method="get" action="{{ url_for('shift.checklists') }}" class="inline-form" style="margin-bottom:10px;">
   <input type="date" name="date" value="{{ day }}" max="{{ shift_today }}">
   <button class="pill" type="submit">Go</button>
 </form>
+<a class="pill small" style="display:inline-block; margin-bottom:6px;" href="{{ url_for('shift.checklist_scorecard') }}">📊 Scorecard — how consistently each list gets done →</a>
 
-{% for daypart in DAYPARTS %}
-  {% set day_runs = runs | selectattr('daypart', 'equalto', daypart) | list %}
+{% macro run_card(r) %}
+<a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
+  <h2>{{ r.name }} {% if r.critical_remaining %}<span class="critical-flag">● {{ r.critical_remaining }} critical left</span>{% endif %}</h2>
+  <div class="bar {{ 'full' if r.done == r.total and r.total }}"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
+  <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.area }}{% if r.owner %} · owner {{ r.owner }}{% endif %}{% if r.verified_by %} · ✓ checked by {{ r.verified_by }}{% endif %}</div>
+</a>
+{% endmacro %}
+
+{% set daily = runs | selectattr('frequency', 'equalto', 'daily') | list %}
+{% for daypart in ['allday'] + DAYPARTS %}
+  {% set day_runs = daily | selectattr('daypart', 'equalto', daypart) | list %}
   {% if day_runs %}
   <div class="section-label">{{ DAYPART_LABELS[daypart] }}</div>
-  {% for r in day_runs %}
-  <a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
-    <h2>{{ r.name }} {% if r.critical_remaining %}<span class="critical-flag">● {{ r.critical_remaining }} critical left</span>{% endif %}</h2>
-    <div class="bar {{ 'full' if r.done == r.total and r.total }}"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
-    <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.area }}</div>
-  </a>
-  {% endfor %}
+  {% for r in day_runs %}{{ run_card(r) }}{% endfor %}
+  {% endif %}
+{% endfor %}
+
+{% for freq, heading in [('weekly', 'This week'), ('monthly', 'This month')] %}
+  {% set period_runs = runs | selectattr('frequency', 'equalto', freq) | list %}
+  {% if period_runs %}
+  <div class="section-label">{{ heading }} · {{ period_runs[0].period_label }}</div>
+  {% for r in period_runs %}{{ run_card(r) }}{% endfor %}
   {% endif %}
 {% endfor %}
 

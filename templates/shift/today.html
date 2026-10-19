@@ -61,17 +61,27 @@
 <a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
   <h2>{{ r.name }} {% if r.critical_remaining %}<span class="critical-flag">● {{ r.critical_remaining }} critical left</span>{% endif %}</h2>
   <div class="bar {{ 'full' if r.done == r.total and r.total }}"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
-  <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.area }}</div>
+  <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.area }}{% if r.owner %} · owner {{ r.owner }}{% endif %}{% if r.verified_by %} · ✓ checked by {{ r.verified_by }}{% endif %}</div>
 </a>
 {% else %}
 <div class="empty">No checklists for this daypart. See all of today's under the ✅ tab.</div>
 {% endfor %}
 
-{% set other = runs | rejectattr('daypart', 'equalto', shift_daypart) | list %}
-{% if other %}
+{% if due_runs %}
+<div class="section-label">Weekly &amp; monthly — due</div>
+{% for r in due_runs %}
+<a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
+  <h2>{{ r.name }} <span class="critical-flag">● {{ r.due_note }}</span></h2>
+  <div class="bar"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
+  <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.period_label }}</div>
+</a>
+{% endfor %}
+{% endif %}
+
+{% if other_runs %}
 <div class="section-label">Rest of today</div>
 <div class="card">
-  {% for r in other %}
+  {% for r in other_runs %}
   <div style="display:flex; align-items:center; gap:10px; padding:6px 0;">
     <a href="{{ url_for('shift.run_detail', run_id=r.id) }}" style="flex:1; text-decoration:none; font-weight:700; font-size:14px;">{{ r.name }}</a>
     <span class="progress-note" style="margin:0;">{{ r.done }}/{{ r.total }}</span>

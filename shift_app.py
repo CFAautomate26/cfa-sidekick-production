@@ -155,6 +155,9 @@ def inject_shift_globals():
         "shift_daypart": shift_db.current_daypart(),
         "DAYPARTS": shift_db.DAYPARTS,
         "DAYPART_LABELS": shift_db.DAYPART_LABELS,
+        "CHECKLIST_DAYPARTS": shift_db.CHECKLIST_DAYPARTS,
+        "FREQUENCY_LABELS": shift_db.FREQUENCY_LABELS,
+        "WEEKDAY_LABELS": shift_db.WEEKDAY_LABELS,
         "NOTE_CATEGORIES": shift_db.NOTE_CATEGORIES,
         "data_at_risk": DATA_AT_RISK,
         "unread_announcements": (
@@ -198,6 +201,11 @@ def _valid_date(value: str | None) -> str:
 def _valid_daypart(value: str | None) -> str:
     value = (value or "").strip().lower()
     return value if value in shift_db.DAYPARTS else shift_db.current_daypart()
+
+
+def _valid_checklist_daypart(value: str | None) -> str:
+    value = (value or "").strip().lower()
+    return value if value in shift_db.CHECKLIST_DAYPARTS else shift_db.current_daypart()
 
 
 def _optional_int(value: str | None) -> int | None:
@@ -299,10 +307,12 @@ def today():
                      if not a["acked"]]
     leader_id = session.get("shift_leader_id")
     open_recs, awaiting_recs, _ = shift_db.recovery_feed(resolved_limit=0)
+    daily = [r for r in runs if r["frequency"] == "daily"]
     return render_template(
         "shift/today.html",
-        runs=runs,
-        current_runs=[r for r in runs if r["daypart"] == daypart],
+        current_runs=[r for r in daily if r["daypart"] in (daypart, "allday")],
+        other_runs=[r for r in daily if r["daypart"] not in (daypart, "allday")],
+        due_runs=_due_period_runs(runs, day),
         announcements=announcements,
         lineup=shift_db.lineup_for(day, daypart),
         positions=shift_db.active_positions(),
@@ -318,6 +328,38 @@ def today():
     )
 
 
+def _due_period_runs(runs: list[dict], day: str) -> list[dict]:
+    """Weekly/monthly lists worth a card on Today: unfinished, and due —
+    a weekly list from its assigned day on (the weekend if no day is
+    assigned), a monthly audit in the month's last 7 days."""
+    weekday = date.fromisoformat(day).weekday()
+    due = []
+    for r in runs:
+        if r["frequency"] == "daily" or (r["total"] and r["done"] == r["total"]):
+            continue
+        if r["frequency"] == "weekly":
+            due_day = r["due_weekday"] if r["due_weekday"] is not None else 5
+            if weekday < due_day:
+                continue
+            r["due_note"] = (f"due {shift_db.WEEKDAY_LABELS[due_day]}"
+                             + (" — overdue" if weekday > due_day
+                                and r["due_weekday"] is not None else ""))
+        else:
+            days_left = (date.fromisoformat(r["period_end"])
+                         - date.fromisoformat(day)).days
+            if days_left >= 7:
+                continue
+            r["due_note"] = f"due by {r['period_end'][5:]}"
+        due.append(r)
+    return due
+
+
+def _can_edit_run(run: dict) -> bool:
+    """Lists lock when their period ends, so the scorecard measures what
+    was done on the day; the Operator can still correct a past list."""
+    return run["is_current"] or _is_operator()
+
+
 # ---------------------------------------------------------------------------
 # Checklists
 # ---------------------------------------------------------------------------
@@ -331,13 +373,53 @@ def checklists():
                            runs=shift_db.runs_for_date(day))
 
 
+@shift_bp.route("/checklists/scorecard")
+def checklist_scorecard():
+    cards = shift_db.checklist_scorecard()
+    areas: dict[str, list[dict]] = {}
+    for c in cards:
+        areas.setdefault(c["area"], []).append(c)
+    return render_template("shift/scorecard.html", areas=areas)
+
+
 @shift_bp.route("/checklists/run/<int:run_id>")
 def run_detail(run_id):
     run, items = shift_db.run_with_items(run_id)
     if not run:
         flash("That checklist doesn't exist.")
         return redirect(url_for("shift.checklists"))
-    return render_template("shift/run.html", run=run, items=items)
+    return render_template("shift/run.html", run=run, items=items,
+                           can_edit=_can_edit_run(run),
+                           roster=[m["name"] for m in shift_db.roster()])
+
+
+@shift_bp.route("/checklists/run/<int:run_id>/owner", methods=["POST"])
+def run_owner(run_id):
+    run, _ = shift_db.run_with_items(run_id)
+    if not run:
+        flash("That checklist doesn't exist.")
+        return redirect(url_for("shift.checklists"))
+    if not _can_edit_run(run):
+        flash("That list is closed — its period has ended.")
+    else:
+        shift_db.set_run_owner(run_id, request.form.get("owner", ""))
+    return redirect(url_for("shift.run_detail", run_id=run_id))
+
+
+@shift_bp.route("/checklists/run/<int:run_id>/verify", methods=["POST"])
+def run_verify(run_id):
+    run, _ = shift_db.run_with_items(run_id)
+    if not run:
+        flash("That checklist doesn't exist.")
+        return redirect(url_for("shift.checklists"))
+    verified = request.form.get("verified") == "1"
+    if not _can_edit_run(run):
+        flash("That list is closed — its period has ended.")
+    elif not shift_db.set_run_verified(run_id, verified, current_name()):
+        fresh, _ = shift_db.run_with_items(run_id)
+        flash(f"Already checked by {fresh['verified_by']} — nothing changed."
+              if verified and fresh["verified_by"] else "Nothing to undo.")
+    return redirect(url_for("shift.run_detail", run_id=run_id))
 
 
 @shift_bp.route("/item/<int:item_id>/toggle", methods=["POST"])
@@ -349,6 +431,13 @@ def toggle_item(item_id):
             return {"ok": False}, 404
         flash("That item doesn't exist.")
         return redirect(url_for("shift.checklists"))
+    run, _ = shift_db.run_with_items(run_id)
+    if not _can_edit_run(run):
+        if request.form.get("ajax") == "1":
+            return {"ok": False, "locked": True}, 403
+        flash("That list is closed — its period has ended, so it can't be "
+              "changed (the Operator can correct it).")
+        return redirect(url_for("shift.run_detail", run_id=run_id))
 
     shift_db.set_item_done(item_id, done, current_name())
 
@@ -1717,6 +1806,12 @@ def admin_templates():
                            templates=shift_db.all_templates(include_inactive=True))
 
 
+def _template_schedule() -> tuple[str, int | None]:
+    frequency = request.form.get("frequency") or "daily"
+    due = request.form.get("due_weekday") or ""
+    return frequency, (int(due) if due.isdigit() and len(due) == 1 else None)
+
+
 @shift_bp.route("/admin/templates/new", methods=["GET", "POST"])
 @admin_required
 def admin_template_new():
@@ -1726,9 +1821,9 @@ def admin_template_new():
         if not name or not items:
             flash("A checklist needs a name and at least one item.")
             return redirect(url_for("shift.admin_template_new"))
-        shift_db.create_template(name, _valid_daypart(request.form.get("daypart")),
+        shift_db.create_template(name, _valid_checklist_daypart(request.form.get("daypart")),
                                  (request.form.get("area") or "All").strip() or "All",
-                                 items)
+                                 items, *_template_schedule())
         return redirect(url_for("shift.admin_templates"))
     return render_template("shift/admin_template_edit.html", template=None, items_text="")
 
@@ -1747,9 +1842,9 @@ def admin_template_edit(template_id):
             flash("A checklist needs a name and at least one item.")
             return redirect(url_for("shift.admin_template_edit", template_id=template_id))
         shift_db.update_template(template_id, name,
-                                 _valid_daypart(request.form.get("daypart")),
+                                 _valid_checklist_daypart(request.form.get("daypart")),
                                  (request.form.get("area") or "All").strip() or "All",
-                                 parsed)
+                                 parsed, *_template_schedule())
         flash("Saved. Past days keep their history; the change starts tomorrow "
               "(or the next day that hasn't been opened yet).")
         return redirect(url_for("shift.admin_templates"))
