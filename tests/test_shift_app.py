@@ -244,9 +244,9 @@ def test_today_shows_all_day_cleaning_lists(client):
 
 
 def test_due_period_runs_rules():
-    def run(freq, due=None, done=0, total=4, end="2026-10-25"):
+    def run(freq, due=None, done=0, total=4, end="2026-10-25", active=1):
         return {"frequency": freq, "due_weekday": due, "done": done, "total": total,
-                "period_end": end, "name": f"{freq}-{due}"}
+                "period_end": end, "name": f"{freq}-{due}", "active": active}
     # 2026-10-21 is a Wednesday (weekday 2)
     due = shift_app._due_period_runs([
         run("weekly", due=1),            # Tuesday → overdue
@@ -254,6 +254,7 @@ def test_due_period_runs_rules():
         run("weekly", due=4),            # Friday → not yet
         run("weekly"),                   # no day → from Saturday
         run("weekly", due=1, done=4),    # finished → never
+        run("weekly", due=0, done=1, active=0),  # retired → never nags
         run("monthly", end="2026-10-31"),  # 10 days left → not yet
         run("daily"),
     ], "2026-10-21")
@@ -334,6 +335,38 @@ def test_admin_template_schedule(client):
     assert (t["frequency"], t["due_weekday"]) == ("monthly", None)
     page = client.get("/shift/admin/templates").data.decode()
     assert "Weekly (Mon)" in page or "Monthly" in page
+    resp = client.post(f"/shift/admin/templates/{t['id']}", data={   # "²".isdigit()
+        "name": "Patio deep clean", "daypart": "allday", "area": "Patio",
+        "frequency": "weekly", "due_weekday": "²", "items": "Scrub"})
+    assert resp.status_code == 302
+    t, _ = shift_db.template_with_items(t["id"])
+    assert (t["frequency"], t["due_weekday"]) == ("weekly", None)
+
+
+def test_period_lists_show_on_the_day_each_item_was_done(client, monkeypatch):
+    from datetime import datetime
+    clock = {"now": datetime(2026, 10, 19, 13, 0)}                  # Monday
+    monkeypatch.setattr(shift_db, "now_local", lambda: clock["now"])
+    login_operator(client)
+    client.get("/shift/checklists")
+    run = next(r for r in shift_db.runs_for_date("2026-10-19")
+               if r["name"] == "Drive Thru — Weekly")
+    _, items = shift_db.run_with_items(run["id"])
+    client.post(f"/shift/item/{items[0]['id']}/toggle", data={"done": "1"})
+    clock["now"] = datetime(2026, 10, 21, 1, 30)                    # still Tue's shift
+    client.post(f"/shift/item/{items[1]['id']}/toggle", data={"done": "1"})
+    clock["now"] = datetime(2026, 10, 22, 9, 0)
+    page = client.get(f"/shift/checklists/run/{run['id']}").data.decode()
+    assert "done by Operator · 10-19 13:00" in page                  # date, not just time
+    assert "done by Operator · 10-21 01:30" in page
+    assert 'data-stamp-from="5"' in page
+    monday = client.get("/shift/history?date=2026-10-19").data.decode()
+    assert "Drive Thru — Weekly" in monday and "1 checked this day" in monday
+    assert items[0]["label"] in monday and items[1]["label"] not in monday
+    tuesday = client.get("/shift/history?date=2026-10-20").data.decode()
+    assert items[1]["label"] in tuesday and items[0]["label"] not in tuesday
+    wednesday = client.get("/shift/history?date=2026-10-21").data.decode()
+    assert "Drive Thru — Weekly" not in wednesday
 
 
 def test_toggle_item_form_flow(client):

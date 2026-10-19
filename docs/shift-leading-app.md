@@ -24,12 +24,19 @@ the leadership team:
   **Manager check** (a leader taps "I checked this station" — stamped).
   A list **locks when its day/week/month ends** so the numbers reflect
   what was really done; the Operator master login can still correct one.
+  Changing a list's frequency (Admin → Edit checklist templates) takes
+  effect right away — the new weekly/monthly list appears for the current
+  week/month — and its scorecard starts fresh. History shows a weekly or
+  monthly list under the day each item was actually checked.
 - **Checklist scorecard** (Checklists → 📊, or More) — for every active
-  list: completion % over the last 7 and 28 days (daily) or 4 weeks / 3
-  months, how many periods were fully done, the current streak, how many
+  list: completion % over the last 7 and 28 open days (daily) or 4 weeks /
+  3 months, how many periods were fully done, the current streak, how many
   were manager-checked, days nobody opened, a color strip per period, and
   the items most often missed. Counting starts at a list's first day; a
-  day nobody opened counts as nothing done.
+  day nobody opened counts as nothing done. Sundays (closed) never count,
+  and neither does the stretch a retired list was switched off (restoring
+  it restarts the count). Holidays the store is closed do count as not
+  opened — read those squares accordingly.
 - **Lineup / setup sheet** — assign team members to positions per daypart,
   with one-tap **copy from yesterday** or **copy from the previous daypart**,
   and name autosuggest from the roster.
@@ -261,7 +268,10 @@ scale.
   team-member 1:1s, a restore on a build from before they existed
   permanently deletes them: clearing the roster cascades). Restoring a
   backup taken before team-member 1:1s existed clears them too, so take
-  a fresh backup first. Course progress and everything else comes back as it was.
+  a fresh backup first. Restoring a backup from before the station
+  cleaning lists existed puts the built-in lists back (anything the
+  backup has under the same name is kept as restored). Course progress
+  and everything else comes back as it was.
 
 ## Security model (know its limits)
 

@@ -13,6 +13,7 @@ should attach a persistent disk and point SHIFT_DB_PATH at it, e.g.
 
 import json
 import os
+import re
 import secrets
 import sqlite3
 from contextlib import closing
@@ -48,6 +49,8 @@ FREQUENCIES = ["daily", "weekly", "monthly"]
 FREQUENCY_LABELS = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
 WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
                   "Saturday", "Sunday"]
+# The store is closed Sundays: the scorecard never counts them as missed.
+CLOSED_WEEKDAYS = (6,)
 
 NOTE_CATEGORIES = ["general", "win", "issue", "equipment", "staffing", "guest", "food-safety"]
 
@@ -169,7 +172,9 @@ CREATE TABLE IF NOT EXISTS checklist_templates (
     sort INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     frequency TEXT NOT NULL DEFAULT 'daily',    -- daily | weekly | monthly
-    due_weekday INTEGER                         -- weekly "assign a day": 0 = Monday
+    due_weekday INTEGER,                        -- weekly "assign a day": 0 = Monday
+    tracking_since TEXT                         -- un-retired / frequency changed on; the
+                                                -- scorecard skips empty periods before it
 );
 
 CREATE TABLE IF NOT EXISTS checklist_template_items (
@@ -183,7 +188,9 @@ CREATE TABLE IF NOT EXISTS checklist_template_items (
 -- One run of a template for one period. Items are snapshotted from the
 -- template at creation so later template edits never rewrite past history.
 -- run_date is the period's first business day: the day itself (daily), its
--- Monday (weekly) or the 1st (monthly); frequency is snapshotted too.
+-- Monday (weekly) or the 1st (monthly); frequency is snapshotted too and is
+-- part of the key, so a list switched from daily to weekly still gets its
+-- weekly run on a Monday that already has a daily one.
 CREATE TABLE IF NOT EXISTS checklist_runs (
     id INTEGER PRIMARY KEY,
     template_id INTEGER NOT NULL REFERENCES checklist_templates(id) ON DELETE CASCADE,
@@ -192,7 +199,7 @@ CREATE TABLE IF NOT EXISTS checklist_runs (
     owner TEXT,                                 -- the paper sheet's "Owner"
     verified_by TEXT,                           -- the paper sheet's "Manager check"
     verified_at TEXT,
-    UNIQUE (template_id, run_date)
+    UNIQUE (template_id, frequency, run_date)
 );
 
 CREATE TABLE IF NOT EXISTS checklist_run_items (
@@ -531,6 +538,55 @@ def init_db() -> None:
         except BaseException:
             conn.rollback()
             raise
+        _rekey_checklist_runs(conn)
+
+
+def _rekey_checklist_runs(conn) -> None:
+    """Rebuild an old checklist_runs table keyed UNIQUE(template_id,
+    run_date) as UNIQUE(template_id, frequency, run_date): under the old key
+    a list switched from daily to weekly/monthly could never get its run on
+    a Monday/1st that already had a daily one. SQLite can't alter a table
+    constraint, so this is its documented copy-and-swap rebuild. Row ids are
+    kept, so every run's items stay attached; foreign keys must be OFF (set
+    outside the transaction, where the pragma takes effect) or dropping the
+    old table would cascade-delete all of them."""
+    def old_key() -> bool:
+        for idx in conn.execute("PRAGMA index_list(checklist_runs)").fetchall():
+            cols = [c["name"] for c in conn.execute(f"PRAGMA index_info({idx['name']})")]
+            if idx["unique"] and cols == ["template_id", "run_date"]:
+                return True
+        return False
+
+    if not old_key():
+        return
+    table_sql = re.search(r"CREATE TABLE IF NOT EXISTS checklist_runs \(.*?\n\);",
+                          SCHEMA, re.S).group(0)
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if old_key():  # another worker may have rebuilt it meanwhile
+                conn.execute(table_sql.replace("IF NOT EXISTS checklist_runs",
+                                               "checklist_runs_rekey"))
+                conn.execute(
+                    "INSERT INTO checklist_runs_rekey (id, template_id, run_date, "
+                    "frequency, owner, verified_by, verified_at) SELECT id, "
+                    "template_id, run_date, frequency, owner, verified_by, "
+                    "verified_at FROM checklist_runs")
+                conn.execute("DROP TABLE checklist_runs")
+                conn.execute("ALTER TABLE checklist_runs_rekey RENAME TO checklist_runs")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_checklist_runs_date "
+                             "ON checklist_runs(run_date)")
+                if conn.execute(
+                        "PRAGMA foreign_key_check(checklist_run_items)").fetchone():
+                    raise sqlite3.IntegrityError("checklist_runs rebuild orphaned rows")
+                print("shift_db: re-keyed checklist_runs by frequency")
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
 
 
 def _migrate(conn) -> None:
@@ -573,6 +629,8 @@ def _migrate(conn) -> None:
                      "frequency TEXT NOT NULL DEFAULT 'daily'")
     if "due_weekday" not in cols:
         conn.execute("ALTER TABLE checklist_templates ADD COLUMN due_weekday INTEGER")
+    if "tracking_since" not in cols:
+        conn.execute("ALTER TABLE checklist_templates ADD COLUMN tracking_since TEXT")
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(checklist_runs)")}
     for col_def in ("frequency TEXT NOT NULL DEFAULT 'daily'", "owner TEXT",
                     "verified_by TEXT", "verified_at TEXT"):
@@ -732,7 +790,7 @@ def ensure_runs_for_date(run_date: str) -> None:
         for t in templates:
             frequency = t["frequency"] if t["frequency"] in FREQUENCIES else "daily"
             start = period_start(frequency, run_date)
-            # INSERT OR IGNORE + the UNIQUE(template_id, run_date) constraint
+            # INSERT OR IGNORE + UNIQUE(template_id, frequency, run_date)
             # makes concurrent first-loads race-safe.
             cur = conn.execute(
                 "INSERT OR IGNORE INTO checklist_runs (template_id, run_date, frequency) "
@@ -762,7 +820,9 @@ def _decorate_run(run: dict, today: str) -> dict:
 def runs_for_date(run_date: str) -> list[dict]:
     """The runs covering a date — that day's daily runs plus the weekly and
     monthly runs whose period contains it — with progress counts, ordered
-    daily (by daypart) then weekly then monthly."""
+    daily (by daypart) then weekly then monthly. A weekly/monthly run of a
+    retired list drops out once nothing on it was checked: it would
+    otherwise linger (and nag on Today) for the rest of its period."""
     daypart_order = {d: i for i, d in enumerate(["allday"] + DAYPARTS)}
     freq_order = {f: i for i, f in enumerate(FREQUENCIES)}
     today = today_local()
@@ -771,7 +831,7 @@ def runs_for_date(run_date: str) -> list[dict]:
             """
             SELECT r.id, r.run_date, r.frequency, r.owner, r.verified_by,
                    r.verified_at, t.name, t.daypart, t.area, t.sort, t.due_weekday,
-                   COUNT(i.id) AS total,
+                   t.active, COUNT(i.id) AS total,
                    COALESCE(SUM(i.done), 0) AS done,
                    COALESCE(SUM(CASE WHEN i.critical=1 AND i.done=0 THEN 1 ELSE 0 END), 0)
                        AS critical_remaining
@@ -786,7 +846,8 @@ def runs_for_date(run_date: str) -> list[dict]:
             (run_date, period_start("weekly", run_date),
              period_start("monthly", run_date)),
         ).fetchall()
-    runs = [_decorate_run(dict(r), today) for r in rows]
+    runs = [_decorate_run(dict(r), today) for r in rows
+            if r["active"] or r["frequency"] == "daily" or r["done"]]
     runs.sort(key=lambda r: (freq_order.get(r["frequency"], 9),
                              daypart_order.get(r["daypart"], 99), r["sort"], r["id"]))
     return runs
@@ -847,22 +908,40 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
     """How consistently each active checklist gets done, for the scorecard.
 
     Periods are measured once they're over (today, this week and this month
-    show separately as "in progress"): the last 7 and 28 days for daily
-    lists, the last 4 weeks for weekly, the last 3 months for monthly.
-    Counting starts at a list's first run, so a new list isn't penalized
-    for days before it existed. A period with no run at all (nobody opened
-    the app) counts as nothing done. Completion = items checked / items
-    expected; a period is "complete" when every item was checked."""
+    show separately as "in progress"): the last 7 and 28 open days for daily
+    lists (closed Sundays never count), the last 4 weeks for weekly, the
+    last 3 months for monthly. Only runs at the list's current frequency
+    count, from its first one, so a new or re-scheduled list isn't
+    penalized for periods before it existed; nor is a list for the periods
+    it was retired. A period with no run at all (nobody opened the app)
+    counts as nothing done. Completion = items checked / items expected; a
+    period is "complete" when every item was checked."""
     today = today or today_local()
     windows = {"daily": 28, "weekly": 4, "monthly": 3}
+
+    def periods(frequency: str, count: int) -> list[str]:
+        """Starts of the last `count` FINISHED periods, newest first."""
+        starts, cur = [], period_start(frequency, today)
+        while len(starts) < count:
+            prev = date.fromisoformat(cur) - timedelta(days=1)
+            cur = period_start(frequency, prev.isoformat())
+            if frequency == "daily" and prev.weekday() in CLOSED_WEEKDAYS:
+                continue
+            starts.append(cur)
+        return starts
+
+    window_starts = {f: periods(f, n) for f, n in windows.items()}
+    oldest = min(starts[-1] for starts in window_starts.values())
     with closing(connect()) as conn:
         templates = [dict(t) for t in conn.execute(
             """
             SELECT t.id, t.name, t.area, t.daypart, t.frequency, t.due_weekday, t.sort,
+                   t.tracking_since,
                    (SELECT COUNT(*) FROM checklist_template_items i
                     WHERE i.template_id = t.id) AS item_count,
                    (SELECT MIN(run_date) FROM checklist_runs r
-                    WHERE r.template_id = t.id) AS first_run
+                    WHERE r.template_id = t.id AND r.frequency = t.frequency)
+                       AS first_run
             FROM checklist_templates t WHERE t.active = 1
             ORDER BY t.sort, t.id
             """).fetchall()]
@@ -873,38 +952,31 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
             FROM checklist_runs r LEFT JOIN checklist_run_items i ON i.run_id = r.id
             WHERE r.run_date >= ?
             GROUP BY r.id
-            """, ((date.fromisoformat(today) - timedelta(days=100)).isoformat(),)
+            """, (oldest,)
         ).fetchall()]
         misses = [dict(m) for m in conn.execute(
             """
-            SELECT r.template_id, r.run_date, i.label, i.done
+            SELECT r.template_id, r.frequency, r.run_date, i.label, i.done
             FROM checklist_runs r JOIN checklist_run_items i ON i.run_id = r.id
             WHERE r.run_date >= ?
-            """, ((date.fromisoformat(today) - timedelta(days=100)).isoformat(),)
+            """, (oldest,)
         ).fetchall()]
-    by_key = {(r["template_id"], r["run_date"]): r for r in runs}
-
-    def periods(frequency: str, count: int) -> list[str]:
-        """Starts of the last `count` FINISHED periods, newest first."""
-        starts, cur = [], period_start(frequency, today)
-        for _ in range(count):
-            d = date.fromisoformat(cur)
-            prev = d - timedelta(days=1) if frequency != "monthly" else d - timedelta(days=1)
-            cur = period_start(frequency, prev.isoformat())
-            starts.append(cur)
-        return starts
+    by_key = {(r["template_id"], r["frequency"], r["run_date"]): r for r in runs}
 
     cards = []
     for t in templates:
         freq = t["frequency"] if t["frequency"] in FREQUENCIES else "daily"
         current_start = period_start(freq, today)
-        cur_run = by_key.get((t["id"], current_start))
+        cur_run = by_key.get((t["id"], freq, current_start))
         history = []
         if t["first_run"]:
-            for start in periods(freq, windows[freq]):
+            for start in window_starts[freq]:
                 if start < period_start(freq, t["first_run"]):
                     break
-                run = by_key.get((t["id"], start))
+                run = by_key.get((t["id"], freq, start))
+                if (not run and t["tracking_since"]
+                        and period_end(freq, start) < t["tracking_since"]):
+                    continue  # retired (or another frequency) back then
                 total = run["total"] if run else t["item_count"]
                 done = run["done"] if run else 0
                 history.append({
@@ -933,10 +1005,11 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
             if not row["complete"]:
                 break
             streak += 1
-        window_starts = {r["start"] for r in history}
+        counted = {r["start"] for r in history}
         missed: dict[str, list[int]] = {}
         for m in misses:
-            if m["template_id"] == t["id"] and m["run_date"] in window_starts:
+            if (m["template_id"] == t["id"] and m["frequency"] == freq
+                    and m["run_date"] in counted):
                 tally = missed.setdefault(m["label"], [0, 0])
                 tally[1] += 1
                 if not m["done"]:
@@ -1029,13 +1102,15 @@ def update_template(template_id: int, name: str, daypart: str, area: str,
                     due_weekday: int | None = None) -> None:
     """Replace a template's fields and item list ((label, critical) pairs).
     Existing runs keep their snapshotted items (and frequency); only future
-    runs pick up the change."""
+    runs pick up the change. A new frequency restarts scorecard tracking."""
     frequency, due_weekday = _clean_schedule(frequency, due_weekday)
     with closing(connect()) as conn, conn:
         conn.execute(
-            "UPDATE checklist_templates SET name=?, daypart=?, area=?, frequency=?, "
-            "due_weekday=? WHERE id=?",
-            (name, daypart, area, frequency, due_weekday, template_id),
+            "UPDATE checklist_templates SET name=?, daypart=?, area=?, "
+            "tracking_since=CASE WHEN frequency=? THEN tracking_since ELSE ? END, "
+            "frequency=?, due_weekday=? WHERE id=?",
+            (name, daypart, area, frequency, today_local(), frequency, due_weekday,
+             template_id),
         )
         conn.execute(
             "DELETE FROM checklist_template_items WHERE template_id=?", (template_id,)
@@ -1049,11 +1124,16 @@ def update_template(template_id: int, name: str, daypart: str, area: str,
 
 
 def set_template_active(template_id: int, active: bool) -> None:
+    """Retire or restore a list. Restoring stamps tracking_since, so the
+    scorecard doesn't count the retired stretch as days nobody opened."""
     with closing(connect()) as conn, conn:
-        conn.execute(
-            "UPDATE checklist_templates SET active=? WHERE id=?",
-            (1 if active else 0, template_id),
-        )
+        if active:
+            conn.execute(
+                "UPDATE checklist_templates SET active=1, tracking_since=? "
+                "WHERE id=? AND active=0", (today_local(), template_id))
+        else:
+            conn.execute("UPDATE checklist_templates SET active=0 WHERE id=?",
+                         (template_id,))
 
 
 # ---------------------------------------------------------------------------
@@ -1550,7 +1630,7 @@ def leader_task_summary() -> list[dict]:
 # 1:1 meeting agendas
 # ---------------------------------------------------------------------------
 
-def _business_date(stamp: str) -> str:
+def business_date(stamp: str) -> str:
     """A now_stamp() value -> the 4am-rollover business date it belongs to."""
     try:
         return (datetime.strptime(stamp, "%Y-%m-%d %H:%M")
@@ -1637,7 +1717,7 @@ def _topics_for(kind: str, owner_id: int, meetings: int = 12,
     for t in agenda:
         # Strictly before the last meeting's business date: a topic added on
         # meeting day (before or after the sit-down) was never "carried".
-        t["carried"] = bool(last_met and _business_date(t["created_at"]) < last_met)
+        t["carried"] = bool(last_met and business_date(t["created_at"]) < last_met)
     history: list[dict] = []
     for t in discussed:
         if not history or history[-1]["date"] != t["discussed_on"]:
@@ -2082,7 +2162,7 @@ def recovery_feed(resolved_limit: int = 50) \
     for r in awaiting:
         try:
             r["waiting_days"] = max(0, (today - date.fromisoformat(
-                _business_date(r["contacted_at"]))).days)
+                business_date(r["contacted_at"]))).days)
         except ValueError:
             r["waiting_days"] = 0
     return open_recs, awaiting, resolved
@@ -2792,6 +2872,14 @@ def import_json(raw: str) -> str | None:
                             "VALUES ('course_seeded', ?)", (now_stamp(),))
                     else:
                         conn.execute("DELETE FROM meta WHERE key='course_seeded'")
+                    # A backup from before the station cleaning lists (its
+                    # templates have no frequency) would wipe them for good:
+                    # seed them back now, skipping any name it restored.
+                    templates = payload.get("checklist_templates", [])
+                    if templates and not any("frequency" in row for row in templates):
+                        conn.execute(
+                            "DELETE FROM meta WHERE key='cleaning_lists_seeded'")
+                        _seed_cleaning(conn)
                     # A restore may renumber leader ids; bump the session
                     # epoch so every leader's 30-day cookie must re-login
                     # instead of silently attaching to a different leader.

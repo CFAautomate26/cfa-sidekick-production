@@ -329,13 +329,14 @@ def today():
 
 
 def _due_period_runs(runs: list[dict], day: str) -> list[dict]:
-    """Weekly/monthly lists worth a card on Today: unfinished, and due —
-    a weekly list from its assigned day on (the weekend if no day is
-    assigned), a monthly audit in the month's last 7 days."""
+    """Weekly/monthly lists worth a card on Today: unfinished, still in use,
+    and due — a weekly list from its assigned day on (the weekend if no day
+    is assigned), a monthly audit in the month's last 7 days."""
     weekday = date.fromisoformat(day).weekday()
     due = []
     for r in runs:
-        if r["frequency"] == "daily" or (r["total"] and r["done"] == r["total"]):
+        if (r["frequency"] == "daily" or not r["active"]
+                or (r["total"] and r["done"] == r["total"])):
             continue
         if r["frequency"] == "weekly":
             due_day = r["due_weekday"] if r["due_weekday"] is not None else 5
@@ -1692,6 +1693,13 @@ def history():
     runs = []
     for summary in shift_db.runs_for_date(day):
         run, items = shift_db.run_with_items(summary["id"])
+        if run["frequency"] != "daily":
+            # A weekly/monthly list spans many days: show only what was
+            # checked on this one, under the day it was actually done.
+            items = [i for i in items if i["done"]
+                     and shift_db.business_date(i["done_at"]) == day]
+            if not items:
+                continue
         run.update(total=summary["total"], done=summary["done"])
         runs.append((run, items))
     lineups = {dp: shift_db.lineup_for(day, dp) for dp in shift_db.DAYPARTS}
@@ -1809,7 +1817,7 @@ def admin_templates():
 def _template_schedule() -> tuple[str, int | None]:
     frequency = request.form.get("frequency") or "daily"
     due = request.form.get("due_weekday") or ""
-    return frequency, (int(due) if due.isdigit() and len(due) == 1 else None)
+    return frequency, (int(due) if re.fullmatch(r"[0-6]", due) else None)
 
 
 @shift_bp.route("/admin/templates/new", methods=["GET", "POST"])

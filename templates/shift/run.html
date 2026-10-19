@@ -3,7 +3,7 @@
 {% block content %}
 {% set done_count = items | selectattr('done') | list | length %}
 {% set crit_left = items | selectattr('critical') | rejectattr('done') | list | length %}
-<div data-progress>
+<div data-progress data-stamp-from="{{ 11 if run.frequency == 'daily' else 5 }}">
   <h1 class="page">{{ run.name }}</h1>
   <div class="sub">{{ run.period_label if run.frequency != 'daily' else run.run_date }}
     · {{ FREQUENCY_LABELS[run.frequency] }}{% if run.frequency == 'daily' %} · {{ DAYPART_LABELS[run.daypart] }}{% endif %}
@@ -67,7 +67,7 @@ ended, so the scorecard shows what was actually done. Only the Operator can corr
     <button type="submit" class="itemrow {{ 'done' if i.done }}">
       <span class="checkmark">✓</span>
       <span class="label">{% if i.critical %}<span class="crit">● </span>{% endif %}{{ i.label }}
-        <span class="meta">{% if i.done %}done by {{ i.done_by }} · {{ i.done_at[11:] }}{% endif %}</span>
+        <span class="meta">{% if i.done %}done by {{ i.done_by }} · {{ i.done_at[11:] if run.frequency == 'daily' else i.done_at[5:] }}{% endif %}</span>
       </span>
     </button>
   </form>

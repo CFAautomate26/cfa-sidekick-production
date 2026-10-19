@@ -244,9 +244,11 @@ document.addEventListener('submit', function (e) {
       if (!out.ok) throw 0;
       doneInput.value = out.done ? '0' : '1';   // reconcile with the server
       row.classList.toggle('done', !!out.done);
-      var meta = row.querySelector('.meta');
-      meta.textContent = out.done ? ('done by ' + (out.done_by || '') + ' · ' + (out.done_at || '').slice(11)) : '';
       var page = document.querySelector('[data-progress]');
+      // Daily lists show the time; week/month-long lists the date too.
+      var stampFrom = page ? (+page.dataset.stampFrom || 11) : 11;
+      var meta = row.querySelector('.meta');
+      meta.textContent = out.done ? ('done by ' + (out.done_by || '') + ' · ' + (out.done_at || '').slice(stampFrom)) : '';
       if (page) {
         var bar = page.querySelector('.bar span');
         bar.style.width = Math.round(out.done_count / out.total * 100) + '%';

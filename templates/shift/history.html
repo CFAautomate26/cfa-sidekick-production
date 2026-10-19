@@ -17,7 +17,11 @@
 <div class="section-label">Checklists</div>
 {% for run, items in runs %}
 <div class="card">
+  {% if run.frequency == 'daily' %}
   <h2>{{ run.name }} <span class="progress-note" style="display:inline; margin:0;">{{ run.done }}/{{ run.total }}</span></h2>
+  {% else %}
+  <h2>{{ run.name }} <span class="progress-note" style="display:inline; margin:0;">{{ items | length }} checked this day · {{ run.period_label }}: {{ run.done }}/{{ run.total }}</span></h2>
+  {% endif %}
   <table class="plain">
     {% for i in items %}
     <tr>

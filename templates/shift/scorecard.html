@@ -4,7 +4,8 @@
 <h1 class="page">📊 Checklist scorecard</h1>
 <div class="sub">How consistently each list gets done. Finished days, weeks and
 months only — lists lock when their period ends, so this is what was really
-checked off. A day nobody opened counts as nothing done.</div>
+checked off. A day nobody opened counts as nothing done; Sundays (closed)
+don't count.</div>
 
 <div class="card" style="font-size:13px; padding:10px 14px;">
   <span style="display:inline-flex; align-items:center; gap:4px; margin-right:10px;"><span class="sq sq-full"></span> all done</span>
@@ -36,9 +37,9 @@ checked off. A day nobody opened counts as nothing done.</div>
   {% set r = c.recent %}{% set w = c.window %}
   <div style="font-size:14px;">
     {% if c.frequency == 'daily' %}
-    <strong>Last {{ r.periods }} day{{ 's' if r.periods != 1 }}: {{ r.pct }}%</strong>
+    <strong>Last {{ r.periods }} open day{{ 's' if r.periods != 1 }}: {{ r.pct }}%</strong>
     · {{ r.complete }} of {{ r.periods }} fully done
-    {% if w.periods > r.periods %}<span style="color:var(--soft);"> · {{ w.periods }} days: {{ w.pct }}%</span>{% endif %}
+    {% if w.periods > r.periods %}<span style="color:var(--soft);"> · {{ w.periods }} open days: {{ w.pct }}%</span>{% endif %}
     {% else %}
     <strong>Last {{ w.periods }} {{ 'week' if c.frequency == 'weekly' else 'month' }}{{ 's' if w.periods != 1 }}: {{ w.pct }}%</strong>
     · {{ w.complete }} of {{ w.periods }} fully done
