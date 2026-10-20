@@ -9,6 +9,10 @@
     {% if unread_announcements %}<span class="critical-flag">● {{ unread_announcements }} new</span>{% endif %}</h2>
   <div class="progress-note">Store-wide messages with “Got it” tracking</div>
 </a>
+<a class="card tap" href="{{ url_for('shift.checklist_scorecard') }}">
+  <h2>📊 Checklist scorecard</h2>
+  <div class="progress-note">How consistently each cleaning &amp; food-safety list gets done</div>
+</a>
 <a class="card tap" href="{{ url_for('shift.todo') }}">
   <h2>✅ To-dos</h2>
   <div class="progress-note">Assign and track tasks per leader</div>

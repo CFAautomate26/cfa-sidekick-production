@@ -1,0 +1,83 @@
+{% extends "shift/base.html" %}
+{% block title %}Checklist scorecard{% endblock %}
+{% block content %}
+<h1 class="page">📊 Checklist scorecard</h1>
+<div class="sub">How consistently each list gets done. Finished days, weeks and
+months only — lists lock when their period ends, so this is what was really
+checked off. A day nobody opened counts as nothing done; Sundays (closed)
+don't count.</div>
+
+<div class="card" style="font-size:13px; padding:10px 14px;">
+  <span style="display:inline-flex; align-items:center; gap:4px; margin-right:10px;"><span class="sq sq-full"></span> all done</span>
+  <span style="display:inline-flex; align-items:center; gap:4px; margin-right:10px;"><span class="sq sq-part"></span> half or more</span>
+  <span style="display:inline-flex; align-items:center; gap:4px; margin-right:10px;"><span class="sq sq-low"></span> under half</span>
+  <span style="display:inline-flex; align-items:center; gap:4px;"><span class="sq sq-none"></span> not opened</span>
+</div>
+
+{% for area, cards in areas.items() %}
+<div class="section-label">{{ area }}</div>
+{% for c in cards %}
+<div class="card">
+  <h2 style="margin-bottom:4px;">{{ c.name }}
+    <span class="note-cat">{{ FREQUENCY_LABELS[c.frequency] }}</span>
+    {% if c.streak >= 2 %}<span style="font-size:13px;">🔥 {{ c.streak }} in a row</span>{% endif %}</h2>
+
+  {% if c.current %}
+  <a href="{{ url_for('shift.run_detail', run_id=c.current.run_id) }}" class="progress-note" style="display:block; margin-top:0;">
+    {{ 'Today' if c.frequency == 'daily' else c.current.label }}: {{ c.current.done }} of {{ c.current.total }} done{% if c.current.verified %} · ✓ checked{% endif %} →</a>
+  {% endif %}
+
+  {% if c.history %}
+  <div style="display:flex; gap:3px; flex-wrap:wrap; margin:8px 0 6px;" aria-label="Oldest to newest">
+    {% for h in c.history | reverse %}
+    <span class="sq {{ 'sq-none' if not h.opened else ('sq-full' if h.complete else ('sq-part' if h.pct >= 50 else 'sq-low')) }}"
+          title="{{ h.label }}: {% if h.opened %}{{ h.done }}/{{ h.total }}{% if h.verified %} ✓ checked{% endif %}{% else %}not opened{% endif %}"></span>
+    {% endfor %}
+  </div>
+  {% set r = c.recent %}{% set w = c.window %}
+  <div style="font-size:14px;">
+    {% if c.frequency == 'daily' %}
+    <strong>Last {{ r.periods }} open day{{ 's' if r.periods != 1 }}: {{ r.pct }}%</strong>
+    · {{ r.complete }} of {{ r.periods }} fully done
+    {% if w.periods > r.periods %}<span style="color:var(--soft);"> · {{ w.periods }} open days: {{ w.pct }}%</span>{% endif %}
+    {% else %}
+    <strong>Last {{ w.periods }} {{ 'week' if c.frequency == 'weekly' else 'month' }}{{ 's' if w.periods != 1 }}: {{ w.pct }}%</strong>
+    · {{ w.complete }} of {{ w.periods }} fully done
+    {% endif %}
+  </div>
+  {% if w.verified_of or w.not_opened %}
+  <div class="progress-note" style="margin-top:2px;">
+    {% if w.verified_of %}✓ manager-checked {{ w.verified }} of {{ w.verified_of }}{% endif %}{% if w.verified_of and w.not_opened %} · {% endif %}{% if w.not_opened %}{{ w.not_opened }} not opened{% endif %}
+  </div>
+  {% endif %}
+  {% if c.most_missed %}
+  <div style="margin-top:8px; font-size:13px;">
+    <div style="font-weight:700;">Most often missed</div>
+    {% for m in c.most_missed %}
+    <div style="display:flex; gap:8px; padding:2px 0;">
+      <span style="flex:1;">{{ m.label }}</span>
+      <span class="critical-flag" style="white-space:nowrap;">{{ m.missed }} of {{ m.of }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% else %}
+  {% set unit = 'week' if c.frequency == 'weekly' else ('month' if c.frequency == 'monthly' else 'day') %}
+  <div class="progress-note">Tracking starts {% if unit == 'day' %}{{ 'the next open day' if today_closed else 'today' }}{% else %}{{ ('this ' if c.current else 'next ') + unit }}{% endif %}
+  — the first result shows once it's finished.</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="empty">No active checklists yet.</div>
+{% endfor %}
+
+<style>
+  .sq { display:inline-block; width:14px; height:14px; border-radius:3px; }
+  .sq-full { background: var(--good); }
+  .sq-part { background: #e0a100; }
+  .sq-low { background: var(--cfa-red); }
+  .sq-none { background: var(--line); }
+</style>
+<a class="pill small ghost" href="{{ url_for('shift.checklists') }}">← Checklists</a>
+{% endblock %}

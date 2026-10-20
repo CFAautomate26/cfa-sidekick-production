@@ -8,6 +8,10 @@ import pytest
 import app as cfa_app
 import shift_app
 import shift_db
+import shift_cleaning
+
+# Base templates + the station cleaning sheets, both seeded on first boot
+SEEDED_LISTS = len(shift_db.SEED_TEMPLATES) + len(shift_cleaning.LISTS)
 
 
 @pytest.fixture()
@@ -223,7 +227,199 @@ def test_today_instantiates_and_lists_runs(client):
     resp = client.get("/shift/")
     assert resp.status_code == 200
     runs = shift_db.runs_for_date(shift_db.today_local())
-    assert len(runs) == len(shift_db.SEED_TEMPLATES)
+    assert len(runs) == SEEDED_LISTS
+
+
+def _today_run(name):
+    return next(r for r in shift_db.runs_for_date(shift_db.today_local())
+                if r["name"] == name)
+
+
+def test_today_shows_all_day_cleaning_lists(client):
+    login_operator(client)
+    page = client.get("/shift/").data.decode()
+    current = page[page.index("This daypart's checklists"):]
+    assert "Dining Room &amp; Washrooms — Daily" in current
+    assert "Drive Thru — Daily" in current
+
+
+def test_due_period_runs_rules():
+    def run(freq, due=None, done=0, total=4, end="2026-10-25", scheduled=True):
+        return {"frequency": freq, "due_weekday": due, "done": done, "total": total,
+                "period_end": end, "name": f"{freq}-{due}", "scheduled": scheduled}
+    # 2026-10-21 is a Wednesday (weekday 2)
+    due = shift_app._due_period_runs([
+        run("weekly", due=1),            # Tuesday → overdue
+        run("weekly", due=2),            # today
+        run("weekly", due=4),            # Friday → not yet
+        run("weekly"),                   # no day → from Saturday
+        run("weekly", due=1, done=4),    # finished → never
+        run("weekly", due=0, done=1, scheduled=False),  # retired/moved → never nags
+        run("monthly", end="2026-10-31"),  # 10 days left → not yet
+        run("daily"),
+    ], "2026-10-21")
+    notes = {r["name"]: r["due_note"] for r in due}
+    assert notes == {"weekly-1": "due Tuesday — overdue", "weekly-2": "due Wednesday"}
+    due = shift_app._due_period_runs([run("weekly"), run("monthly", end="2026-10-31")],
+                                     "2026-10-25")                  # Sunday, 6 days left
+    assert {r["name"]: r["due_note"] for r in due} == {
+        "weekly-None": "due Saturday", "monthly-None": "due by 10-31"}
+
+
+def test_past_lists_lock_for_leaders_not_the_operator(client):
+    make_leader(client)
+    shift_db.ensure_runs_for_date("2026-09-19")            # a past day
+    past = next(r for r in shift_db.runs_for_date("2026-09-19")
+                if r["name"] == "Drive Thru — Daily")
+    _, items = shift_db.run_with_items(past["id"])
+    login_leader(client)
+    page = client.get(f"/shift/checklists/run/{past['id']}").data
+    assert "🔒".encode() in page and b'class="item"' not in page
+    resp = client.post(f"/shift/item/{items[0]['id']}/toggle", data={"done": "1"},
+                       follow_redirects=True)
+    assert b"closed" in resp.data
+    resp = client.post(f"/shift/item/{items[0]['id']}/toggle",
+                       data={"done": "1", "ajax": "1"})
+    assert resp.status_code == 403 and resp.get_json()["locked"]
+    client.post(f"/shift/checklists/run/{past['id']}/owner", data={"owner": "X"})
+    client.post(f"/shift/checklists/run/{past['id']}/verify", data={"verified": "1"})
+    fresh, items = shift_db.run_with_items(past["id"])
+    assert not items[0]["done"] and fresh["owner"] is None and fresh["verified_by"] is None
+    client.post("/shift/logout")
+
+    login_operator(client)                                # the Operator can correct
+    client.post(f"/shift/item/{items[0]['id']}/toggle", data={"done": "1"})
+    assert shift_db.run_with_items(past["id"])[1][0]["done"]
+
+
+def test_owner_and_manager_check_routes(client):
+    make_leader(client)
+    login_leader(client)
+    client.get("/shift/")
+    run = _today_run("Drive Thru — Daily")
+    client.post(f"/shift/checklists/run/{run['id']}/owner", data={"owner": "Calla"})
+    resp = client.post(f"/shift/checklists/run/{run['id']}/verify",
+                       data={"verified": "1"}, follow_redirects=True)
+    assert b"Maya" in resp.data and b"Calla" in resp.data
+    resp = client.post(f"/shift/checklists/run/{run['id']}/verify",
+                       data={"verified": "1"}, follow_redirects=True)
+    assert b"Already checked by Maya" in resp.data
+    page = client.get("/shift/checklists").data.decode()
+    assert "owner Calla" in page and "✓ checked by Maya" in page
+    assert "This week · Week of" in page and "This month ·" in page
+
+
+def test_scorecard_page(client):
+    make_leader(client)
+    shift_db.ensure_runs_for_date("2026-10-01")
+    login_leader(client)                                  # every leader can see it
+    page = client.get("/shift/checklists/scorecard").data.decode()
+    assert "Checklist scorecard" in page
+    for area in ["Dining Room", "Drive Thru", "Food Safety"]:
+        assert f'<div class="section-label">{area}</div>' in page
+    assert "fully done" in page and "Most often missed" in page
+    assert b"Checklist scorecard" in client.get("/shift/more").data
+
+
+def test_admin_template_schedule(client):
+    login_operator(client)
+    client.post("/shift/admin/templates/new", data={
+        "name": "Patio deep clean", "daypart": "allday", "area": "Patio",
+        "frequency": "weekly", "due_weekday": "3", "items": "Scrub\n! Pressure wash"})
+    t = next(x for x in shift_db.all_templates() if x["name"] == "Patio deep clean")
+    assert (t["frequency"], t["due_weekday"], t["daypart"]) == ("weekly", 3, "allday")
+    client.post(f"/shift/admin/templates/{t['id']}", data={
+        "name": "Patio deep clean", "daypart": "allday", "area": "Patio",
+        "frequency": "monthly", "due_weekday": "99", "items": "Scrub"})
+    t, _ = shift_db.template_with_items(t["id"])
+    assert (t["frequency"], t["due_weekday"]) == ("monthly", None)
+    page = client.get("/shift/admin/templates").data.decode()
+    assert "Weekly (Mon)" in page or "Monthly" in page
+    resp = client.post(f"/shift/admin/templates/{t['id']}", data={   # "²".isdigit()
+        "name": "Patio deep clean", "daypart": "allday", "area": "Patio",
+        "frequency": "weekly", "due_weekday": "²", "items": "Scrub"})
+    assert resp.status_code == 302
+    t, _ = shift_db.template_with_items(t["id"])
+    assert (t["frequency"], t["due_weekday"]) == ("weekly", None)
+
+
+def test_period_lists_show_on_the_day_each_item_was_done(client, monkeypatch):
+    from datetime import datetime
+    clock = {"now": datetime(2026, 10, 19, 13, 0)}                  # Monday
+    monkeypatch.setattr(shift_db, "now_local", lambda: clock["now"])
+    login_operator(client)
+    client.get("/shift/checklists")
+    run = next(r for r in shift_db.runs_for_date("2026-10-19")
+               if r["name"] == "Drive Thru — Weekly")
+    _, items = shift_db.run_with_items(run["id"])
+    client.post(f"/shift/item/{items[0]['id']}/toggle", data={"done": "1"})
+    clock["now"] = datetime(2026, 10, 21, 1, 30)                    # still Tue's shift
+    client.post(f"/shift/item/{items[1]['id']}/toggle", data={"done": "1"})
+    clock["now"] = datetime(2026, 10, 22, 9, 0)
+    page = client.get(f"/shift/checklists/run/{run['id']}").data.decode()
+    assert "done by Operator · 10-19 13:00" in page                  # date, not just time
+    assert "done by Operator · 10-21 01:30" in page
+    assert 'data-stamp-from="5"' in page
+    monday = client.get("/shift/history?date=2026-10-19").data.decode()
+    assert "Drive Thru — Weekly" in monday and "1 checked this day" in monday
+    assert items[0]["label"] in monday and items[1]["label"] not in monday
+    tuesday = client.get("/shift/history?date=2026-10-20").data.decode()
+    assert items[1]["label"] in tuesday and items[0]["label"] not in tuesday
+    wednesday = client.get("/shift/history?date=2026-10-21").data.decode()
+    assert "Drive Thru — Weekly" not in wednesday
+    clock["now"] = datetime(2026, 10, 27, 10, 0)                    # next week:
+    client.post(f"/shift/item/{items[2]['id']}/toggle", data={"done": "1"})  # a correction
+    page = client.get("/shift/history?date=2026-10-27").data.decode()
+    from html import escape
+    assert escape(items[2]["label"]) in page and "Week of Oct 19: 3/" in page
+    daily = next(r for r in shift_db.runs_for_date("2026-10-19")
+                 if r["name"] == "Drive Thru — Daily")
+    _, ditems = shift_db.run_with_items(daily["id"])
+    client.post(f"/shift/item/{ditems[0]['id']}/toggle", data={"done": "1"})  # corrects 10-19
+    page = client.get("/shift/history?date=2026-10-27").data.decode()
+    assert escape(ditems[0]["label"]) in page and "2026-10-19: 1/" in page
+    page = client.get("/shift/history?date=2026-10-19").data.decode()
+    assert "Operator · 10-27 10:00" in page                  # dated, not passed off as 10-19
+    page = client.get(f"/shift/checklists/run/{daily['id']}").data.decode()
+    assert "done by Operator · 10-27 10:00" in page and 'data-stamp-from="5"' in page
+
+
+def test_scorecard_says_when_tracking_really_starts(client, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(shift_db, "now_local", lambda: datetime(2026, 11, 1, 11, 0))  # Sun
+    login_operator(client)
+    client.post("/shift/admin/templates/new", data={
+        "name": "Patio deep clean", "daypart": "allday", "area": "Patio",
+        "frequency": "weekly", "items": "Scrub"})
+    page = client.get("/shift/checklists/scorecard").data.decode()
+    card = page[page.index("Patio deep clean"):]
+    assert card.split("Tracking starts", 1)[1].lstrip().startswith("next week")
+    templates = client.get("/shift/admin/templates").data.decode()
+    assert "Weekly · All day · Patio · 1 items" in " ".join(templates.split())
+    client.post("/shift/admin/templates/new", data={
+        "name": "Lobby dusting", "daypart": "allday", "area": "Lobby", "items": "Dust"})
+    page = client.get("/shift/checklists/scorecard").data.decode()
+    card = page[page.index("Lobby dusting"):]                  # Sundays don't count
+    assert card.split("Tracking starts", 1)[1].lstrip().startswith("the next open day")
+
+
+def test_after_midnight_close_checks_read_as_that_shift(client, monkeypatch):
+    from datetime import datetime
+    clock = {"now": datetime(2026, 10, 19, 22, 30)}
+    monkeypatch.setattr(shift_db, "now_local", lambda: clock["now"])
+    login_operator(client)
+    client.get("/shift/checklists")
+    run = next(r for r in shift_db.runs_for_date("2026-10-19") if r["name"] == "FOH Closing")
+    _, items = shift_db.run_with_items(run["id"])
+    client.post(f"/shift/item/{items[0]['id']}/toggle", data={"done": "1"})
+    clock["now"] = datetime(2026, 10, 20, 1, 15)               # still the 19th's shift
+    client.post(f"/shift/item/{items[1]['id']}/toggle", data={"done": "1"})
+    page = client.get(f"/shift/checklists/run/{run['id']}").data.decode()
+    assert "done by Operator · 01:15" in page and 'data-stamp-from="11"' in page
+    clock["now"] = datetime(2026, 10, 20, 9, 0)
+    history = client.get("/shift/history?date=2026-10-19").data.decode()
+    assert "Operator · 22:30" in history and "Operator · 01:15" in history
+    assert "10-20 01:15" not in history
 
 
 def test_toggle_item_form_flow(client):
