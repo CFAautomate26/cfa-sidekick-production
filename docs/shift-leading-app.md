@@ -12,11 +12,15 @@ the leadership team:
   (food-safety / cash) are flagged red until done. Templates are editable in
   the admin area; past days keep their history exactly as it happened.
 - **Station cleaning lists** — the posted wall sheets, built in
-  (`shift_cleaning.py`, seeded once): Dining Room & Washrooms and Drive
-  Thru (daily, weekly, and monthly leadership-audit lists), the Food
-  Safety Daily Commitment as AM and PM lists, and the sanitizer-change /
-  spindle-cleaning times (10:30–8:30, every two hours) split across the
-  dayparts. Lists can be **daily, weekly (Mon–Sun, with an optional
+  (`shift_cleaning.py`, each batch seeded once): front of house — Dining
+  Room & Washrooms and Drive Thru (daily, weekly, and monthly
+  leadership-audit lists), the Food Safety Daily Commitment as AM and PM
+  lists, and the sanitizer-change / spindle-cleaning times (10:30–8:30,
+  every two hours) split across the dayparts; back of house — Machines,
+  Boards (primary, secondary & prep), Produce Station, and Breading & Raw
+  (daily, weekly, and monthly each), with the food-safety controls
+  (temperatures, sanitizer strength, raw/ready-to-eat separation, hold and
+  shelf-life limits) flagged red. Lists can be **daily, weekly (Mon–Sun, with an optional
   assigned day), or monthly**; all-day lists show on Today all day, and a
   weekly/monthly list appears on Today when it's due (from its assigned
   day — the weekend if none — or the month's last week) until it's done.

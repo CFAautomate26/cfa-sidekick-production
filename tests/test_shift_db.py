@@ -586,6 +586,73 @@ def test_cleaning_sheets_seeded_as_posted(isolated_db):
     assert len(shift_db.all_templates()) == SEEDED_LISTS
 
 
+def test_back_of_house_sheets_seeded_as_posted(isolated_db):
+    by_name = {t["name"]: t for t in shift_db.all_templates()}
+    expect = {  # name: (frequency, area, items, critical) — off the wall sheets
+        "Machines — Daily": ("daily", "Machines", 9, 0),
+        "Machines — Weekly": ("weekly", "Machines", 6, 0),
+        "Machines — Monthly audit": ("monthly", "Machines", 7, 1),
+        "Boards — Daily": ("daily", "Boards", 15, 7),
+        "Boards — Weekly": ("weekly", "Boards", 10, 0),
+        "Boards — Monthly audit": ("monthly", "Boards", 3, 0),
+        "Produce Station — Daily": ("daily", "Produce", 11, 4),
+        "Produce Station — Weekly": ("weekly", "Produce", 10, 0),
+        "Produce Station — Monthly audit": ("monthly", "Produce", 3, 0),
+        "Breading & Raw — Daily": ("daily", "Breading & Raw", 14, 7),
+        "Breading & Raw — Weekly": ("weekly", "Breading & Raw", 4, 0),
+        "Breading & Raw — Monthly audit": ("monthly", "Breading & Raw", 2, 0),
+    }
+    for name, (freq, area, count, critical) in expect.items():
+        t = by_name[name]
+        assert (t["frequency"], t["daypart"], t["area"], t["item_count"]) == (
+            freq, "allday", area, count), name
+        _, items = shift_db.template_with_items(t["id"])
+        assert sum(i["critical"] for i in items) == critical, name
+        assert not [i for i in items if i["label"].startswith("!")], name
+    _, items = shift_db.template_with_items(by_name["Breading & Raw — Daily"]["id"])
+    cook = next(i for i in items if "165°F" in i["label"])
+    assert cook["label"] == "Cook chicken and egg products to an internal temperature of 165°F"
+    assert cook["critical"]
+
+
+def test_back_of_house_batch_reaches_an_existing_database(isolated_db):
+    boh = [lst[0] for lst in shift_cleaning.BOH_LISTS]
+    with shift_db.closing(shift_db.connect()) as conn, conn:   # a pre-BOH database
+        conn.executemany("DELETE FROM checklist_templates WHERE name=?",
+                         [(n,) for n in boh])
+        conn.execute("DELETE FROM meta WHERE key='boh_cleaning_lists_seeded'")
+    assert len(shift_db.all_templates()) == SEEDED_LISTS - len(boh)
+    shift_db.init_db()
+    shift_db.init_db()                                     # once only
+    templates = shift_db.all_templates()
+    assert len(templates) == SEEDED_LISTS
+    assert [t["name"] for t in templates][-len(boh):] == boh  # after the existing lists
+
+
+def test_restores_bring_back_only_the_batches_a_backup_predates(isolated_db):
+    boh = {lst[0] for lst in shift_cleaning.BOH_LISTS}
+
+    def strip_boh(payload):
+        keep = [t for t in payload["checklist_templates"] if t["name"] not in boh]
+        payload["checklist_templates"] = keep
+        ids = {t["id"] for t in keep}
+        for table in ("checklist_template_items", "checklist_schedule_log"):
+            payload[table] = [r for r in payload[table] if r["template_id"] in ids]
+
+    # A backup from the build before the back-of-house sheets.
+    payload = json.loads(shift_db.export_json())
+    strip_boh(payload)
+    del payload["meta"]["cleaning_batches"]
+    assert shift_db.import_json(json.dumps(payload)) is None
+    assert len(shift_db.all_templates()) == SEEDED_LISTS
+    # A current backup that already had them (one since renamed) stays as is.
+    payload = json.loads(shift_db.export_json())
+    strip_boh(payload)
+    assert shift_db.import_json(json.dumps(payload)) is None
+    shift_db.init_db()
+    assert len(shift_db.all_templates()) == SEEDED_LISTS - len(boh)
+
+
 def test_cleaning_seed_upgrades_an_existing_database(tmp_path, monkeypatch):
     import sqlite3
     monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "pre_cleaning.db"))
@@ -907,7 +974,7 @@ def test_retired_period_list_drops_off_until_worked(isolated_db):
         if t["name"] in ("Drive Thru — Weekly", "Dining Room & Washrooms — Weekly"):
             shift_db.set_template_active(t["id"], False)
     names = {r["name"]: r["scheduled"] for r in shift_db.runs_for_date("2026-10-24")
-             if r["frequency"] == "weekly"}
+             if r["name"] in ("Drive Thru — Weekly", "Dining Room & Washrooms — Weekly")}
     assert names == {"Dining Room & Washrooms — Weekly": False}  # empty one gone; work kept
 
 
@@ -986,7 +1053,8 @@ def test_closed_sunday_starts_no_spent_period(isolated_db):
                 if r["frequency"] == "monthly"]
     shift_db.ensure_runs_for_date("2027-01-30")            # Saturday: still open
     assert len([r for r in shift_db.runs_for_date("2027-01-30")
-                if r["frequency"] == "monthly"]) == 2
+                if r["frequency"] == "monthly"]) == len(
+        [lst for lst in shift_cleaning.LISTS if lst[1] == "monthly"])
     # A list set up on a Sunday starts with the next week, not a 0% one.
     tid = shift_db.create_template("Patio", "allday", "Patio", [("Sweep", False)],
                                    frequency="weekly")
@@ -1213,7 +1281,7 @@ def test_pre_cleaning_backup_restore_seeds_the_lists_back(isolated_db):
                                            if i["template_id"] in keep]
     for t in payload["checklist_templates"]:
         del t["frequency"], t["due_weekday"]
-    del payload["checklist_schedule_log"]                  # didn't exist yet either
+    del payload["checklist_schedule_log"], payload["meta"]  # didn't exist yet either
     assert shift_db.import_json(json.dumps(payload)) is None
     assert len(shift_db.all_templates()) == SEEDED_LISTS
     with shift_db.closing(shift_db.connect()) as conn:     # every list has a baseline
