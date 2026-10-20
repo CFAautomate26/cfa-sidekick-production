@@ -595,10 +595,10 @@ def test_back_of_house_sheets_seeded_as_posted(isolated_db):
         "Boards — Daily": ("daily", "Boards", 15, 7),
         "Boards — Weekly": ("weekly", "Boards", 10, 0),
         "Boards — Monthly audit": ("monthly", "Boards", 3, 0),
-        "Produce Station — Daily": ("daily", "Produce", 11, 4),
+        "Produce Station — Daily": ("daily", "Produce", 11, 5),
         "Produce Station — Weekly": ("weekly", "Produce", 10, 0),
         "Produce Station — Monthly audit": ("monthly", "Produce", 3, 0),
-        "Breading & Raw — Daily": ("daily", "Breading & Raw", 14, 7),
+        "Breading & Raw — Daily": ("daily", "Breading & Raw", 14, 8),
         "Breading & Raw — Weekly": ("weekly", "Breading & Raw", 4, 0),
         "Breading & Raw — Monthly audit": ("monthly", "Breading & Raw", 2, 0),
     }

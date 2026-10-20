@@ -206,7 +206,7 @@ _PRODUCE_DAILY = [
     "!Verify produce is 40°F or lower; out of refrigeration no longer than 30 minutes",
     "!Test produce-wash concentration before every batch (0.75–1.0 oz/gal)",
     "!Submerge whole produce before cutting or trimming for at least 90 seconds",
-    "Wear gloves when handling washed produce; discard damaged or spoiled product",
+    "!Wear gloves when handling washed produce; discard damaged or spoiled product",
     "Wash, rinse, sanitize & air-dry produce cutters, juicers, spinners after each use",
     "Clean the lettuce spinner thoroughly (bowl, basket, lid) — a commonly missed item",
     "!Keep the vegetable sink clean & sanitized — produce only, never dishes or raw meat",
@@ -240,7 +240,7 @@ _BREADING_DAILY = [
     "!Prepare raw-designated sanitizing sink/buckets; test each fill (150–400 ppm)",
     "!Use yellow gloves and yellow-designated utensils/boards/knives/tongs only for raw chicken",
     "!Keep raw-chicken pans/containers off the floor and away from RTE prep areas",
-    "Keep the breader off fryer/grill controls; keep machines person off raw tools",
+    "!Keep the breader off fryer/grill controls; keep machines person off raw tools",
     "!Every 4 hours, clean & sanitize breading-table utensils (scoops, sifter baskets, "
     "transfer pans)",
     "!Verify refrigerated breading table 33–38°F and ice-bath display 32–37°F before loading",
