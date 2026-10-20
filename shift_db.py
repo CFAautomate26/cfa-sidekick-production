@@ -721,38 +721,38 @@ def _seed_course(conn) -> None:
 
 
 def _seed_cleaning(conn) -> None:
-    """Seed the posted station cleaning sheets (shift_cleaning.py) once, as
-    ordinary templates after the existing ones. A name already in use is
-    skipped, so a hand-made copy is never duplicated."""
-    if conn.execute(
-        "SELECT 1 FROM meta WHERE key='cleaning_lists_seeded'"
-    ).fetchone():
-        return
-    stamp = now_stamp()
-    sort = conn.execute(
-        "SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM checklist_templates"
-    ).fetchone()["s"]
-    added = 0
-    for name, frequency, daypart, area, due_weekday, items in shift_cleaning.LISTS:
-        if conn.execute("SELECT 1 FROM checklist_templates WHERE name=?",
-                        (name,)).fetchone():
+    """Seed each batch of posted station cleaning sheets (shift_cleaning.
+    BATCHES) once, as ordinary templates after the existing ones. Each batch
+    has its own meta key, so a batch shipped later still reaches an existing
+    database. A name already in use is skipped, so a hand-made copy is never
+    duplicated."""
+    for key, lists in shift_cleaning.BATCHES:
+        if conn.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone():
             continue
-        cur = conn.execute(
-            "INSERT INTO checklist_templates (name, daypart, area, sort, frequency, "
-            "due_weekday) VALUES (?,?,?,?,?,?)",
-            (name, daypart, area, sort, frequency, due_weekday),
-        )
-        conn.executemany(
-            "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
-            "VALUES (?,?,?,?)",
-            [(cur.lastrowid, label, 1 if critical else 0, i)
-             for i, (label, critical) in enumerate(items)],
-        )
-        sort += 1
-        added += 1
-    conn.execute("INSERT INTO meta (key, value) VALUES ('cleaning_lists_seeded', ?)",
-                 (stamp,))
-    print(f"shift_db: seeded {added} station cleaning lists at {stamp}")
+        stamp = now_stamp()
+        sort = conn.execute(
+            "SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM checklist_templates"
+        ).fetchone()["s"]
+        added = 0
+        for name, frequency, daypart, area, due_weekday, items in lists:
+            if conn.execute("SELECT 1 FROM checklist_templates WHERE name=?",
+                            (name,)).fetchone():
+                continue
+            cur = conn.execute(
+                "INSERT INTO checklist_templates (name, daypart, area, sort, frequency, "
+                "due_weekday) VALUES (?,?,?,?,?,?)",
+                (name, daypart, area, sort, frequency, due_weekday),
+            )
+            conn.executemany(
+                "INSERT INTO checklist_template_items (template_id, label, critical, "
+                "sort) VALUES (?,?,?,?)",
+                [(cur.lastrowid, label, 1 if critical else 0, i)
+                 for i, (label, critical) in enumerate(items)],
+            )
+            sort += 1
+            added += 1
+        conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, stamp))
+        print(f"shift_db: seeded {added} station cleaning lists ({key}) at {stamp}")
 
 
 def _seed_schedule_log(conn) -> None:
@@ -2941,7 +2941,10 @@ def export_json() -> str:
     with closing(connect()) as conn:
         since = conn.execute(
             "SELECT value FROM meta WHERE key='manager_check_since'").fetchone()
-        payload["meta"] = {"manager_check_since": since["value"] if since else None}
+        seeded = [key for key, _ in shift_cleaning.BATCHES if conn.execute(
+            "SELECT 1 FROM meta WHERE key=?", (key,)).fetchone()]
+        payload["meta"] = {"manager_check_since": since["value"] if since else None,
+                           "cleaning_batches": ",".join(seeded)}
         # SELECTs run in autocommit by default; an explicit transaction makes
         # the whole export one consistent snapshot (WAL gives repeatable
         # reads), so a write landing mid-export can't orphan child rows.
@@ -3038,14 +3041,29 @@ def import_json(raw: str) -> str | None:
                             "VALUES ('course_seeded', ?)", (now_stamp(),))
                     else:
                         conn.execute("DELETE FROM meta WHERE key='course_seeded'")
-                    # A backup from before the station cleaning lists (its
-                    # templates have no frequency) would wipe them for good:
-                    # seed them back now, skipping any name it restored.
+                    # A backup from before a batch of station cleaning
+                    # sheets would wipe that batch for good: seed it back
+                    # now, skipping any name the backup restored. Newer
+                    # backups list their batches; older ones predate all but
+                    # the first, which they hold if their templates carry a
+                    # frequency. An empty backup stays empty.
                     templates = payload.get("checklist_templates", [])
-                    if templates and not any("frequency" in row for row in templates):
-                        conn.execute(
-                            "DELETE FROM meta WHERE key='cleaning_lists_seeded'")
-                        _seed_cleaning(conn)
+                    listed = meta.get("cleaning_batches")
+                    for key, _ in shift_cleaning.BATCHES:
+                        if listed is not None:
+                            held = key in listed.split(",")
+                        elif not templates:
+                            held = True
+                        elif key == shift_cleaning.BATCHES[0][0]:
+                            held = any("frequency" in row for row in templates)
+                        else:
+                            held = False
+                        if held:
+                            conn.execute("INSERT OR IGNORE INTO meta (key, value) "
+                                         "VALUES (?, ?)", (key, now_stamp()))
+                        else:
+                            conn.execute("DELETE FROM meta WHERE key=?", (key,))
+                    _seed_cleaning(conn)
                     # Lists restored without schedule history get a baseline,
                     # and runs from before the Manager check existed don't
                     # count against it: the backup says since when (older
