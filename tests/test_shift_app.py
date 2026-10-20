@@ -396,6 +396,11 @@ def test_scorecard_says_when_tracking_really_starts(client, monkeypatch):
     assert card.split("Tracking starts", 1)[1].lstrip().startswith("next week")
     templates = client.get("/shift/admin/templates").data.decode()
     assert "Weekly · All day · Patio · 1 items" in " ".join(templates.split())
+    client.post("/shift/admin/templates/new", data={
+        "name": "Lobby dusting", "daypart": "allday", "area": "Lobby", "items": "Dust"})
+    page = client.get("/shift/checklists/scorecard").data.decode()
+    card = page[page.index("Lobby dusting"):]                  # Sundays don't count
+    assert card.split("Tracking starts", 1)[1].lstrip().startswith("the next open day")
 
 
 def test_after_midnight_close_checks_read_as_that_shift(client, monkeypatch):

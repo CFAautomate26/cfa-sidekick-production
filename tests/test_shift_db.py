@@ -937,6 +937,25 @@ def test_past_days_show_what_was_owed(isolated_db, monkeypatch):
     assert "Drive Thru — Daily" in saturday                    # owed it, missed it
 
 
+def test_lists_retired_before_the_log_keep_their_missed_runs(isolated_db, monkeypatch):
+    for day in ("2026-10-13", "2026-10-14"):
+        shift_db.ensure_runs_for_date(day)
+    with shift_db.closing(shift_db.connect()) as conn, conn:  # retired on the old build
+        conn.execute("DELETE FROM checklist_schedule_log")
+        conn.execute("UPDATE checklist_templates SET active=0 WHERE name='FOH Opening'")
+    shift_db.init_db()                                      # the upgrade's baselines
+    assert "FOH Opening" in {r["name"] for r in shift_db.runs_for_date("2026-10-14")}
+    monkeypatch.setattr(shift_db, "today_local", lambda: "2026-10-19")
+    fid = next(t["id"] for t in shift_db.all_templates(include_inactive=True)
+               if t["name"] == "FOH Opening")
+    shift_db.set_template_active(fid, True)
+    assert "FOH Opening" in {r["name"] for r in shift_db.runs_for_date("2026-10-14")}
+    card = next(c for c in shift_db.checklist_scorecard(today="2026-10-19")
+                if c["id"] == fid)
+    assert [(h["start"], h["opened"]) for h in card["history"]] == [
+        ("2026-10-14", True), ("2026-10-13", True)]
+
+
 def test_off_schedule_period_runs(isolated_db, monkeypatch):
     _do("2026-10-06", "Drive Thru — Weekly", 0)            # a missed past week
     _do("2026-10-20", "Drive Thru — Weekly", 0)            # this week, nothing yet

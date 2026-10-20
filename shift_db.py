@@ -823,10 +823,14 @@ def run_is_current(frequency: str, run_date: str, today: str | None = None) -> b
     return period_start(frequency, today) == run_date
 
 
-def _owed(log_rows: list | None, frequency: str, start: str) -> bool:
+def _owed(log_rows: list | None, frequency: str, start: str,
+          has_run: bool = False) -> bool:
     """Did a list owe the period starting `start` — was it active at this
     frequency at the close of the period's last open day? `log_rows` are
-    its checklist_schedule_log rows in order (none: always as it is)."""
+    its checklist_schedule_log rows in order (none: always as it is).
+    The undated baseline only says how a list stood when the log began, so
+    where it decides, a run for the period (only ever made for an active
+    list on that schedule) is the proof it was owed."""
     if not log_rows:
         return True
     last_open = date.fromisoformat(period_end(frequency, start))
@@ -837,6 +841,8 @@ def _owed(log_rows: list | None, frequency: str, start: str) -> bool:
         if row["changed_on"] > last_open.isoformat():
             break
         state = row
+    if state and state["changed_on"] == "" and has_run:
+        return True
     return bool(state and state["active"] and state["frequency"] == frequency)
 
 
@@ -940,7 +946,8 @@ def runs_for_date(run_date: str) -> list[dict]:
         run["scheduled"] = bool(run["active"]) and (
             run["frequency"] == run.pop("template_frequency"))
         if run["done"] or (run["scheduled"] if run["is_current"] else _owed(
-                logs.get(run["template_id"]), run["frequency"], run["run_date"])):
+                logs.get(run["template_id"]), run["frequency"], run["run_date"],
+                has_run=True)):
             runs.append(run)
     runs.sort(key=lambda r: (freq_order.get(r["frequency"], 9),
                              daypart_order.get(r["daypart"], 99), r["sort"], r["id"]))
@@ -1114,9 +1121,9 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
             for start in window_starts[freq]:
                 if start < period_start(freq, first_run):
                     break
-                if not _owed(schedule.get(t["id"]), freq, start):
-                    continue  # retired or on another schedule by then
                 run = by_key.get((t["id"], freq, start))
+                if not _owed(schedule.get(t["id"]), freq, start, has_run=bool(run)):
+                    continue  # retired or on another schedule by then
                 if not run and app_used(freq, start):
                     continue  # only scheduled after the app was last used
                 total = run["total"] if run else t["item_count"]
