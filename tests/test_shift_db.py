@@ -586,6 +586,132 @@ def test_cleaning_sheets_seeded_as_posted(isolated_db):
     assert len(shift_db.all_templates()) == SEEDED_LISTS
 
 
+def _closing(name):
+    t = next(t for t in shift_db.all_templates() if t["name"] == name)
+    return [(i["label"], bool(i["critical"])) for i in shift_db.template_with_items(t["id"])[1]]
+
+
+def test_closing_lists_carry_nightly_drains(isolated_db):
+    foh, boh = _closing("FOH Closing"), _closing("BOH Closing")
+    assert foh[-2:] == [(shift_db.CLOSING_DRAINS["FOH Closing"], True),
+                        ("Doors locked, lights + signage off, alarm checklist", True)]
+    i = boh.index(("Floors swept and mopped", False))
+    assert boh[i + 1] == (shift_db.CLOSING_DRAINS["BOH Closing"], True)
+    assert not [label for label, _ in foh + boh if label.endswith("drains cleaned")]
+
+
+def test_nightly_drains_reach_the_live_closing_lists(isolated_db):
+    old = {name: items for name, _, _, items in shift_db.SEED_TEMPLATES}
+    old["FOH Closing"] = [i for i in old["FOH Closing"]
+                          if i[0] != shift_db.CLOSING_DRAINS["FOH Closing"]]
+    old["BOH Closing"] = [("Floors swept, mopped, drains cleaned", False) if i[0] ==
+                          "Floors swept and mopped" else i for i in old["BOH Closing"]
+                          if i[0] != shift_db.CLOSING_DRAINS["BOH Closing"]]
+    with shift_db.closing(shift_db.connect()) as conn, conn:   # the live lists today
+        for name in ("FOH Closing", "BOH Closing"):
+            tid = conn.execute("SELECT id FROM checklist_templates WHERE name=?",
+                               (name,)).fetchone()["id"]
+            conn.execute("DELETE FROM checklist_template_items WHERE template_id=?", (tid,))
+            conn.executemany(
+                "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
+                "VALUES (?,?,?,?)", [(tid, label, int(c), n)
+                                     for n, (label, c) in enumerate(old[name])])
+        conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
+    today = shift_db.today_local()
+    shift_db.ensure_runs_for_date(today)                    # tonight's list already open
+    run = next(r for r in shift_db.runs_for_date(today) if r["name"] == "BOH Closing")
+    before = [(i["id"], i["label"]) for i in shift_db.run_with_items(run["id"])[1]]
+    shift_db.init_db()
+    shift_db.init_db()                                     # once only
+    test_closing_lists_carry_nightly_drains(None)
+    assert len(_closing("FOH Closing")) == len(old["FOH Closing"]) + 1
+    assert len(_closing("BOH Closing")) == len(old["BOH Closing"]) + 1
+    assert [(i["id"], i["label"]) for i in shift_db.run_with_items(run["id"])[1]] == before
+    # Taken off by the Operator, it stays off.
+    tid = next(t["id"] for t in shift_db.all_templates() if t["name"] == "FOH Closing")
+    t, items = shift_db.template_with_items(tid)
+    shift_db.update_template(tid, t["name"], t["daypart"], t["area"],
+                             [(i["label"], bool(i["critical"])) for i in items
+                              if not i["label"].startswith("Drains cleaned")])
+    shift_db.init_db()
+    assert len(_closing("FOH Closing")) == len(old["FOH Closing"])
+
+
+def test_nightly_drains_touch_only_the_live_closing_lists(isolated_db):
+    def boot_pre_drain(edit=None):
+        with shift_db.closing(shift_db.connect()) as conn, conn:
+            conn.execute("DELETE FROM checklist_template_items "
+                         "WHERE label LIKE 'Drains cleaned:%'")
+            conn.execute("UPDATE checklist_template_items SET label=? "
+                         "WHERE label='Floors swept and mopped'",
+                         ("Floors swept, mopped, drains cleaned",))
+            conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
+            if edit:
+                edit(conn)
+        shift_db.init_db()
+
+    def labels(tid):
+        return [i["label"] for i in shift_db.template_with_items(tid)[1]]
+
+    ids = {t["name"]: t["id"] for t in shift_db.all_templates()}
+    foh, boh = ids["FOH Closing"], ids["BOH Closing"]
+    drain_foh, drain_boh = shift_db.CLOSING_DRAINS["FOH Closing"], shift_db.CLOSING_DRAINS["BOH Closing"]
+
+    # Retired and rebuilt under the same name: only the active copy changes.
+    shift_db.set_template_active(foh, False)
+    rebuilt = shift_db.create_template(
+        "foh closing ", "dinner", "Front Counter",
+        [("Lobby doors locked at 10pm", False), ("Dining room closed", False),
+         ("Alarm set, lights + signage off", True)])
+    boot_pre_drain()
+    assert labels(rebuilt) == ["Lobby doors locked at 10pm", "Dining room closed",
+                               drain_foh, "Alarm set, lights + signage off"]
+    assert drain_foh not in labels(foh)
+
+    # BOH: a door line above the floors line doesn't move the split.
+    def door_first(conn):
+        conn.execute("INSERT INTO checklist_template_items (template_id, label, sort) "
+                     "VALUES (?, 'Back door locked behind trash runs', -1)", (boh,))
+    boot_pre_drain(door_first)
+    got = labels(boh)
+    assert got[got.index("Floors swept and mopped") + 1] == drain_boh
+    assert "Floors swept, mopped, drains cleaned" not in got
+
+    # "Drained" isn't a drains line; a hand-made drains line is.
+    def fryers_drained(conn):
+        conn.execute("UPDATE checklist_template_items SET label='All fryers filtered, "
+                     "drained and boiled out' WHERE template_id=? AND label LIKE 'All fryers%'",
+                     (boh,))
+        conn.execute("INSERT INTO checklist_template_items (template_id, label, sort) "
+                     "VALUES (?, 'Drains flushed + scrubbed (FOH)', 99)", (rebuilt,))
+    boot_pre_drain(fryers_drained)
+    assert drain_boh in labels(boh)
+    assert [x for x in labels(rebuilt) if "rain" in x] == ["Drains flushed + scrubbed (FOH)"]
+
+    # Renamed: not guessed at — left for the Operator.
+    def renamed(conn):
+        conn.execute("UPDATE checklist_templates SET name='Kitchen close' WHERE id=?", (boh,))
+    boot_pre_drain(renamed)
+    assert drain_boh not in labels(boh)
+
+
+def test_restoring_an_older_backup_brings_the_drains_back(isolated_db):
+    payload = json.loads(shift_db.export_json())
+    drains = set(shift_db.CLOSING_DRAINS.values())
+    payload["checklist_template_items"] = [i for i in payload["checklist_template_items"]
+                                           if i["label"] not in drains]
+    del payload["meta"]["closing_drains_added"]            # a backup from before
+    assert shift_db.import_json(json.dumps(payload)) is None
+    assert (shift_db.CLOSING_DRAINS["FOH Closing"], True) in _closing("FOH Closing")
+    # A current backup without them (the Operator took them off) stays that way.
+    payload = json.loads(shift_db.export_json())
+    payload["checklist_template_items"] = [i for i in payload["checklist_template_items"]
+                                           if i["label"] not in drains]
+    assert shift_db.import_json(json.dumps(payload)) is None
+    shift_db.init_db()
+    assert not [label for label, _ in _closing("FOH Closing") if label in drains]
+
+
 def test_back_of_house_sheets_seeded_as_posted(isolated_db):
     by_name = {t["name"]: t for t in shift_db.all_templates()}
     expect = {  # name: (frequency, area, items, critical) — off the wall sheets
