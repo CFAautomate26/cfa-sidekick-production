@@ -637,6 +637,57 @@ def test_nightly_drains_reach_the_live_closing_lists(isolated_db):
     assert len(_closing("FOH Closing")) == len(old["FOH Closing"])
 
 
+def test_nightly_drains_find_the_lists_the_operator_actually_runs(isolated_db):
+    def boot_pre_drain(edit):
+        with shift_db.closing(shift_db.connect()) as conn, conn:
+            for name in ("FOH Closing", "BOH Closing"):
+                tid = conn.execute("SELECT id FROM checklist_templates WHERE name=?",
+                                   (name,)).fetchone()["id"]
+                conn.execute("DELETE FROM checklist_template_items WHERE template_id=? "
+                             "AND label LIKE 'Drains cleaned:%'", (tid,))
+                conn.execute("UPDATE checklist_template_items SET label=? WHERE "
+                             "template_id=? AND label='Floors swept and mopped'",
+                             ("Floors swept, mopped, drains cleaned", tid))
+            conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
+            edit(conn)
+        shift_db.init_db()
+
+    def labels(tid):
+        return [i["label"] for i in shift_db.template_with_items(tid)[1]]
+
+    # Retired and rebuilt under the same name: the active copy gets it too.
+    def rebuilt(conn):
+        conn.execute("UPDATE checklist_templates SET active=0 WHERE name='FOH Closing'")
+    boot_pre_drain(rebuilt)
+    new_id = shift_db.create_template("FOH Closing", "dinner", "Front Counter",
+                                      [("Lobby closed", False), ("Lock doors, set alarm", True)])
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("DELETE FROM checklist_template_items WHERE label LIKE 'Drains cleaned:%'")
+        conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
+    shift_db.init_db()
+    assert labels(new_id) == ["Lobby closed", shift_db.CLOSING_DRAINS["FOH Closing"],
+                              "Lock doors, set alarm"]       # before a reworded lock-up
+
+    # Renamed, and one already tracking drains by hand: no duplicates.
+    def renamed(conn):
+        conn.execute("UPDATE checklist_templates SET name='Close — kitchen' "
+                     "WHERE name='BOH Closing'")
+    boot_pre_drain(renamed)
+    boh = next(t["id"] for t in shift_db.all_templates() if t["name"] == "Close — kitchen")
+    assert shift_db.CLOSING_DRAINS["BOH Closing"] in labels(boh)
+    assert "Floors swept and mopped" in labels(boh)
+    t, items = shift_db.template_with_items(new_id)
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("DELETE FROM checklist_template_items WHERE template_id=? AND "
+                     "label LIKE 'Drains cleaned:%'", (new_id,))
+        conn.execute("INSERT INTO checklist_template_items (template_id, label, sort) "
+                     "VALUES (?, 'Drains flushed + scrubbed (FOH)', 9)", (new_id,))
+        conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
+    shift_db.init_db()
+    assert [label for label in labels(new_id) if "rain" in label] == [
+        "Drains flushed + scrubbed (FOH)"]
+
+
 def test_restoring_an_older_backup_brings_the_drains_back(isolated_db):
     payload = json.loads(shift_db.export_json())
     drains = set(shift_db.CLOSING_DRAINS.values())
