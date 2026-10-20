@@ -705,13 +705,14 @@ def _seed_base(conn) -> None:
 
 
 def _seed_closing_drains(conn) -> None:
-    """Once: give the live closing lists their own nightly drain item (red)
-    — before FOH's lock-up line, and after BOH's floors line, which drops
-    its bundled "drains cleaned" so drains count on their own. The lists
-    are found by name (any case; every copy, retired ones too) or, if
-    renamed, as the dinner closing list in their area. A list already
-    mentioning drains in any other line is left alone, and runs already
-    started keep their items. The deploy log names what was changed."""
+    """Once: give the live closing lists their own nightly drain item (red).
+    Only ACTIVE lists named exactly "FOH Closing" / "BOH Closing" (any case
+    or spacing) are touched — no guessing at renamed or rebuilt lists, which
+    the Operator can update in Admin — and one already tracking drains in a
+    line of its own is left alone. BOH's bundled "Floors swept, mopped,
+    drains cleaned" becomes "Floors swept and mopped" with the drain item
+    after it; FOH's goes before its last lock-up/alarm line. Runs already
+    started keep their items; the deploy log says what was done."""
     if conn.execute(
         "SELECT 1 FROM meta WHERE key='closing_drains_added'"
     ).fetchone():
@@ -719,39 +720,38 @@ def _seed_closing_drains(conn) -> None:
     bundled = "Floors swept, mopped, drains cleaned"
     done = []
     for name, label in CLOSING_DRAINS.items():
-        area = "Front Counter" if name.startswith("FOH") else "Kitchen"
         lists = conn.execute(
-            "SELECT id, name FROM checklist_templates WHERE lower(trim(name)) = lower(?) "
-            "ORDER BY active DESC, id", (name,)).fetchall() or conn.execute(
-            "SELECT id, name FROM checklist_templates WHERE daypart='dinner' AND area=? "
-            "AND lower(name) LIKE '%clos%' ORDER BY active DESC, id", (area,)).fetchall()
+            "SELECT id FROM checklist_templates WHERE active=1 "
+            "AND lower(trim(name)) = lower(?) ORDER BY id", (name,)).fetchall()
         if not lists:
-            done.append(f"{name}: not found")
+            done.append(f"{name}: no active list by that name, not changed")
         for t in lists:
             items = conn.execute(
                 "SELECT id, label FROM checklist_template_items WHERE template_id=? "
                 "ORDER BY sort, id", (t["id"],)).fetchall()
-            if any("drain" in i["label"].lower() and i["label"] != bundled for i in items):
-                done.append(f"{t['name']} (#{t['id']}): already has a drains line")
+            if any(re.search(r"\bdrains?\b", i["label"], re.I) and i["label"] != bundled
+                   for i in items):
+                done.append(f"{name} #{t['id']}: already has a drains line")
                 continue
             pos = len(items)
-            for n, item in enumerate(items):
-                low = item["label"].lower()
-                if item["label"] == bundled:
-                    conn.execute("UPDATE checklist_template_items SET label=? WHERE id=?",
-                                 ("Floors swept and mopped", item["id"]))
-                    pos = n + 1
-                    break
-                if "lock" in low and ("door" in low or "alarm" in low):
-                    pos = n
-                    break
+            if name == "BOH Closing":
+                for n, item in enumerate(items):
+                    if item["label"] == bundled:
+                        conn.execute(
+                            "UPDATE checklist_template_items SET label=? WHERE id=?",
+                            ("Floors swept and mopped", item["id"]))
+                        pos = n + 1
+            else:
+                for n, item in enumerate(items):
+                    if re.search(r"\b(lock|alarm)", item["label"], re.I):
+                        pos = n                         # the last one wins
             for n, item in enumerate(items):
                 conn.execute("UPDATE checklist_template_items SET sort=? WHERE id=?",
                              (n if n < pos else n + 1, item["id"]))
             conn.execute(
                 "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
                 "VALUES (?,?,1,?)", (t["id"], label, pos))
-            done.append(f"{t['name']} (#{t['id']}): added")
+            done.append(f"{name} #{t['id']}: added")
     conn.execute("INSERT INTO meta (key, value) VALUES ('closing_drains_added', ?)",
                  (now_stamp(),))
     print(f"shift_db: nightly drain items — {'; '.join(done)}")

@@ -637,55 +637,62 @@ def test_nightly_drains_reach_the_live_closing_lists(isolated_db):
     assert len(_closing("FOH Closing")) == len(old["FOH Closing"])
 
 
-def test_nightly_drains_find_the_lists_the_operator_actually_runs(isolated_db):
-    def boot_pre_drain(edit):
+def test_nightly_drains_touch_only_the_live_closing_lists(isolated_db):
+    def boot_pre_drain(edit=None):
         with shift_db.closing(shift_db.connect()) as conn, conn:
-            for name in ("FOH Closing", "BOH Closing"):
-                tid = conn.execute("SELECT id FROM checklist_templates WHERE name=?",
-                                   (name,)).fetchone()["id"]
-                conn.execute("DELETE FROM checklist_template_items WHERE template_id=? "
-                             "AND label LIKE 'Drains cleaned:%'", (tid,))
-                conn.execute("UPDATE checklist_template_items SET label=? WHERE "
-                             "template_id=? AND label='Floors swept and mopped'",
-                             ("Floors swept, mopped, drains cleaned", tid))
+            conn.execute("DELETE FROM checklist_template_items "
+                         "WHERE label LIKE 'Drains cleaned:%'")
+            conn.execute("UPDATE checklist_template_items SET label=? "
+                         "WHERE label='Floors swept and mopped'",
+                         ("Floors swept, mopped, drains cleaned",))
             conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
-            edit(conn)
+            if edit:
+                edit(conn)
         shift_db.init_db()
 
     def labels(tid):
         return [i["label"] for i in shift_db.template_with_items(tid)[1]]
 
-    # Retired and rebuilt under the same name: the active copy gets it too.
-    def rebuilt(conn):
-        conn.execute("UPDATE checklist_templates SET active=0 WHERE name='FOH Closing'")
-    boot_pre_drain(rebuilt)
-    new_id = shift_db.create_template("FOH Closing", "dinner", "Front Counter",
-                                      [("Lobby closed", False), ("Lock doors, set alarm", True)])
-    with shift_db.closing(shift_db.connect()) as conn, conn:
-        conn.execute("DELETE FROM checklist_template_items WHERE label LIKE 'Drains cleaned:%'")
-        conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
-    shift_db.init_db()
-    assert labels(new_id) == ["Lobby closed", shift_db.CLOSING_DRAINS["FOH Closing"],
-                              "Lock doors, set alarm"]       # before a reworded lock-up
+    ids = {t["name"]: t["id"] for t in shift_db.all_templates()}
+    foh, boh = ids["FOH Closing"], ids["BOH Closing"]
+    drain_foh, drain_boh = shift_db.CLOSING_DRAINS["FOH Closing"], shift_db.CLOSING_DRAINS["BOH Closing"]
 
-    # Renamed, and one already tracking drains by hand: no duplicates.
-    def renamed(conn):
-        conn.execute("UPDATE checklist_templates SET name='Close — kitchen' "
-                     "WHERE name='BOH Closing'")
-    boot_pre_drain(renamed)
-    boh = next(t["id"] for t in shift_db.all_templates() if t["name"] == "Close — kitchen")
-    assert shift_db.CLOSING_DRAINS["BOH Closing"] in labels(boh)
-    assert "Floors swept and mopped" in labels(boh)
-    t, items = shift_db.template_with_items(new_id)
-    with shift_db.closing(shift_db.connect()) as conn, conn:
-        conn.execute("DELETE FROM checklist_template_items WHERE template_id=? AND "
-                     "label LIKE 'Drains cleaned:%'", (new_id,))
+    # Retired and rebuilt under the same name: only the active copy changes.
+    shift_db.set_template_active(foh, False)
+    rebuilt = shift_db.create_template(
+        "foh closing ", "dinner", "Front Counter",
+        [("Lobby doors locked at 10pm", False), ("Dining room closed", False),
+         ("Alarm set, lights + signage off", True)])
+    boot_pre_drain()
+    assert labels(rebuilt) == ["Lobby doors locked at 10pm", "Dining room closed",
+                               drain_foh, "Alarm set, lights + signage off"]
+    assert drain_foh not in labels(foh)
+
+    # BOH: a door line above the floors line doesn't move the split.
+    def door_first(conn):
         conn.execute("INSERT INTO checklist_template_items (template_id, label, sort) "
-                     "VALUES (?, 'Drains flushed + scrubbed (FOH)', 9)", (new_id,))
-        conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
-    shift_db.init_db()
-    assert [label for label in labels(new_id) if "rain" in label] == [
-        "Drains flushed + scrubbed (FOH)"]
+                     "VALUES (?, 'Back door locked behind trash runs', -1)", (boh,))
+    boot_pre_drain(door_first)
+    got = labels(boh)
+    assert got[got.index("Floors swept and mopped") + 1] == drain_boh
+    assert "Floors swept, mopped, drains cleaned" not in got
+
+    # "Drained" isn't a drains line; a hand-made drains line is.
+    def fryers_drained(conn):
+        conn.execute("UPDATE checklist_template_items SET label='All fryers filtered, "
+                     "drained and boiled out' WHERE template_id=? AND label LIKE 'All fryers%'",
+                     (boh,))
+        conn.execute("INSERT INTO checklist_template_items (template_id, label, sort) "
+                     "VALUES (?, 'Drains flushed + scrubbed (FOH)', 99)", (rebuilt,))
+    boot_pre_drain(fryers_drained)
+    assert drain_boh in labels(boh)
+    assert [x for x in labels(rebuilt) if "rain" in x] == ["Drains flushed + scrubbed (FOH)"]
+
+    # Renamed: not guessed at — left for the Operator.
+    def renamed(conn):
+        conn.execute("UPDATE checklist_templates SET name='Kitchen close' WHERE id=?", (boh,))
+    boot_pre_drain(renamed)
+    assert drain_boh not in labels(boh)
 
 
 def test_restoring_an_older_backup_brings_the_drains_back(isolated_db):
