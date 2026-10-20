@@ -9,8 +9,11 @@ the leadership team:
 - **Shift checklists** — FOH/BOH opening, breakfast→lunch transition,
   afternoon reset, and closing lists generated fresh every day. Tapping an
   item stamps *who* checked it and *when*. Items marked **critical**
-  (food-safety / cash) are flagged red until done. Templates are editable in
-  the admin area; past days keep their history exactly as it happened.
+  (food-safety / cash) are flagged red until done. Both closing lists carry
+  their own red nightly drain-cleaning item (FOH and BOH drains), so the
+  scorecard shows whether drains got done every night. Templates are
+  editable in the admin area; past days keep their history exactly as it
+  happened.
 - **Station cleaning lists** — the posted wall sheets, built in
   (`shift_cleaning.py`, each batch seeded once): front of house — Dining
   Room & Washrooms and Drive Thru (daily, weekly, and monthly

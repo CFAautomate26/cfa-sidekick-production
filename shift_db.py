@@ -439,6 +439,17 @@ CREATE INDEX IF NOT EXISTS idx_goal_updates_goal ON goal_updates(goal_id);
 # UI flags red until done.
 # ---------------------------------------------------------------------------
 
+# Nightly drain cleaning, its own red item on both closing lists so the
+# scorecard shows it was done every night (live databases get it from
+# _seed_closing_drains).
+CLOSING_DRAINS = {
+    "FOH Closing": ("Drains cleaned: every front-of-house floor & sink drain — dining room, "
+                    "washrooms, front counter, drive-thru (clear debris, scrub, flush)"),
+    "BOH Closing": ("Drains cleaned: every back-of-house floor & sink drain — centerline "
+                    "(×4), breading-area receiving drain, dish & prep sinks (clear debris, "
+                    "scrub, flush)"),
+}
+
 SEED_TEMPLATES = [
     ("FOH Opening", "breakfast", "Front Counter", [
         ("Registers + ServicePoint logged in and tested", False),
@@ -492,6 +503,7 @@ SEED_TEMPLATES = [
         ("Registers counted, tills to safe, deposit prepped", True),
         ("Play area / high chairs sanitized", False),
         ("Patio furniture secured, exterior litter walk", False),
+        (CLOSING_DRAINS["FOH Closing"], True),
         ("Doors locked, lights + signage off, alarm checklist", True),
     ]),
     ("BOH Closing", "dinner", "Kitchen", [
@@ -500,7 +512,8 @@ SEED_TEMPLATES = [
         ("Grills scraped, cleaned and re-seasoned", False),
         ("All product dated, wrapped, rotated (FIFO) into walk-in", True),
         ("Prep surfaces + boards sanitized", True),
-        ("Floors swept, mopped, drains cleaned", False),
+        ("Floors swept and mopped", False),
+        (CLOSING_DRAINS["BOH Closing"], True),
         ("Closing temp checks logged", True),
         ("Waste log completed and verified", True),
         ("Sanitizer buckets emptied, towels to laundry", False),
@@ -543,6 +556,7 @@ def init_db() -> None:
         try:
             _migrate(conn)
             _seed_base(conn)
+            _seed_closing_drains(conn)
             _seed_course(conn)
             _seed_cleaning(conn)
             _seed_schedule_log(conn)
@@ -688,6 +702,46 @@ def _seed_base(conn) -> None:
     )
     conn.execute("INSERT INTO meta (key, value) VALUES ('seeded', ?)", (stamp,))
     print(f"shift_db: seeded default checklists and positions at {stamp}")
+
+
+def _seed_closing_drains(conn) -> None:
+    """Once: give the live FOH and BOH Closing lists their own nightly drain
+    item (red) — before FOH's lock-up line, and after BOH's floors line,
+    which drops its bundled "drains cleaned" so drains count on their own.
+    A list renamed or already carrying the item is left alone, and runs
+    already started keep their items."""
+    if conn.execute(
+        "SELECT 1 FROM meta WHERE key='closing_drains_added'"
+    ).fetchone():
+        return
+    for name, label in CLOSING_DRAINS.items():
+        t = conn.execute("SELECT id FROM checklist_templates WHERE name=?",
+                         (name,)).fetchone()
+        if not t or conn.execute(
+                "SELECT 1 FROM checklist_template_items WHERE template_id=? AND label=?",
+                (t["id"], label)).fetchone():
+            continue
+        items = conn.execute(
+            "SELECT id, label FROM checklist_template_items WHERE template_id=? "
+            "ORDER BY sort, id", (t["id"],)).fetchall()
+        pos = len(items)
+        for n, item in enumerate(items):
+            if item["label"] == "Floors swept, mopped, drains cleaned":
+                conn.execute("UPDATE checklist_template_items SET label=? WHERE id=?",
+                             ("Floors swept and mopped", item["id"]))
+                pos = n + 1
+                break
+            if item["label"].startswith("Doors locked"):
+                pos = n
+                break
+        for n, item in enumerate(items):
+            conn.execute("UPDATE checklist_template_items SET sort=? WHERE id=?",
+                         (n if n < pos else n + 1, item["id"]))
+        conn.execute(
+            "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
+            "VALUES (?,?,1,?)", (t["id"], label, pos))
+    conn.execute("INSERT INTO meta (key, value) VALUES ('closing_drains_added', ?)",
+                 (now_stamp(),))
 
 
 def _seed_course(conn) -> None:
@@ -2943,8 +2997,11 @@ def export_json() -> str:
             "SELECT value FROM meta WHERE key='manager_check_since'").fetchone()
         seeded = [key for key, _ in shift_cleaning.BATCHES if conn.execute(
             "SELECT 1 FROM meta WHERE key=?", (key,)).fetchone()]
+        drains = conn.execute(
+            "SELECT value FROM meta WHERE key='closing_drains_added'").fetchone()
         payload["meta"] = {"manager_check_since": since["value"] if since else None,
-                           "cleaning_batches": ",".join(seeded)}
+                           "cleaning_batches": ",".join(seeded),
+                           "closing_drains_added": drains["value"] if drains else None}
         # SELECTs run in autocommit by default; an explicit transaction makes
         # the whole export one consistent snapshot (WAL gives repeatable
         # reads), so a write landing mid-export can't orphan child rows.
@@ -3064,6 +3121,15 @@ def import_json(raw: str) -> str | None:
                         else:
                             conn.execute("DELETE FROM meta WHERE key=?", (key,))
                     _seed_cleaning(conn)
+                    # Same for the nightly drain items on the closing lists.
+                    if ("closing_drains_added" in meta
+                            and meta["closing_drains_added"]) or (
+                            "closing_drains_added" not in meta and not templates):
+                        conn.execute("INSERT OR IGNORE INTO meta (key, value) VALUES "
+                                     "('closing_drains_added', ?)", (now_stamp(),))
+                    else:
+                        conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
+                        _seed_closing_drains(conn)
                     # Lists restored without schedule history get a baseline,
                     # and runs from before the Manager check existed don't
                     # count against it: the backup says since when (older
