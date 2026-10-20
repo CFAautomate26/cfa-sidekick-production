@@ -10,15 +10,15 @@ after the change — history is never rewritten.</div>
 <div style="margin-top:14px;">
 {% for t in templates %}
 <div class="card" {% if not t.active %}style="opacity:0.6;"{% endif %}>
-  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+  <div style="display:flex; align-items:center; gap:8px;">
     <a href="{{ url_for('shift.admin_template_edit', template_id=t.id) }}" style="flex:1; font-weight:700; text-decoration:none;">{{ t.name }}</a>
-    <span class="progress-note" style="margin:0;">{{ FREQUENCY_LABELS.get(t.frequency, 'Daily') }}{% if t.frequency == 'weekly' and t.due_weekday is not none %} ({{ WEEKDAY_LABELS[t.due_weekday][:3] }}){% endif %}
-      · {{ DAYPART_LABELS.get(t.daypart, t.daypart) }} · {{ t.area }} · {{ t.item_count }} items</span>
     <form method="post" action="{{ url_for('shift.admin_template_toggle', template_id=t.id) }}">
       <input type="hidden" name="active" value="{{ '0' if t.active else '1' }}">
       <button class="pill small ghost" type="submit">{{ 'Retire' if t.active else 'Restore' }}</button>
     </form>
   </div>
+  <div class="progress-note" style="margin:2px 0 0;">{{ FREQUENCY_LABELS.get(t.frequency, 'Daily') }}{% if t.frequency == 'weekly' and t.due_weekday is not none %} ({{ WEEKDAY_LABELS[t.due_weekday][:3] }}){% endif %}
+    · {{ DAYPART_LABELS.get(t.daypart, t.daypart) }} · {{ t.area }} · {{ t.item_count }} items</div>
 </div>
 {% endfor %}
 </div>

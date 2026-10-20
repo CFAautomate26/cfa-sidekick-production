@@ -823,6 +823,32 @@ def run_is_current(frequency: str, run_date: str, today: str | None = None) -> b
     return period_start(frequency, today) == run_date
 
 
+def _owed(log_rows: list | None, frequency: str, start: str) -> bool:
+    """Did a list owe the period starting `start` — was it active at this
+    frequency at the close of the period's last open day? `log_rows` are
+    its checklist_schedule_log rows in order (none: always as it is)."""
+    if not log_rows:
+        return True
+    last_open = date.fromisoformat(period_end(frequency, start))
+    while last_open.weekday() in CLOSED_WEEKDAYS and last_open.isoformat() > start:
+        last_open -= timedelta(days=1)
+    state = None
+    for row in log_rows:
+        if row["changed_on"] > last_open.isoformat():
+            break
+        state = row
+    return bool(state and state["active"] and state["frequency"] == frequency)
+
+
+def _schedule_logs(conn) -> dict[int, list]:
+    logs: dict[int, list] = {}
+    for row in conn.execute(
+            "SELECT template_id, changed_on, frequency, active "
+            "FROM checklist_schedule_log ORDER BY template_id, changed_on, id"):
+        logs.setdefault(row["template_id"], []).append(row)
+    return logs
+
+
 def _open_day_left(frequency: str, day: str) -> bool:
     """Is any day from `day` to the end of its period an open day?"""
     d = date.fromisoformat(day)
@@ -880,17 +906,17 @@ def runs_for_date(run_date: str) -> list[dict]:
     """The runs covering a date — that day's daily runs plus the weekly and
     monthly runs whose period contains it — with progress counts, ordered
     daily (by daypart) then weekly then monthly. "scheduled" is False for a
-    run whose list was since retired or moved to another frequency; such a
-    run drops out of its current day/week/month while nothing on it is
-    checked — the list no longer owes that period, and it would otherwise
-    linger (and nag on Today). Past periods always show as they were."""
+    run whose list was since retired or moved to another frequency. A run
+    with nothing checked shows only while its list owes the period (the
+    scorecard's rule) — so a list taken off mid-period doesn't linger (or
+    nag on Today), now or in History later; a missed one always shows."""
     daypart_order = {d: i for i, d in enumerate(["allday"] + DAYPARTS)}
     freq_order = {f: i for i, f in enumerate(FREQUENCIES)}
     today = today_local()
     with closing(connect()) as conn:
         rows = conn.execute(
             """
-            SELECT r.id, r.run_date, r.frequency, r.owner, r.verified_by,
+            SELECT r.id, r.template_id, r.run_date, r.frequency, r.owner, r.verified_by,
                    r.verified_at, t.name, t.daypart, t.area, t.sort, t.due_weekday,
                    t.active, t.frequency AS template_frequency, COUNT(i.id) AS total,
                    COALESCE(SUM(i.done), 0) AS done,
@@ -907,12 +933,14 @@ def runs_for_date(run_date: str) -> list[dict]:
             (run_date, period_start("weekly", run_date),
              period_start("monthly", run_date)),
         ).fetchall()
+        logs = _schedule_logs(conn)
     runs = []
     for row in rows:
         run = _decorate_run(dict(row), today)
         run["scheduled"] = bool(run["active"]) and (
             run["frequency"] == run.pop("template_frequency"))
-        if run["scheduled"] or run["done"] or not run["is_current"]:
+        if run["done"] or (run["scheduled"] if run["is_current"] else _owed(
+                logs.get(run["template_id"]), run["frequency"], run["run_date"])):
             runs.append(run)
     runs.sort(key=lambda r: (freq_order.get(r["frequency"], 9),
                              daypart_order.get(r["daypart"], 99), r["sort"], r["id"]))
@@ -1056,11 +1084,7 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
             WHERE r.run_date >= ?
             """, (oldest,)
         ).fetchall()]
-        schedule: dict[int, list] = {}
-        for row in conn.execute(
-                "SELECT template_id, changed_on, frequency, active "
-                "FROM checklist_schedule_log ORDER BY template_id, changed_on, id"):
-            schedule.setdefault(row["template_id"], []).append(row)
+        schedule = _schedule_logs(conn)
         since = conn.execute(
             "SELECT value FROM meta WHERE key='manager_check_since'").fetchone()
     checks_since = since["value"] if since else ""
@@ -1078,22 +1102,6 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
         return ((frequency, start) in period_runs
                 or any(start <= d <= end for d in app_days))
 
-    def owed(template_id: int, frequency: str, start: str) -> bool:
-        """Was the list active at this frequency at the close of the
-        period's last open day?"""
-        rows = schedule.get(template_id)
-        if not rows:
-            return True
-        last_open = date.fromisoformat(period_end(frequency, start))
-        while (last_open.weekday() in CLOSED_WEEKDAYS
-               and last_open.isoformat() > start):
-            last_open -= timedelta(days=1)
-        state = None
-        for row in rows:
-            if row["changed_on"] > last_open.isoformat():
-                break
-            state = row
-        return bool(state and state["active"] and state["frequency"] == frequency)
 
     cards = []
     for t in templates:
@@ -1106,7 +1114,7 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
             for start in window_starts[freq]:
                 if start < period_start(freq, first_run):
                     break
-                if not owed(t["id"], freq, start):
+                if not _owed(schedule.get(t["id"]), freq, start):
                     continue  # retired or on another schedule by then
                 run = by_key.get((t["id"], freq, start))
                 if not run and app_used(freq, start):

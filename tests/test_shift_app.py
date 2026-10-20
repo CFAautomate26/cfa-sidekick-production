@@ -384,6 +384,20 @@ def test_period_lists_show_on_the_day_each_item_was_done(client, monkeypatch):
     assert "done by Operator · 10-27 10:00" in page and 'data-stamp-from="5"' in page
 
 
+def test_scorecard_says_when_tracking_really_starts(client, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(shift_db, "now_local", lambda: datetime(2026, 11, 1, 11, 0))  # Sun
+    login_operator(client)
+    client.post("/shift/admin/templates/new", data={
+        "name": "Patio deep clean", "daypart": "allday", "area": "Patio",
+        "frequency": "weekly", "items": "Scrub"})
+    page = client.get("/shift/checklists/scorecard").data.decode()
+    card = page[page.index("Patio deep clean"):]
+    assert card.split("Tracking starts", 1)[1].lstrip().startswith("next week")
+    templates = client.get("/shift/admin/templates").data.decode()
+    assert "Weekly · All day · Patio · 1 items" in " ".join(templates.split())
+
+
 def test_after_midnight_close_checks_read_as_that_shift(client, monkeypatch):
     from datetime import datetime
     clock = {"now": datetime(2026, 10, 19, 22, 30)}

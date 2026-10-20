@@ -378,6 +378,7 @@ def checklists():
 
 @shift_bp.route("/checklists/scorecard")
 def checklist_scorecard():
+    shift_db.ensure_runs_for_date(shift_db.today_local())   # "in progress" is real
     cards = shift_db.checklist_scorecard()
     areas: dict[str, list[dict]] = {}
     for c in cards:

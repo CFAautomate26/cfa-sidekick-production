@@ -62,7 +62,8 @@ don't count.</div>
   </div>
   {% endif %}
   {% else %}
-  <div class="progress-note">Tracking starts {{ 'today' if c.frequency == 'daily' else 'this ' + ('week' if c.frequency == 'weekly' else 'month') }}
+  {% set unit = 'week' if c.frequency == 'weekly' else ('month' if c.frequency == 'monthly' else 'day') %}
+  <div class="progress-note">Tracking starts {{ ('today' if unit == 'day' else 'this ' + unit) if c.current else ('the next open day' if unit == 'day' else 'next ' + unit) }}
   — the first result shows once it's finished.</div>
   {% endif %}
 </div>

@@ -924,6 +924,19 @@ def test_retired_daily_list_leaves_today_unless_started(isolated_db):
     assert "BOH Opening" in {r["name"] for r in shift_db.runs_for_date(today)}
 
 
+def test_past_days_show_what_was_owed(isolated_db, monkeypatch):
+    clock = {"day": "2026-10-24"}                           # a Saturday
+    monkeypatch.setattr(shift_db, "today_local", lambda: clock["day"])
+    shift_db.ensure_runs_for_date("2026-10-24")
+    ids = {t["name"]: t["id"] for t in shift_db.all_templates()}
+    shift_db.set_template_active(ids["Dining Room & Washrooms — Daily"], False)  # 2pm
+    clock["day"] = "2026-10-26"
+    shift_db.set_template_active(ids["Drive Thru — Daily"], False)   # retired later
+    saturday = {r["name"] for r in shift_db.runs_for_date("2026-10-24")}
+    assert "Dining Room & Washrooms — Daily" not in saturday   # didn't owe Saturday
+    assert "Drive Thru — Daily" in saturday                    # owed it, missed it
+
+
 def test_off_schedule_period_runs(isolated_db, monkeypatch):
     _do("2026-10-06", "Drive Thru — Weekly", 0)            # a missed past week
     _do("2026-10-20", "Drive Thru — Weekly", 0)            # this week, nothing yet
