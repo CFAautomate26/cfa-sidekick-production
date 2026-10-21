@@ -731,6 +731,11 @@ def test_manager_office_on_foh_closing(isolated_db, tmp_path, monkeypatch):
     shift_db.init_db()
     assert office not in _closing("FOH Closing")
 
+    # Mentioning the office isn't covering it; cleaning it is.
+    boot_without_it(lambda conn: conn.execute(
+        "UPDATE checklist_template_items SET label='Registers counted, tills + deposit "
+        "to office safe' WHERE template_id=? AND label LIKE 'Registers%'", (tid,)))
+    assert office in _closing("FOH Closing")
     # An office line of the Operator's own counts; a renamed list isn't guessed at.
     boot_without_it(lambda conn: conn.execute(
         "INSERT INTO checklist_template_items (template_id, label, sort) "

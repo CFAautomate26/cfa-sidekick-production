@@ -457,8 +457,10 @@ CLOSING_DRAINS = {
 # New databases get them in SEED_TEMPLATES.
 MANAGER_OFFICE = ("Manager's office cleaned: desk + counters wiped, trash emptied, "
                   "floor swept + mopped")
+_CLEANING = r"(clean|wip|tid|mop|sweep|swept|dust|vacuum)"
 LIST_ADDITIONS = [
-    ("closing_office_added", "FOH Closing", MANAGER_OFFICE, False, r"\boffice\b"),
+    ("closing_office_added", "FOH Closing", MANAGER_OFFICE, False,
+     rf"\boffice\b.*\b{_CLEANING}|\b{_CLEANING}\w*\b.*\boffice\b"),
 ]
 
 SEED_TEMPLATES = [
