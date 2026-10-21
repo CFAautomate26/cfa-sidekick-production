@@ -450,6 +450,17 @@ CLOSING_DRAINS = {
                     "scrub, flush)"),
 }
 
+# Later one-line additions to lists the live database already has:
+# (meta key that marks it applied, list name, label, critical, "already
+# covered" pattern). Each lands once, before the list's last lock-up/alarm
+# line, on the active list by that exact name — see _seed_list_additions.
+# New databases get them in SEED_TEMPLATES.
+MANAGER_OFFICE = ("Manager's office cleaned: desk + counters wiped, trash emptied, "
+                  "floor swept + mopped")
+LIST_ADDITIONS = [
+    ("closing_office_added", "FOH Closing", MANAGER_OFFICE, False, r"\boffice\b"),
+]
+
 SEED_TEMPLATES = [
     ("FOH Opening", "breakfast", "Front Counter", [
         ("Registers + ServicePoint logged in and tested", False),
@@ -504,6 +515,7 @@ SEED_TEMPLATES = [
         ("Play area / high chairs sanitized", False),
         ("Patio furniture secured, exterior litter walk", False),
         (CLOSING_DRAINS["FOH Closing"], True),
+        (MANAGER_OFFICE, False),
         ("Doors locked, lights + signage off, alarm checklist", True),
     ]),
     ("BOH Closing", "dinner", "Kitchen", [
@@ -557,6 +569,7 @@ def init_db() -> None:
             _migrate(conn)
             _seed_base(conn)
             _seed_closing_drains(conn)
+            _seed_list_additions(conn)
             _seed_course(conn)
             _seed_cleaning(conn)
             _seed_schedule_log(conn)
@@ -704,6 +717,64 @@ def _seed_base(conn) -> None:
     print(f"shift_db: seeded default checklists and positions at {stamp}")
 
 
+def _active_lists_named(conn, name: str) -> list:
+    """Active templates named `name`, ignoring case and outer spaces."""
+    return conn.execute(
+        "SELECT id FROM checklist_templates WHERE active=1 "
+        "AND lower(trim(name)) = lower(?) ORDER BY id", (name,)).fetchall()
+
+
+def _template_items(conn, template_id: int) -> list:
+    return conn.execute(
+        "SELECT id, label FROM checklist_template_items WHERE template_id=? "
+        "ORDER BY sort, id", (template_id,)).fetchall()
+
+
+def _before_last_lockup(items: list) -> int:
+    """Position just before a list's last lock-up/alarm line (else its end)."""
+    pos = len(items)
+    for n, item in enumerate(items):
+        if re.search(r"\b(lock|alarm)", item["label"], re.I):
+            pos = n
+    return pos
+
+
+def _insert_template_item(conn, template_id: int, items: list, pos: int,
+                          label: str, critical: bool) -> None:
+    """Insert an item at `pos` in `items` (the list in order), renumbering."""
+    for n, item in enumerate(items):
+        conn.execute("UPDATE checklist_template_items SET sort=? WHERE id=?",
+                     (n if n < pos else n + 1, item["id"]))
+    conn.execute(
+        "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
+        "VALUES (?,?,?,?)", (template_id, label, 1 if critical else 0, pos))
+
+
+def _seed_list_additions(conn) -> None:
+    """Apply each LIST_ADDITIONS entry once: only ACTIVE lists with that
+    exact name (any case or spacing) are touched — renamed or rebuilt ones
+    are left for the Operator — and one already covering it (its pattern
+    matches a line) is left alone. Runs already started keep their items,
+    and an item the Operator later removes stays removed."""
+    for key, name, label, critical, covered in LIST_ADDITIONS:
+        if conn.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone():
+            continue
+        done = []
+        lists = _active_lists_named(conn, name)
+        if not lists:
+            done.append("no active list by that name, not changed")
+        for t in lists:
+            items = _template_items(conn, t["id"])
+            if any(re.search(covered, i["label"], re.I) for i in items):
+                done.append(f"#{t['id']} already covers it")
+                continue
+            _insert_template_item(conn, t["id"], items, _before_last_lockup(items),
+                                  label, critical)
+            done.append(f"#{t['id']} added")
+        conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, now_stamp()))
+        print(f"shift_db: {name} + {label.split(':')[0]!r} — {'; '.join(done)}")
+
+
 def _seed_closing_drains(conn) -> None:
     """Once: give the live closing lists their own nightly drain item (red).
     Only ACTIVE lists named exactly "FOH Closing" / "BOH Closing" (any case
@@ -720,15 +791,11 @@ def _seed_closing_drains(conn) -> None:
     bundled = "Floors swept, mopped, drains cleaned"
     done = []
     for name, label in CLOSING_DRAINS.items():
-        lists = conn.execute(
-            "SELECT id FROM checklist_templates WHERE active=1 "
-            "AND lower(trim(name)) = lower(?) ORDER BY id", (name,)).fetchall()
+        lists = _active_lists_named(conn, name)
         if not lists:
             done.append(f"{name}: no active list by that name, not changed")
         for t in lists:
-            items = conn.execute(
-                "SELECT id, label FROM checklist_template_items WHERE template_id=? "
-                "ORDER BY sort, id", (t["id"],)).fetchall()
+            items = _template_items(conn, t["id"])
             if any(re.search(r"\bdrains?\b", i["label"], re.I) and i["label"] != bundled
                    for i in items):
                 done.append(f"{name} #{t['id']}: already has a drains line")
@@ -742,15 +809,8 @@ def _seed_closing_drains(conn) -> None:
                             ("Floors swept and mopped", item["id"]))
                         pos = n + 1
             else:
-                for n, item in enumerate(items):
-                    if re.search(r"\b(lock|alarm)", item["label"], re.I):
-                        pos = n                         # the last one wins
-            for n, item in enumerate(items):
-                conn.execute("UPDATE checklist_template_items SET sort=? WHERE id=?",
-                             (n if n < pos else n + 1, item["id"]))
-            conn.execute(
-                "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
-                "VALUES (?,?,1,?)", (t["id"], label, pos))
+                pos = _before_last_lockup(items)
+            _insert_template_item(conn, t["id"], items, pos, label, True)
             done.append(f"{name} #{t['id']}: added")
     conn.execute("INSERT INTO meta (key, value) VALUES ('closing_drains_added', ?)",
                  (now_stamp(),))
@@ -3014,7 +3074,10 @@ def export_json() -> str:
             "SELECT value FROM meta WHERE key='closing_drains_added'").fetchone()
         payload["meta"] = {"manager_check_since": since["value"] if since else None,
                            "cleaning_batches": ",".join(seeded),
-                           "closing_drains_added": drains["value"] if drains else None}
+                           "closing_drains_added": drains["value"] if drains else None,
+                           "list_additions": ",".join(
+                               key for key, *_ in LIST_ADDITIONS if conn.execute(
+                                   "SELECT 1 FROM meta WHERE key=?", (key,)).fetchone())}
         # SELECTs run in autocommit by default; an explicit transaction makes
         # the whole export one consistent snapshot (WAL gives repeatable
         # reads), so a write landing mid-export can't orphan child rows.
@@ -3143,6 +3206,17 @@ def import_json(raw: str) -> str | None:
                     else:
                         conn.execute("DELETE FROM meta WHERE key='closing_drains_added'")
                         _seed_closing_drains(conn)
+                    # And the later one-line additions (LIST_ADDITIONS).
+                    listed = meta.get("list_additions")
+                    for key, *_ in LIST_ADDITIONS:
+                        held = (key in listed.split(",") if listed is not None
+                                else not templates)
+                        if held:
+                            conn.execute("INSERT OR IGNORE INTO meta (key, value) "
+                                         "VALUES (?, ?)", (key, now_stamp()))
+                        else:
+                            conn.execute("DELETE FROM meta WHERE key=?", (key,))
+                    _seed_list_additions(conn)
                     # Lists restored without schedule history get a baseline,
                     # and runs from before the Manager check existed don't
                     # count against it: the backup says since when (older
