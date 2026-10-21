@@ -11,7 +11,9 @@ the leadership team:
   item stamps *who* checked it and *when*. Items marked **critical**
   (food-safety / cash) are flagged red until done. Both closing lists carry
   their own red nightly drain-cleaning item (FOH and BOH drains), so the
-  scorecard shows whether drains got done every night. Templates are
+  scorecard shows whether drains got done every night; FOH Closing also
+  has "Manager's office cleaned". Later additions like these reach the
+  live lists once on deploy (`LIST_ADDITIONS` in `shift_db.py`). Templates are
   editable in the admin area; past days keep their history exactly as it
   happened.
 - **Station cleaning lists** — the posted wall sheets, built in

@@ -593,8 +593,10 @@ def _closing(name):
 
 def test_closing_lists_carry_nightly_drains(isolated_db):
     foh, boh = _closing("FOH Closing"), _closing("BOH Closing")
-    assert foh[-2:] == [(shift_db.CLOSING_DRAINS["FOH Closing"], True),
-                        ("Doors locked, lights + signage off, alarm checklist", True)]
+    labels = [label for label, _ in foh]
+    assert (shift_db.CLOSING_DRAINS["FOH Closing"], True) in foh
+    assert labels.index(shift_db.CLOSING_DRAINS["FOH Closing"]) < labels.index(
+        "Doors locked, lights + signage off, alarm checklist")
     i = boh.index(("Floors swept and mopped", False))
     assert boh[i + 1] == (shift_db.CLOSING_DRAINS["BOH Closing"], True)
     assert not [label for label, _ in foh + boh if label.endswith("drains cleaned")]
@@ -693,6 +695,72 @@ def test_nightly_drains_touch_only_the_live_closing_lists(isolated_db):
         conn.execute("UPDATE checklist_templates SET name='Kitchen close' WHERE id=?", (boh,))
     boot_pre_drain(renamed)
     assert drain_boh not in labels(boh)
+
+
+def test_manager_office_on_foh_closing(isolated_db, tmp_path, monkeypatch):
+    office = (shift_db.MANAGER_OFFICE, False)
+    lock = "Doors locked, lights + signage off, alarm checklist"
+    foh = _closing("FOH Closing")
+    assert foh[-2:] == [office, (lock, True)]              # a fresh database
+
+    tid = next(t["id"] for t in shift_db.all_templates() if t["name"] == "FOH Closing")
+
+    def boot_without_it(edit=None):
+        with shift_db.closing(shift_db.connect()) as conn, conn:
+            conn.execute("DELETE FROM checklist_template_items WHERE label=?",
+                         (shift_db.MANAGER_OFFICE,))
+            conn.execute("DELETE FROM meta WHERE key='closing_office_added'")
+            if edit:
+                edit(conn)
+        shift_db.init_db()
+
+    today = shift_db.today_local()
+    shift_db.ensure_runs_for_date(today)
+    run = next(r for r in shift_db.runs_for_date(today) if r["name"] == "FOH Closing")
+    before = [(i["id"], i["label"]) for i in shift_db.run_with_items(run["id"])[1]]
+    boot_without_it()                                      # the live list today
+    shift_db.init_db()                                     # once only
+    assert _closing("FOH Closing") == foh
+    assert [(i["id"], i["label"]) for i in shift_db.run_with_items(run["id"])[1]] == before
+
+    # Taken off by the Operator, it stays off.
+    t, items = shift_db.template_with_items(tid)
+    shift_db.update_template(tid, t["name"], t["daypart"], t["area"],
+                             [(i["label"], bool(i["critical"])) for i in items
+                              if i["label"] != shift_db.MANAGER_OFFICE])
+    shift_db.init_db()
+    assert office not in _closing("FOH Closing")
+
+    # Mentioning the office isn't covering it; cleaning it is.
+    boot_without_it(lambda conn: conn.execute(
+        "UPDATE checklist_template_items SET label='Registers counted, tills + deposit "
+        "to office safe' WHERE template_id=? AND label LIKE 'Registers%'", (tid,)))
+    assert office in _closing("FOH Closing")
+    # An office line of the Operator's own counts; a renamed list isn't guessed at.
+    boot_without_it(lambda conn: conn.execute(
+        "INSERT INTO checklist_template_items (template_id, label, sort) "
+        "VALUES (?, 'Office tidy, cash drawer locked', 3)", (tid,)))
+    assert office not in _closing("FOH Closing")
+    boot_without_it(lambda conn: conn.execute(
+        "UPDATE checklist_templates SET name='Front close' WHERE id=?", (tid,)))
+    assert office not in [(i["label"], bool(i["critical"]))
+                          for i in shift_db.template_with_items(tid)[1]]
+
+    # Restores: an older backup gets it back; a current one keeps its choice.
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE checklist_templates SET name='FOH Closing' WHERE id=?", (tid,))
+        conn.execute("DELETE FROM checklist_template_items WHERE template_id=? AND "
+                     "label LIKE 'Office tidy%'", (tid,))
+    payload = json.loads(shift_db.export_json())           # office item absent here
+    del payload["meta"]["list_additions"]
+    assert shift_db.import_json(json.dumps(payload)) is None
+    assert office in _closing("FOH Closing")
+    payload = json.loads(shift_db.export_json())
+    payload["checklist_template_items"] = [
+        i for i in payload["checklist_template_items"] if i["label"] != shift_db.MANAGER_OFFICE]
+    assert shift_db.import_json(json.dumps(payload)) is None
+    shift_db.init_db()
+    assert office not in _closing("FOH Closing")
 
 
 def test_restoring_an_older_backup_brings_the_drains_back(isolated_db):
