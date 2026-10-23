@@ -417,11 +417,15 @@ BUNDLE_MAX_FILE_BYTES = 400_000          # one page's text, before the BODY_MAX 
 BUNDLE_MAX_TOTAL_BYTES = 12 * 1024 * 1024
 _FRONT_KEYS = ("category", "section", "title", "summary", "keywords", "publish",
                "leaders_only", "required")
+PAGE_BREAK = re.compile(r"^={5,}\s*$", re.M)        # between pages in a one-file bundle
 
 
-def bundle_entries(data: bytes) -> tuple[list[dict], list[str]]:
-    """A zip of Markdown pages -> page entries, plus notes about anything
-    skipped. Each .md starts with a header between "---" lines:
+def bundle_entries(data: bytes, filename: str = "") -> tuple[list[dict], list[str]]:
+    """A bundle -> page entries, plus notes about anything skipped. A bundle
+    is a zip of .md pages, or one UTF-8 text file holding the same pages
+    separated by a line of five or more "=" signs (phones unzip downloads
+    and then refuse to pick the folder, so the one-file form matters).
+    Each page starts with a header between "---" lines:
 
         ---
         category: BOH Operations
@@ -439,11 +443,13 @@ def bundle_entries(data: bytes) -> tuple[list[dict], list[str]]:
     is read, so a bundle can't be a zip bomb."""
     entries: list[dict] = []
     notes: list[str] = []
+    if not data.startswith(b"PK"):
+        return _text_bundle(data, filename or "pages")
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
         infos = [i for i in zf.infolist() if not i.is_dir()]
     except (zipfile.BadZipFile, ValueError, OSError):
-        return [], ["that isn't a zip file"]
+        return [], [f"{filename or 'that file'}: not a zip or text bundle"]
     if len(infos) > BUNDLE_MAX_FILES:
         return [], [f"too many files (the limit is {BUNDLE_MAX_FILES})"]
     if sum(i.file_size for i in infos) > BUNDLE_MAX_TOTAL_BYTES:
@@ -469,6 +475,32 @@ def bundle_entries(data: bytes) -> tuple[list[dict], list[str]]:
             notes.append(f"{base}: {why}")
             continue
         entry["name"] = base
+        entries.append(entry)
+    return entries, notes
+
+
+def _text_bundle(data: bytes, filename: str) -> tuple[list[dict], list[str]]:
+    """One text file: pages separated by ===== lines (or a single page)."""
+    if len(data) > BUNDLE_MAX_TOTAL_BYTES:
+        return [], [f"{filename}: too big"]
+    try:
+        text = clean(data.decode("utf-8-sig"))
+    except UnicodeDecodeError:
+        return [], [f"{filename}: not readable UTF-8 text (a zip bundle must be a .zip file)"]
+    entries, notes = [], []
+    chunks = [c.strip() for c in PAGE_BREAK.split(text)]
+    chunks = [c for c in chunks if c]
+    if len(chunks) > BUNDLE_MAX_FILES:
+        return [], [f"{filename}: too many pages (the limit is {BUNDLE_MAX_FILES})"]
+    for n, chunk in enumerate(chunks, 1):
+        if len(chunk.encode("utf-8")) > BUNDLE_MAX_FILE_BYTES:
+            notes.append(f"{filename} page {n}: too big for one page")
+            continue
+        entry, why = _front_matter(chunk)
+        if why:
+            notes.append(f"{filename} page {n}: {why}")
+            continue
+        entry["name"] = f"{filename} page {n}"
         entries.append(entry)
     return entries, notes
 

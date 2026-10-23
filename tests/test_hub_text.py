@@ -152,9 +152,25 @@ def test_bundle_entries_reads_headers_in_name_order_and_skips_bad_files():
 
 
 def test_bundle_entries_refuses_what_it_shouldnt_read():
-    assert hub_text.bundle_entries(b"not a zip") == ([], ["that isn't a zip file"])
+    assert hub_text.bundle_entries(b"not a zip") == ([], ["pages page 1: no header between --- lines"])
     big = _bundle({"a.md": _md(body="x" * (hub_text.BUNDLE_MAX_FILE_BYTES + 1))})
     entries, notes = hub_text.bundle_entries(big)
     assert entries == [] and notes == ["a.md: too big for one page"]
     many = _bundle({f"{i}.md": _md(title=str(i)) for i in range(hub_text.BUNDLE_MAX_FILES + 1)})
     assert hub_text.bundle_entries(many)[0] == []
+
+
+def test_text_bundle_is_pages_between_lines_of_equals():
+    one = _md(title="First", summary="one")
+    two = _md(title="Second", category="FOH Operations", publish="no")
+    text = "\ufeff" + one + "\n\n=====\n\n" + two + "\n=======\n\n---\ntitle: Broken\n"
+    entries, notes = hub_text.bundle_entries(text.encode("utf-8"), "library.txt")
+    assert [e["title"] for e in entries] == ["First", "Second"]
+    assert entries[0]["summary"] == "one" and entries[0]["name"] == "library.txt page 1"
+    assert entries[1]["category"] == "FOH Operations" and not entries[1]["publish"]
+    assert notes == ["library.txt page 3: header never closed with ---"]
+    assert hub_text.bundle_entries(one.encode("utf-8"), "a.md")[0][0]["title"] == "First"
+    assert hub_text.bundle_entries(b"\xff\xfe junk", "x.txt") == (
+        [], ["x.txt: not readable UTF-8 text (a zip bundle must be a .zip file)"])
+    assert hub_text.bundle_entries(b"PK\x03\x04 not really", "x.zip") == (
+        [], ["x.zip: not a zip or text bundle"])
