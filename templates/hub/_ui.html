@@ -1,0 +1,44 @@
+{# Small pieces the Hub pages share (inline SVG + links only: the Hub runs
+   no scripts). #}
+
+{% macro crumbs(items) -%}
+<nav class="crumbs" aria-label="You are here">
+  {%- for label, url in items %}{% if not loop.first %}{{ icon('chev') }}{% endif %}<a href="{{ url }}">{{ label }}</a>{% endfor -%}
+</nav>
+{%- endmacro %}
+
+{% macro hero(eyebrow, headline, triage=none) -%}
+<section class="hero compact">
+  <p class="eyebrow">{{ eyebrow }}</p>
+  <h1 class="headline">{{ headline }}</h1>
+  {% if triage %}<p class="triage">{{ triage }}</p>{% endif %}
+  {{ caller() if caller }}
+</section>
+{%- endmacro %}
+
+{% macro paid_time() -%}
+<p class="callout">{{ icon('clock') }}<span>Required reading counts as paid time. Read it on shift, or tell a leader how long it took you.</span></p>
+{%- endmacro %}
+
+{% macro leaders_badge() -%}
+<span class="badge b-navy">{{ icon('lock', 'xs') }}Leaders</span>
+{%- endmacro %}
+
+{# A page's reading state for this viewer: a = their latest confirmation. #}
+{% macro read_badge(p, a, operator) -%}
+{%- if p.required -%}
+  {%- if a and a.version >= p.ack_version %}<span class="badge b-green">{{ icon('check', 'xs') }}Read</span>
+  {%- elif operator %}<span class="badge b-red">Required</span>
+  {%- elif a %}<span class="badge b-tan">Updated · read again</span>
+  {%- else %}<span class="badge b-red">Required</span>{% endif -%}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro search_form(q='', placeholder='Search all pages', label='Search Team Hub', autofocus=false) -%}
+<form class="search" role="search" method="get" action="{{ url_for('hub.search') }}">
+  {{ icon('search') }}
+  <label class="sr" for="q">{{ label }}</label>
+  <input id="q" name="q" type="search" value="{{ q }}" maxlength="100" placeholder="{{ placeholder }}"{{ ' autofocus' if autofocus }}>
+  <button type="submit">Search</button>
+</form>
+{%- endmacro %}

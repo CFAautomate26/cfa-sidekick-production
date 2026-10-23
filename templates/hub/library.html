@@ -1,0 +1,99 @@
+{% extends "hub/base.html" %}
+{% from "hub/_ui.html" import search_form, leaders_badge with context %}
+{% block title %}Systems &amp; Procedures{% endblock %}
+{% block head %}{% include "hub/_style.html" %}
+<style>
+.lib .tiles { margin-top: 22px; }
+.ed .lead-ico { background: var(--tan-100); }
+.sec-head h2 small { font-size: 0.9375rem; font-weight: 400; color: var(--text-muted); letter-spacing: 0; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="lib">
+<section class="hero compact">
+  <p class="eyebrow">Systems &amp; Procedures</p>
+  <h1 class="headline">Here's how we do it.</h1>
+  {{ search_form(placeholder='Search %d page%s' % (total_pages, '' if total_pages == 1 else 's') if total_pages else 'Search all pages', label='Search procedures') }}
+  <nav class="seg" aria-label="Browse">
+    <a {% if not view %}class="on" aria-current="page" {% endif %}href="{{ url_for('hub.library') }}">Categories</a>
+    {% if not viewer.is_operator %}<a href="{{ url_for('hub.to_read') }}">To read{% if to_read %} <span class="count">{{ to_read|length }}</span>{% endif %}</a>{% endif %}
+    <a {% if view == 'updated' %}class="on" aria-current="page" {% endif %}href="{{ url_for('hub.library', view='updated') }}">Updated</a>
+  </nav>
+</section>
+
+{% macro page_row(p) %}
+  <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span><span class="row-meta tags"><span>{{ p.category_name }}{% if view == 'updated' and p.section %} · {{ p.section }}{% endif %} · {{ day(p.published_at) }}</span>
+    {%- if p.id in unread %}{% if unread[p.id] %}<span class="badge b-tan">Updated</span>{% else %}<span class="badge b-red">Required</span>{% endif %}{% endif %}
+    {%- if p.leaders_only or p.category_leaders_only %}{{ leaders_badge() }}{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+{% endmacro %}
+
+{% if view == 'updated' %}
+<section class="sec" id="recent">
+  <div class="sec-head"><h2>Recently updated</h2></div>
+  {% if recent %}
+  <div class="card list">{% for p in recent %}{{ page_row(p) }}{% endfor %}</div>
+  {% else %}<div class="empty">Nothing's been published yet.</div>{% endif %}
+</section>
+{% else %}
+
+{% if tiles %}
+<div class="tiles" id="categories">
+  {% for t in tiles %}
+  <a class="tile" href="{{ t.url }}"><span class="tile-art{{ ' cool' if t.leaders_only }}">{{ art(t.art) }}
+    {%- if t.leaders_only %}{{ leaders_badge() }}{% elif t.to_read %}<span class="badge b-red">{{ t.to_read }} to read</span>{% endif %}</span>
+    <span class="tile-name">{{ t.name }} {{ icon('chev') }}</span>
+    <span class="tile-meta">{{ t.meta }}{% if t.leaders_only and t.to_read %} · {{ t.to_read }} to read{% endif %}</span></a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No categories yet.</div>
+{% endif %}
+{% if viewer.is_leader and leader_cats %}
+<p class="lockline boxed">{{ icon('lock') }}<span>Team members see {{ member_cats[:-1]|join(', ') }}{{ ' and ' if member_cats|length > 1 }}{{ member_cats[-1] if member_cats }}. {{ leader_cats|join(' and ') }} and leaders-only pages stay with leaders.</span></p>
+{% endif %}
+
+{% if sections %}
+<section class="sec" id="sections">
+  <div class="sec-head"><h2>Browse by section</h2>{% if picked %}<a class="more" href="{{ url_for('hub.library') }}#sections">Clear</a>{% endif %}</div>
+  <div class="chips">
+    {% for name, n in sections %}
+    <a class="chip{{ ' on' if name == picked }}" href="{{ url_for('hub.library', section=name) }}#sections"{% if name == picked %} aria-current="page"{% endif %}>{{ name }} <small>{{ n }}</small></a>
+    {% endfor %}
+  </div>
+  {% if picked %}
+  <div class="card list" style="margin-top:14px;">
+    {% for p in section_pages %}
+    <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span><span class="row-meta tags"><span>{{ p.category_name }}</span>
+      {%- if p.id in unread %}{% if unread[p.id] %}<span class="badge b-tan">Updated</span>{% else %}<span class="badge b-red">Required</span>{% endif %}{% endif %}
+      {%- if p.leaders_only or p.category_leaders_only %}{{ leaders_badge() }}{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if recent %}
+<section class="sec" id="recent">
+  <div class="sec-head"><h2>Recently updated</h2><a class="more" href="{{ url_for('hub.library', view='updated') }}">See all</a></div>
+  <div class="card list">{% for p in recent %}{{ page_row(p) }}{% endfor %}</div>
+</section>
+{% endif %}
+
+{% if queues %}
+<section class="sec ed" id="editor">
+  <div class="sec-head"><h2>Editor tools</h2><a class="more" href="{{ url_for('hub.manage') }}">Manage pages</a></div>
+  <div class="card list">
+    <a class="row" href="{{ url_for('hub.new_page') }}"><span class="lead-ico">{{ icon('plus') }}</span><span class="row-main"><span class="row-title">New page</span><span class="row-meta">Starts as a draft. Photos and files welcome.</span></span>{{ icon('chev', 'chev') }}</a>
+    <a class="row" href="{{ url_for('hub.manage') }}#drafts"><span class="lead-ico">{{ icon('edit') }}</span><span class="row-main"><span class="row-title">Drafts</span><span class="row-meta">Finish and publish</span></span>{% if queues.drafts %}<span class="badge b-tan side">{{ queues.drafts|length }} waiting</span>{% endif %}{{ icon('chev', 'chev') }}</a>
+    <a class="row" href="{{ url_for('hub.manage') }}#reviews"><span class="lead-ico">{{ icon('history') }}</span><span class="row-main"><span class="row-title">Yearly reviews</span><span class="row-meta">Policies due for their check-up</span></span>{% if queues.review_due %}<span class="badge b-red side">{{ queues.review_due|length }} due</span>{% endif %}{{ icon('chev', 'chev') }}</a>
+    {% if queues.counsel %}
+    <a class="row" href="{{ url_for('hub.manage') }}#counsel"><span class="lead-ico">{{ icon('shield') }}</span><span class="row-main"><span class="row-title">Lawyer review</span><span class="row-meta">Held until the Operator clears them</span></span><span class="badge b-red side">{{ queues.counsel|length }} flagged</span>{{ icon('chev', 'chev') }}</a>
+    {% endif %}
+    <a class="row" href="{{ url_for('hub.manage') }}#import"><span class="lead-ico">{{ icon('upload') }}</span><span class="row-main"><span class="row-title">Import a Word doc</span><span class="row-meta">Turns a .docx into a draft page</span></span>{{ icon('chev', 'chev') }}</a>
+  </div>
+  <p class="note">{{ icon('info') }}<span>Only the Operator publishes HR policy. Each page shows who has read it.</span></p>
+</section>
+{% endif %}
+{% endif %}
+</div>
+{% endblock %}

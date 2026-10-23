@@ -1,0 +1,70 @@
+{# Systems & Procedures: the bits every Hub page shares, on top of
+   shared/cfa_style.html. Included from each Hub page's head block. #}
+<style>
+/* Crumbs above a compact hero */
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; margin-top: 18px; font-size: var(--fs-small); color: var(--text-muted); }
+.crumbs .i { width: 14px; height: 14px; stroke-width: 2.4; color: var(--gray-400); }
+.crumbs + .hero { padding-top: 8px; }
+.hero .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.hero .search { margin-top: 18px; }
+.hero + .card, .hero + .callout, .hero + form, .hero + .empty { margin-top: 22px; }
+.hero + .sec { margin-top: 26px; }
+
+/* Rows: a badge or small action on the right, and a done/undone tick */
+.row .side { flex: 0 0 auto; }
+.row .lead-ico .i { width: 20px; height: 20px; }
+.row-meta.snip { color: var(--text); font-size: 0.9375rem; margin-top: 6px; }
+.row.static { min-height: 0; }
+.card.list > .row:first-child { border-top: 0; }
+.tick { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto; }
+.tick.on { background: var(--ok); color: #fff; }
+.tick.off { border: 2px solid var(--gray-400); }
+
+/* Chips (Browse by section; People filters) */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: var(--r-full); background: #fff;
+  box-shadow: inset 0 0 0 1px var(--rule); font-weight: 700; font-size: 0.875rem; color: var(--nav); }
+.chip small { font-weight: 400; color: var(--text-muted); font-size: 0.8125rem; }
+.chip.on { background: var(--nav); color: #fff; box-shadow: none; }
+.chip.on small { color: #fff; }
+
+/* The lock line, boxed */
+.lockline.boxed { background: var(--cool-white); border-radius: var(--r-xl); padding: 10px 12px; margin-top: 18px; font-weight: 600; align-items: flex-start; }
+.lockline.boxed .i { margin-top: 1px; }
+.note { display: flex; gap: 6px; align-items: flex-start; font-size: 0.8125rem; color: var(--text-muted); margin-top: 10px; line-height: 1.4; }
+.note .i { width: 16px; height: 16px; margin-top: 1px; }
+.callout + .card, .callout + form, .callout + .callout { margin-top: 12px; }
+.callout strong { color: inherit; }
+.callout .lines { display: block; margin-top: 4px; }
+
+/* Cards that hold a form or a tool, opened in place (no JS: <details>) */
+.card .card-title { font-size: var(--fs-h3); font-weight: 700; color: var(--text-strong); letter-spacing: -0.015em; }
+.card .card-meta { font-size: var(--fs-small); color: var(--text-muted); margin-top: 3px; }
+.card form > .field:first-child, .card > .field:first-child { margin-top: 0; }
+details.tool { padding: 0; }
+details.tool > summary { list-style: none; cursor: pointer; }
+details.tool > summary::-webkit-details-marker { display: none; }
+details.tool > summary .chev { transition: transform .15s; }
+details.tool[open] > summary .chev { transform: rotate(90deg); }
+details.tool > .tool-body { border-top: 1px solid var(--rule); padding: 4px 16px 16px; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; align-items: center; }
+.btnrow .btn { min-width: 0; }
+.btn.block { white-space: normal; }
+.inline-form .btn { min-width: 0; flex: 0 0 auto; }
+.checkline { color: var(--text); }
+.field .muted, .field small { font-weight: 400; color: var(--text-muted); }
+
+/* The page itself */
+.card.doc { padding: 20px 18px; border-radius: var(--r-2xl); }
+.doc .hrfoot { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 0.875rem; color: var(--text-muted); line-height: 1.45; }
+.fine-line { font-size: var(--fs-small); color: var(--text-muted); margin: 4px 0 0; }
+
+/* Tables (history, readers, activity) */
+table.plain td:first-child { color: var(--text-muted); }
+table.plain td.who { color: var(--text-strong); font-weight: 700; }
+table.plain .nowrap { white-space: nowrap; }
+
+@media (min-width: 960px) {
+  .narrow { max-width: 760px; }
+}
+</style>
