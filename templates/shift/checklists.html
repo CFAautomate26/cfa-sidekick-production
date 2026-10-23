@@ -1,49 +1,265 @@
 {% extends "shift/base.html" %}
 {% block title %}Checklists{% endblock %}
-{% block content %}
-<h1 class="page">Checklists</h1>
-<div class="sub">{{ 'Today, ' + day if day == shift_today else day }}</div>
+{% block head %}
+<style>
+/* Checklists page. The "Open now" card is a read-only preview: no item
+   forms and no [data-progress] here, so the checklist script stays on the
+   run page. */
+/* The shared legacy .badge colours come after the b-* ones, so restate them */
+.badge.b-red { background: var(--red-100); color: var(--red-700); }
+.badge.b-green { background: var(--ok-bg); color: var(--ok); }
+.badge.b-tan { background: var(--tan-300); color: var(--tan-ink); }
+.seg.fit a { gap: 5px; }
+.now { margin-top: 22px; padding: 18px; }
+.now .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.now .num { font-size: 1.75rem; line-height: 1; margin-top: 18px; }
+.now .num small { font-size: 0.875rem; color: var(--text-muted); letter-spacing: 0; margin-left: 3px; }
+.now .bar { height: 8px; margin-top: 12px; background: #fff; }
+.todo-list { background: #fff; border-radius: var(--r-2xl); margin-top: 14px; padding: 4px 0; }
+.todo-list h3 { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: var(--track-eyebrow);
+  color: var(--text-muted); padding: 10px 14px 2px; }
+.todo-list ul { margin: 0; padding: 0; }
+.todo-list li { list-style: none; display: flex; gap: 10px; align-items: flex-start; padding: 9px 14px;
+  color: var(--text-strong); line-height: 1.35; }
+.todo-list li + li { border-top: 1px solid var(--gray-100); }
+.todo-list li.more { color: var(--text-muted); font-size: var(--fs-small); }
+.todo-list .pip { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-400); flex: 0 0 auto; margin-top: 7px; }
+.todo-list .pip.crit { background: var(--accent); }
+.todo-list .badge { margin-left: 4px; vertical-align: 1px; }
+.now .cta { display: flex; margin-top: 16px; }
+.now .cta .btn { min-width: 0; flex: 1; }
+.caught { margin-top: 22px; display: flex; gap: 14px; align-items: center; }
+.caught .ring { width: 40px; height: 40px; }
+.caught .f-title { margin-top: 0; font-size: 1.25rem; }
+.caught .f-body { margin-top: 2px; font-size: 0.9375rem; color: var(--text-muted); }
+.first-card { margin-top: 22px; }
+.past { margin-top: 18px; align-items: center; }
+.past span { flex: 1; }
+.past .textlink { white-space: nowrap; }
+.score { display: flex; gap: 16px; align-items: center; margin-top: 32px; }
+.score .num { font-size: 2.5rem; color: var(--info); line-height: 1; }
+.score .num small { font-size: 1rem; }
+.score .f-title { display: block; font-size: 1.25rem; margin: 0; }
+.score .f-body { display: block; font-size: 0.9375rem; margin-top: 2px; }
+.more-links { margin-top: 12px; }
+/* This week's and month's lists fold away (the due ones also show in "Also due now") */
+details.fold > summary { list-style: none; cursor: pointer; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary .chev { transition: transform .15s; }
+details.fold[open] > summary .chev { transform: rotate(90deg); }
+details.fold + details.fold { border-top: 1px solid var(--rule); }
+details.fold > a.row { background: var(--gray-050); }
+/* An untouched list's ring: no zero-length arc (its round cap would draw a dot) */
+.ring circle[stroke-dasharray^="0.0 "] { stroke: none; }
+.day-pick { padding: 4px 16px 14px 68px; }
+.day-pick label { display: block; font-size: var(--fs-small); color: var(--text-muted); margin-bottom: 6px; }
+.day-pick input[type=date] { min-height: 44px; }
+.day-pick .btn { min-width: 0; }
+.day-pick .inline-form { max-width: 380px; }
+/* Office desktop: what's due beside the station sheets, then what's next
+   beside the scorecard and past days */
+@media (min-width: 960px) {
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 32px; align-items: start; }
+  .cols > .col > :first-child { margin-top: 22px; }
+  .cols + .cols > .col > :first-child { margin-top: 32px; }
+}
+@media print {
+  .seg, .score, .more-links, .now .cta, .past .textlink { display: none !important; }
+  .card, .feature { break-inside: avoid; }
+}
+</style>
+{% endblock %}
 
-<form method="get" action="{{ url_for('shift.checklists') }}" class="inline-form" style="margin-bottom:10px;">
-  <input type="date" name="date" value="{{ day }}" max="{{ shift_today }}">
-  <button class="pill" type="submit">Go</button>
-</form>
-<a class="pill small" style="display:inline-block; margin-bottom:6px;" href="{{ url_for('shift.checklist_scorecard') }}">📊 Scorecard — how consistently each list gets done →</a>
+{% macro progress(r) -%}
+<span>{% if r.owner %}owner {{ r.owner }} · {% endif %}{% if r.done %}{{ r.done }} of {{ r.total }}{% elif when == 'past' and r.frequency == 'daily' %}nothing checked{% else %}not started{% endif %}</span>
+{%- endmacro %}
 
-{% macro run_card(r) %}
-<a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
-  <h2>{{ r.name }} {% if r.critical_remaining %}<span class="critical-flag">● {{ r.critical_remaining }} critical left</span>{% endif %}</h2>
-  <div class="bar {{ 'full' if r.done == r.total and r.total }}"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
-  <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.area }}{% if r.owner %} · owner {{ r.owner }}{% endif %}{% if r.verified_by %} · ✓ checked by {{ r.verified_by }}{% endif %}</div>
+{% macro tags(r) -%}
+{% if r.finished %}<span class="badge b-green">Done</span>{% if r.owner %}<span>owner {{ r.owner }}</span>{% endif %}
+{%- else -%}
+{% if r.critical_remaining %}<span class="badge b-red"><span class="dot"></span>{{ r.critical_remaining }} critical{{ ' missed' if when == 'past' and r.frequency == 'daily' }}</span>{% endif %}
+{% if r.from_daypart %}<span class="badge b-tan">From {{ r.from_daypart | lower }}</span>{% endif %}
+{% if r.due_badge %}<span class="badge b-tan">{{ r.due_badge }}</span>{% endif %}
+{{ progress(r) }}
+{%- endif %}
+{% if r.verified_by %}<span>✓ checked by {{ r.verified_by }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro ring_row(r) -%}
+<a class="row" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
+  {{ ring(r.total - r.done, r.total, r.critical_remaining > 0) }}
+  <span class="row-main"><span class="row-title">{{ r.name }}</span>
+    <span class="row-meta tags">{{ tags(r) }}</span></span>
+  {{ icon('chev', 'chev') }}
 </a>
-{% endmacro %}
+{%- endmacro %}
 
-{% set daily = runs | selectattr('frequency', 'equalto', 'daily') | list %}
-{% for daypart in ['allday'] + DAYPARTS %}
-  {% set day_runs = daily | selectattr('daypart', 'equalto', daypart) | list %}
-  {% if day_runs %}
-  <div class="section-label">{{ DAYPART_LABELS[daypart] }}</div>
-  {% for r in day_runs %}{{ run_card(r) }}{% endfor %}
-  {% endif %}
-{% endfor %}
+{% macro fold(title, rows) -%}
+<details class="fold">
+  <summary class="row"><span class="lead-ico">{{ icon('clip') }}</span>
+    <span class="row-main"><span class="row-title">{{ title }}</span>
+      <span class="row-meta">{{ rows | length }} list{{ 's' if rows | length != 1 }}{% if rows[0].due_by %} · due by {{ rows[0].due_by }}{% endif %} · {{ rows | sum(attribute='done') }} of {{ rows | sum(attribute='total') }} done</span></span>
+    {{ icon('chev', 'chev') }}
+  </summary>
+  {% for r in rows %}{{ ring_row(r) }}{% endfor %}
+</details>
+{%- endmacro %}
 
-{% for freq, heading in [('weekly', 'This week'), ('monthly', 'This month')] %}
-  {% set period_runs = runs | selectattr('frequency', 'equalto', freq) | list %}
-  {% if period_runs %}
-  <div class="section-label">{{ heading }} · {{ period_runs[0].period_label }}</div>
-  {% for r in period_runs %}{{ run_card(r) }}{% endfor %}
-  {% endif %}
-{% endfor %}
+{% block content %}
+{% set day_args = {} if is_today else {'date': day} %}
+<section class="hero compact">
+  <p class="eyebrow">Checklists · {{ day_label }}</p>
+  <h1 class="headline">{{ part_name }} checklists</h1>
+  <p class="triage">
+    {%- if when == 'now' -%}
+      {% if list_count %}<b>{{ list_count }}</b> list{{ 's' if list_count != 1 }} due now{% if critical_left %} · <b>{{ critical_left }}</b> critical item{{ 's' if critical_left != 1 }} left{% endif %}
+      {%- else %}Nothing due right now{% endif %}
+    {%- elif when == 'later' -%}
+      Later today{% if part_hours %} ({{ part_hours }}){% endif %} · <b>{{ list_count }}</b> list{{ 's' if list_count != 1 }}{% if critical_left %} · <b>{{ critical_left }}</b> critical item{{ 's' if critical_left != 1 }}{% endif %}
+    {%- else -%}
+      {% if when == 'earlier' %}Earlier today · {% endif %}<b>{{ finished_count }}</b> of <b>{{ list_count }}</b> list{{ 's' if list_count != 1 }} finished{% if critical_left %} · <b>{{ critical_left }}</b> critical item{{ 's' if critical_left != 1 }} {{ 'missed' if when == 'past' else 'left' }}{% endif %}
+    {%- endif -%}
+  </p>
+  <nav class="seg fit" aria-label="Daypart">
+    {% for dp in DAYPARTS %}
+    <a href="{{ url_for('shift.checklists', daypart=dp, **day_args) }}"{% if dp == daypart %} class="on" aria-current="page"{% endif %}>{{ daypart_names[dp] }}{% if is_today and dp == now_part %} <span class="live" title="Now"></span><span class="sr">(now)</span>{% endif %}</a>
+    {% endfor %}
+  </nav>
+</section>
+
+{% if not is_today %}
+<p class="callout tan past">{{ icon('history') }}<span>{% if when == 'past' %}Looking back at {{ day_label }}. Lists lock when their day ends.{% else %}{{ day_label }} hasn't happened yet.{% endif %}</span>
+  <a class="textlink" href="{{ url_for('shift.checklists', daypart=daypart) }}">Back to today</a></p>
+{% endif %}
 
 {% if not runs %}
-<div class="empty">
-  {% if day == shift_today %}No active checklist templates — add some under
-  Admin → Checklists.{% else %}Nobody opened the app on {{ day }}, so no
+<div class="empty first-card">
+  {% if is_today %}No checklists yet. An admin adds them under Edit checklist
+  templates.{% else %}Nobody opened the app on {{ day_label }}, so no
   checklists were run that day.{% endif %}
+</div>
+{% else %}
+
+<div class="cols">
+<div class="col">
+{% if live %}
+  {% if open_now %}
+  {% set r = open_now %}
+  <article class="feature cream now" aria-label="Open now">
+    <div class="head">
+      <div>
+        <p class="f-eyebrow">Open now{% if r.from_daypart %} · from {{ r.from_daypart | lower }}{% endif %}{% if r.due_badge %} · {{ r.due_badge | lower }}{% endif %}{% if r.owner %} · owner {{ r.owner }}{% endif %}</p>
+        <p class="f-title">{{ r.name }}</p>
+      </div>
+      <span class="num">{{ r.done }}<small>of {{ r.total }}</small></span>
+    </div>
+    <span class="bar"><span style="width: {{ (r.done / r.total * 100) | round | int if r.total else 0 }}%"></span></span>
+    {% if open_items %}
+    <div class="todo-list">
+      <h3>Still to do</h3>
+      <ul>
+        {% for i in open_items %}
+        <li><span class="pip{{ ' crit' if i.critical }}"></span><span>{{ i.label }}{% if i.critical %} <span class="badge b-red">Critical</span>{% endif %}</span></li>
+        {% endfor %}
+        {% if open_more %}<li class="more"><span class="pip"></span><span>and {{ open_more }} more</span></li>{% endif %}
+      </ul>
+    </div>
+    {% endif %}
+    <div class="cta"><a class="btn btn-primary" href="{{ url_for('shift.run_detail', run_id=r.id) }}">Open the list</a></div>
+  </article>
+  {% else %}
+  <div class="feature cool caught">
+    {{ ring(0, 1) }}
+    <div><p class="f-title">Nothing due right now</p>
+      <p class="f-body">{% if done_now %}Every {{ part_name | lower }} list is done.{% else %}No {{ part_name | lower }} lists today.{% endif %}</p></div>
+  </div>
+  {% endif %}
+
+  {% if also_due %}
+  <section class="sec">
+    <div class="sec-head"><h2>Also due now</h2></div>
+    <div class="card list">{% for r in also_due %}{{ ring_row(r) }}{% endfor %}</div>
+  </section>
+  {% endif %}
+
+  {% if done_now %}
+  <section class="sec">
+    <div class="sec-head"><h2>Finished · {{ part_name | lower }}</h2></div>
+    <div class="card list">{% for r in done_now %}{{ ring_row(r) }}{% endfor %}</div>
+  </section>
+  {% endif %}
+{% else %}
+  {% if mine %}
+  <div class="card list first-card">{% for r in mine %}{{ ring_row(r) }}{% endfor %}</div>
+  {% else %}
+  <div class="empty first-card">No {{ part_name | lower }} lists{{ ' that day' if not is_today }}.</div>
+  {% endif %}
+{% endif %}
+</div>
+
+<div class="col">
+{% if allday %}
+<section class="sec" id="allday">
+  <div class="sec-head"><h2>Station cleaning · all day</h2></div>
+  <p class="sec-note">{{ allday_done }} of {{ allday_total }} done across {{ allday | length }} sheet{{ 's' if allday | length != 1 }}</p>
+  <div class="card list">{% for r in allday %}{{ ring_row(r) }}{% endfor %}</div>
+</section>
+{% endif %}
+</div>
 </div>
 {% endif %}
 
-{% if shift_is_admin %}
-<a class="pill small ghost" href="{{ url_for('shift.admin_templates') }}">Edit checklist templates →</a>
+<div class="cols">
+<div class="col">
+{% if coming %}
+<section class="sec">
+  <div class="sec-head"><h2>Coming up</h2></div>
+  <div class="card list">
+    {% for r in coming %}
+    <a class="row" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
+      <span class="row-main"><span class="row-title">{{ r.name }}</span>
+        <span class="row-meta">{{ r.daypart_name }} ·
+          {% if r.finished %}done{% elif r.done %}{{ r.done }} of {{ r.total }} done{% else %}{{ r.total }} item{{ 's' if r.total != 1 }}{% if r.critical_remaining %} · {{ r.critical_remaining }} critical{% endif %}{% endif %}</span></span>
+      {{ icon('chev', 'chev') }}
+    </a>
+    {% endfor %}
+  </div>
+</section>
 {% endif %}
+
+{% if week or month %}
+<section class="sec" id="period">
+  <div class="sec-head"><h2>Weekly &amp; monthly</h2></div>
+  <div class="card list folds">
+    {% if week %}{{ fold('This week · ' ~ week[0].period_label, week) }}{% endif %}
+    {% if month %}{{ fold('This month · ' ~ month[0].period_label, month) }}{% endif %}
+  </div>
+</section>
+{% endif %}
+</div>
+
+<div class="col">
+<a class="feature cool score" href="{{ url_for('shift.checklist_scorecard') }}">
+  {% if score_pct is not none %}<span class="num">{{ score_pct }}<small>%</small></span>{% endif %}
+  <span><span class="f-title">Scorecard</span>
+    <span class="f-body">{% if score_pct is not none %}Daily list items checked off over the last {{ score_days }} open day{{ 's' if score_days != 1 }}.{% else %}How consistently each list gets done.{% endif %}</span></span>
+</a>
+<div class="card list more-links">
+  <a class="row compact" href="{{ url_for('shift.history') }}"><span class="lead-ico">{{ icon('history') }}</span>
+    <span class="row-main"><span class="row-title">Past days</span><span class="row-meta">Who checked what, lineups and notes</span></span>{{ icon('chev', 'chev') }}</a>
+  <form method="get" action="{{ url_for('shift.checklists') }}" class="day-pick">
+    <label for="pick-day">Checklists for another day</label>
+    <div class="inline-form">
+      <input type="date" id="pick-day" name="date" value="{{ day }}" max="{{ shift_today }}">
+      <input type="hidden" name="daypart" value="{{ daypart }}">
+      <button class="btn btn-secondary sm" type="submit">Go</button>
+    </div>
+  </form>
+  {% if shift_is_admin %}
+  <a class="row compact" href="{{ url_for('shift.admin_templates') }}"><span class="lead-ico">{{ icon('sliders') }}</span>
+    <span class="row-main"><span class="row-title">Edit checklist templates</span><span class="row-meta">Admin leaders + Operator</span></span>{{ icon('chev', 'chev') }}</a>
+  {% endif %}
+</div>
+</div>
+</div>
 {% endblock %}
