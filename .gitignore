@@ -4,3 +4,6 @@ __pycache__/
 *.db
 *.db-wal
 *.db-shm
+
+# Temporary git worktrees made by Claude Code workflows
+.claude/worktrees/
