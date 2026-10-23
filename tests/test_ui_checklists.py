@@ -60,6 +60,24 @@ def tick(name, count=None, skip_critical=False, day="2026-10-23", by="Maya"):
         shift_db.set_item_done(i["id"], True, by)
 
 
+# The seeds' one lunch list (sanitizer & spindles) is all critical items;
+# tests about a mixed list add this one: nine items, the second critical.
+LUNCH_RUSH = [("Menu boards + kiosks on lunch by 10:30", False),
+              ("Breakfast product pulled and waste logged", True),
+              ("Fry station switched to waffle fries", False),
+              ("Breading station set for lunch volume", False),
+              ("Boards stocked for the rush", False),
+              ("Sauces, lids + bags restocked front and DT", False),
+              ("Dining room reset before 11:30", False),
+              ("Lunch lineup reviewed + breaks planned", False),
+              ("Headset batteries swapped", False)]
+SANITIZER_LUNCH = "Sanitizer & spindles — 10:30 / 12:30"
+
+
+def add_lunch_rush():
+    return shift_db.create_template("Lunch Rush", "lunch", "All", LUNCH_RUSH)
+
+
 def section(page, heading):
     """The HTML of one <section> on a page, found by its <h2> heading."""
     start = page.index(f"<h2>{heading}")
@@ -97,12 +115,14 @@ def test_hero_rail_and_daypart_param(client, clock):
 
 def test_open_now_is_a_read_only_preview(client, clock):
     login_operator(client)
+    add_lunch_rush()
     client.get("/shift/checklists")
-    tick("Breakfast → Lunch Transition", count=7, skip_critical=True)
+    tick(SANITIZER_LUNCH)                                    # done: Lunch Rush is open now
+    tick("Lunch Rush", count=7, skip_critical=True)
     page = client.get("/shift/checklists").data.decode()
     card = page[page.index('aria-label="Open now"'):page.index("</article>")]
-    run = run_named("Breakfast → Lunch Transition")
-    assert "Breakfast → Lunch Transition" in card and "7<small>of 9</small>" in card
+    run = run_named("Lunch Rush")
+    assert "Lunch Rush" in card and "7<small>of 9</small>" in card
     _, items = shift_db.run_with_items(run["id"])
     left = [i for i in items if not i["done"]]
     critical = next(i for i in left if i["critical"])
@@ -121,11 +141,13 @@ def test_open_now_lists_more_than_three_with_a_count(client, clock):
     client.get("/shift/checklists")
     page = client.get("/shift/checklists").data.decode()
     card = page[page.index('aria-label="Open now"'):page.index("</article>")]
-    assert card.count("<li") == 4 and "and 6 more" in card     # 9 items, none done
+    assert escape(SANITIZER_LUNCH) in card
+    assert card.count("<li") == 4 and "and 1 more" in card     # 4 items, none done
 
 
 def test_also_due_now_critical_first_with_breakfast_leftovers(client, clock):
     login_operator(client)
+    add_lunch_rush()
     client.get("/shift/checklists")
     for name in ["FOH Opening", "Food Safety Commitment — AM"]:
         tick(name)                                           # breakfast done...
@@ -134,7 +156,9 @@ def test_also_due_now_critical_first_with_breakfast_leftovers(client, clock):
     also = section(page, "Also due now")
     assert "BOH Opening" in also and "From breakfast" in also
     assert "FOH Opening" not in also                         # finished lists never nag
-    assert "Sanitizer &amp; spindles — 10:30 / 12:30" in also
+    assert "Lunch Rush" in also
+    card = page[page.index('aria-label="Open now"'):page.index("</article>")]
+    assert escape(SANITIZER_LUNCH) in card                   # first lunch list, critical
     assert "Drive Thru — Weekly" not in also                 # weekly due Saturday, it's Friday
     boh = run_named("BOH Opening")
     lunch = [r for r in shift_db.runs_for_date("2026-10-23")
@@ -179,7 +203,7 @@ def test_station_cleaning_coming_up_and_links(client, clock):
     assert all(escape(r["name"]) in station for r in allday)
     coming = section(page, "Coming up")
     assert "Afternoon Reset" in coming and "FOH Closing" in coming and "Dinner ·" in coming
-    assert "Breakfast → Lunch Transition" not in coming
+    assert escape(SANITIZER_LUNCH) not in coming             # it's due now, not coming
     assert 'href="/shift/checklists/scorecard"' in page and 'href="/shift/history"' in page
     assert "Edit checklist templates" not in page            # a lead isn't an admin
     client.post("/shift/logout")
@@ -190,8 +214,7 @@ def test_station_cleaning_coming_up_and_links(client, clock):
 def test_nothing_due_and_the_dinner_view(client, clock):
     login_operator(client)
     client.get("/shift/checklists")
-    for name in ["Breakfast → Lunch Transition", "Sanitizer & spindles — 10:30 / 12:30"]:
-        tick(name)
+    tick(SANITIZER_LUNCH)
     for name in ["FOH Opening", "BOH Opening", "Food Safety Commitment — AM"]:
         tick(name)
     page = client.get("/shift/checklists").data.decode()
@@ -203,8 +226,9 @@ def test_nothing_due_and_the_dinner_view(client, clock):
 
 def test_a_past_day(client, clock):
     login_operator(client)
+    add_lunch_rush()
     shift_db.ensure_runs_for_date("2026-10-21")
-    tick("Breakfast → Lunch Transition", count=2, day="2026-10-21")
+    tick("Lunch Rush", count=2, day="2026-10-21")
     page = client.get("/shift/checklists?date=2026-10-21&daypart=lunch").data.decode()
     assert "Checklists · Wed, Oct 21" in page and "Looking back at Wed, Oct 21" in page
     assert 'aria-label="Open now"' not in page and 'class="live"' not in page
@@ -225,9 +249,10 @@ def test_checklists_still_need_a_leader(client, clock):
 
 def test_run_page_keeps_the_script_hooks_and_fields(client, clock):
     login_operator(client)
+    add_lunch_rush()
     client.get("/shift/checklists")
-    run = run_named("Breakfast → Lunch Transition")
-    tick("Breakfast → Lunch Transition", count=1)
+    run = run_named("Lunch Rush")
+    tick("Lunch Rush", count=1)
     page = client.get(f"/shift/checklists/run/{run['id']}").data.decode()
     assert attr_count(page, "data-progress") == 1
     assert attr_count(page, "data-progress-text") == 1 and attr_count(page, "data-critical") == 1

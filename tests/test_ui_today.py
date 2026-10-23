@@ -192,13 +192,13 @@ def test_due_now_breakfast_to_lunch_at_1030(client, clock):
     assert (day, daypart) == (FRI, "breakfast")
     names = titles(rows)
     assert "FOH Opening" in names and "BOH Opening" in names
-    assert "Breakfast → Lunch Transition" not in names
+    assert "Sanitizer & spindles — 10:30 / 12:30" not in names
     assert all(not r["tags"] for r in rows if r["title"] == "BOH Opening")
     tick_all("FOH Opening", FRI, critical_only=True)         # unfinished, nothing critical
     day, daypart, rows = due_now_at(clock, "2026-10-23 10:30")
     assert daypart == "lunch"
     names = titles(rows)
-    assert "Breakfast → Lunch Transition" in names
+    assert "Sanitizer & spindles — 10:30 / 12:30" in names
     assert "FOH Opening" not in names                         # leftover without critical
     boh = next(r for r in rows if r["title"] == "BOH Opening")
     assert ("From breakfast", "b-tan") in boh["tags"]
@@ -211,8 +211,8 @@ def test_due_now_lunch_to_afternoon_at_1400(client, clock):
     _, daypart, rows = due_now_at(clock, "2026-10-23 14:00")
     assert daypart == "afternoon"
     assert "Afternoon Reset" in titles(rows)
-    transition = next(r for r in rows if r["title"] == "Breakfast → Lunch Transition")
-    assert ("From lunch", "b-tan") in transition["tags"]
+    sanitizer = next(r for r in rows if r["title"] == "Sanitizer & spindles — 10:30 / 12:30")
+    assert ("From lunch", "b-tan") in sanitizer["tags"]
 
 
 def test_today_rolls_over_at_4am_not_midnight(client, clock):
