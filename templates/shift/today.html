@@ -1,151 +1,269 @@
 {% extends "shift/base.html" %}
-{% block title %}Today{% endblock %}
+{# Today: a leader's home. Title is plain "Team Hub" (empty title block). #}
+{% block head %}
+<style>
+.ann { margin-top: 18px; padding: 12px 14px 14px 18px; }
+.ann-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ann-head .f-eyebrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ann-head form { margin: 0; flex: 0 0 auto; }
+.ann-head .btn { min-height: 36px; padding: 6px 14px; }
+.ann .f-body { font-size: 1rem; line-height: 1.4; color: var(--text-strong); margin-top: 4px; white-space: pre-line; }
+.ann .ann-more { font-size: var(--fs-small); margin-top: 8px; }
+.wrap > .cols .sec, .wrap > .sec { margin-top: 28px; }
+.lineup { display: grid; grid-template-columns: 1fr 1fr; }
+.lineup > div { padding: 9px 14px 10px 16px; border-top: 1px solid var(--rule); min-width: 0; }
+.lineup > div:nth-child(-n+2) { border-top: 0; }
+.lineup > div:nth-child(odd) { border-right: 1px solid var(--rule); }
+.lineup .pos { font-size: 0.6875rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.lineup .who { font-weight: 700; color: var(--text-strong); font-size: 1rem; margin-top: 1px; }
+.lineup .open { background: var(--red-050); }
+.lineup .open .pos { color: var(--red-700); }
+.lineup .open .who { color: var(--accent); display: flex; align-items: center; gap: 4px; }
+.quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.quick .btn { min-width: 0; padding: 8px 6px; gap: 4px; }
+.goal-row .num { font-size: 1.5rem; line-height: 1; }
+.goal-row .num small { font-size: 0.875rem; color: var(--text-muted); margin-left: 1px; letter-spacing: 0; }
+.goal-row .bar { margin-top: 8px; }
+/* A 44px tap target around the to-do circle */
+.tick-form { margin: -8px -4px -8px -8px; flex: 0 0 auto; }
+.tick { width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 0; cursor: pointer; padding: 0; }
+.tick::before { content: ""; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--gray-400); background: #fff; }
+.tick:hover::before { border-color: var(--ok); }
+.row-meta .stale { color: var(--red-700); font-weight: 700; }
+/* cfa_style's legacy ".badge" gray (Hub badges by meaning) sits after the
+   b-* colours and wins; restate the two this page uses. */
+.badge.b-red { background: var(--red-100); color: var(--red-700); }
+.badge.b-tan { background: var(--tan-300); color: var(--tan-ink); }
+@media (min-width: 960px) {
+  .top { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; padding-top: 12px; }
+  .top.solo { display: block; }
+  .top .ann { margin-top: 22px; }
+  .cols { display: grid; grid-template-columns: 1.08fr 1fr; gap: 0 40px; align-items: start; }
+}
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">Today</h1>
-<div class="sub">{{ shift_today }} · currently <strong>{{ DAYPART_LABELS[shift_daypart] }}</strong></div>
+<div class="top{{ ' solo' if not announcement }}">
+  <section class="hero compact">
+    <p class="eyebrow">{{ eyebrow }}</p>
+    {% if need_count %}
+    <h1 class="headline">{{ need_count }} thing{{ 's' if need_count != 1 }} need{{ 's' if need_count == 1 }} you{% if first_name %}, {{ first_name }}{% endif %}.</h1>
+    <p class="triage">{% for n, word in triage %}<b>{{ n }}</b> {{ word }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+    {% else %}
+    <h1 class="headline">You're all caught up{% if first_name %}, {{ first_name }}{% endif %}.</h1>
+    <p class="triage">{% if due %}Nothing critical left · <b>{{ due | length }}</b> list{{ 's' if due | length != 1 }} still open{% else %}Nothing due right now.{% endif %}</p>
+    {% endif %}
+  </section>
 
-{% for a in announcements %}
-<div class="card" style="border-color: var(--cfa-red);">
-  <div style="display:flex; gap:10px; align-items:flex-start;">
-    <div style="font-size:20px;">📣</div>
-    <div style="flex:1;">
-      <div style="font-size:15px; white-space:pre-line;">{{ a.body }}</div>
-      <div class="progress-note">{{ a.author }} · {{ a.created_at }}</div>
+  {% if announcement %}
+  {% set a = announcement %}
+  <article class="feature cream ann" aria-label="Announcement">
+    <div class="ann-head">
+      <p class="f-eyebrow">{{ icon('mega', 'xs') }}<span>From {{ a.author_label or 'a leader' }}{% if a.when %} · {{ a.when }}{% endif %}</span></p>
+      <form method="post" action="{{ url_for('shift.announcement_ack', announcement_id=a.id) }}">
+        <input type="hidden" name="next" value="{{ url_for('shift.today') }}">
+        <button class="btn btn-primary sm" type="submit">{{ icon('check', 'sm') }}Got it</button>
+      </form>
     </div>
-  </div>
-  <form method="post" action="{{ url_for('shift.announcement_ack', announcement_id=a.id) }}" style="margin-top:10px;">
-    <input type="hidden" name="next" value="{{ url_for('shift.today') }}">
-    <button class="pill primary small" type="submit">Got it ✓</button>
-  </form>
-</div>
-{% endfor %}
-
-{% if my_tasks %}
-<div class="section-label">Your to-dos</div>
-<a class="card tap" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) }}">
-  {% for t in my_tasks %}
-  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px; align-items:baseline;">
-    <span style="color:var(--soft);">▢</span>
-    <span style="flex:1; font-weight:700;">{{ t.title }}</span>
-    {% if t.due_date %}<span class="progress-note" style="margin:0;{% if t.overdue %} color:var(--cfa-red); font-weight:700;{% endif %}">due {{ t.due_date }}</span>{% endif %}
-  </div>
-  {% endfor %}
-  <div class="progress-note">Tap to open and check off</div>
-</a>
-{% endif %}
-
-{% if open_recoveries or awaiting_recoveries %}
-<div class="section-label">Guest recovery</div>
-<a class="card tap" {% if open_recoveries %}style="border-color: var(--cfa-red);"{% endif %} href="{{ url_for('shift.recovery') }}">
-  {% for r in open_recoveries[:3] %}
-  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px; align-items:baseline;">
-    <span style="flex:1; font-weight:700;">{{ r.guest_name }}</span>
-    <span class="progress-note" style="margin:0;">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
-    {% if r.follow_up %}<span>📞</span>{% endif %}
-    {% if r.age_days %}<span class="progress-note" style="margin:0;{% if r.stale %} color:var(--cfa-red); font-weight:700;{% endif %}">{{ r.age_days }}d</span>{% endif %}
-  </div>
-  {% endfor %}
-  {% if open_recoveries | length > 3 %}
-  <div style="font-size:13px; color:var(--soft); padding:3px 0;">+{{ open_recoveries | length - 3 }} more</div>
+    <p class="f-body">{{ a.body }}{% if a.page_id %} <a class="textlink" href="{{ url_for('hub.page', page_id=a.page_id) }}">Open&nbsp;the&nbsp;page</a>{% endif %}</p>
+    {% if more_unread %}
+    <p class="ann-more"><a class="textlink" href="{{ url_for('shift.announcements') }}">{{ more_unread }} more announcement{{ 's' if more_unread != 1 }} to read</a></p>
+    {% endif %}
+  </article>
   {% endif %}
-  {% if awaiting_recoveries %}
-  <div style="font-size:13px; padding:3px 0;">📞 {{ awaiting_recoveries | length }} contacted — coming back
-    ({{ awaiting_recoveries[:2] | map(attribute='guest_name') | join(', ') }}{{ '…' if awaiting_recoveries | length > 2 }})</div>
-  {% endif %}
-  <div class="progress-note">{% if open_recoveries %}{{ open_recoveries | length }} guest{{ 's' if open_recoveries | length != 1 }} waiting — tap to resolve or log a new one{% else %}Hand over what was promised when they're in, then mark it done{% endif %}</div>
-</a>
-{% endif %}
-
-<div class="section-label">This daypart's checklists</div>
-{% for r in current_runs %}
-<a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
-  <h2>{{ r.name }} {% if r.critical_remaining %}<span class="critical-flag">● {{ r.critical_remaining }} critical left</span>{% endif %}</h2>
-  <div class="bar {{ 'full' if r.done == r.total and r.total }}"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
-  <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.area }}{% if r.owner %} · owner {{ r.owner }}{% endif %}{% if r.verified_by %} · ✓ checked by {{ r.verified_by }}{% endif %}</div>
-</a>
-{% else %}
-<div class="empty">No checklists for this daypart. See all of today's under the ✅ tab.</div>
-{% endfor %}
-
-{% if due_runs %}
-<div class="section-label">Weekly &amp; monthly — due</div>
-{% for r in due_runs %}
-<a class="card tap" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
-  <h2>{{ r.name }} <span class="critical-flag">● {{ r.due_note }}</span></h2>
-  <div class="bar"><span style="width: {{ (r.done / r.total * 100) | round if r.total else 0 }}%"></span></div>
-  <div class="progress-note">{{ r.done }} of {{ r.total }} done · {{ r.period_label }}</div>
-</a>
-{% endfor %}
-{% endif %}
-
-{% if other_runs %}
-<div class="section-label">Rest of today</div>
-<div class="card">
-  {% for r in other_runs %}
-  <div style="display:flex; align-items:center; gap:10px; padding:6px 0;">
-    <a href="{{ url_for('shift.run_detail', run_id=r.id) }}" style="flex:1; text-decoration:none; font-weight:700; font-size:14px;">{{ r.name }}</a>
-    <span class="progress-note" style="margin:0;">{{ r.done }}/{{ r.total }}</span>
-  </div>
-  {% endfor %}
 </div>
-{% endif %}
 
-<div class="section-label">{{ DAYPART_LABELS[shift_daypart] }} lineup</div>
-<a class="card tap" href="{{ url_for('shift.lineup') }}">
-  {% if lineup %}
-    {% for p in positions if p.id in lineup %}
-      <div style="display:flex; gap:8px; padding:3px 0; font-size:14px;">
-        <span style="color:var(--soft); flex:0 0 46%;">{{ p.name }}</span>
-        <strong>{{ lineup[p.id] | map(attribute='member_name') | join(', ') }}</strong>
+<div class="cols">
+  <div class="col-a">
+    <section class="sec" aria-labelledby="due-head">
+      <div class="sec-head"><h2 id="due-head">Due now</h2><a class="more" href="{{ url_for('shift.checklists') }}">All checklists</a></div>
+      <div class="card list">
+        {% for row in due %}
+        <a class="row" href="{{ url_for('shift.run_detail', run_id=row.run_id) if row.kind == 'run' else url_for('shift.checklists') ~ '#allday' }}">
+          {{ ring(row.left, row.total, row.critical > 0) }}
+          <span class="row-main">
+            <span class="row-title">{{ row.title }}</span>
+            {% if row.critical or row.tags %}
+            <span class="row-meta tags">{% if row.critical %}<span class="badge b-red"><span class="dot"></span>{{ row.critical }} critical</span>{% endif %}{% for label, tone in row.tags %}<span class="badge {{ tone }}">{{ label }}</span>{% endfor %}{% if row.meta %}<span>{{ row.meta }}</span>{% endif %}</span>
+            {% else %}
+            <span class="row-meta">{{ row.meta }}</span>
+            {% endif %}
+          </span>{{ icon('chev', 'chev') }}
+        </a>
+        {% else %}
+        <a class="row" href="{{ url_for('shift.checklists') }}">
+          <span class="lead-ico green">{{ icon('check') }}</span>
+          <span class="row-main">
+            <span class="row-title">Nothing due right now</span>
+            <span class="row-meta">Every {{ daypart_word | lower }} list is done. Later dayparts are on Checklists.</span>
+          </span>{{ icon('chev', 'chev') }}
+        </a>
+        {% endfor %}
       </div>
-    {% endfor %}
-    <div class="progress-note">Tap to edit</div>
-  {% else %}
-    <div style="color:var(--soft); font-size:14px;">No lineup for {{ DAYPART_LABELS[shift_daypart] }} yet — tap to set it up or copy from yesterday.</div>
-  {% endif %}
-</a>
+    </section>
 
-<div class="section-label">Goals</div>
-{% for g in goals[:3] %}
-<a class="card tap" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}">
-  <h2>{{ g.title }}</h2>
-  {% if g.progress_pct is not none %}
-  <div class="bar {{ 'full' if g.progress_pct >= 100 }}"><span style="width: {{ g.progress_pct }}%"></span></div>
-  <div class="progress-note">{{ g.latest_value | num }} {{ g.unit }} · target {{ g.target_value | num }} {{ g.unit }} · {{ g.progress_pct }}%</div>
-  {% else %}
-  <div class="progress-note">{{ g.period }}{% if g.due_date %} · due {{ g.due_date }}{% endif %} · tap to log progress</div>
-  {% endif %}
-</a>
-{% else %}
-<div class="empty">No active goals — set one under the 🎯 tab.</div>
-{% endfor %}
-{% if goals | length > 3 %}
-<a class="pill small ghost" href="{{ url_for('shift.goals') }}">All goals →</a>
-{% endif %}
+    {% if guest_rows or tasks or to_read %}
+    <section class="sec" aria-labelledby="also-head">
+      <div class="sec-head"><h2 id="also-head">Also needs you</h2></div>
+      <div class="card list">
+        {% for g in guest_rows %}
+        <a class="row" href="{{ url_for('shift.recovery') }}#rec-{{ g.id }}">
+          {% if g.coming %}
+          <span class="lead-ico">{{ icon('phone') }}</span>
+          <span class="row-main">
+            <span class="row-title">{{ g.name }} is coming back</span>
+            <span class="row-meta">Hand over what was promised: {{ g.remedy }}{% if g.note %} · {{ g.note }}{% endif %}{% if g.waiting >= 7 %} · <span class="stale">waiting {{ g.waiting }}d</span>{% endif %}</span>
+          </span>
+          {% else %}
+          <span class="lead-ico red">{{ icon('heart') }}</span>
+          <span class="row-main">
+            <span class="row-title">{% if g.call_back %}Call {{ g.name }} back{% else %}Follow up with {{ g.name }}{% endif %}</span>
+            <span class="row-meta">{{ g.details or g.issue }} · {{ g.remedy }}{% if g.age %} · <span class="{{ 'stale' if g.stale }}">{{ g.age }}d open</span>{% endif %}</span>
+          </span>
+          {% endif %}{{ icon('chev', 'chev') }}
+        </a>
+        {% endfor %}
+        {% if guests_hidden %}
+        <a class="row compact" href="{{ url_for('shift.recovery') }}">
+          <span class="row-main row-meta" style="margin:0;">+{{ guests_hidden }} more · {% if open_guests %}{{ open_guests }} guest{{ 's' if open_guests != 1 }} waiting{% if coming_back %}, {{ coming_back }} coming back{% endif %}{% else %}{{ coming_back }} coming back{% endif %}</span>{{ icon('chev', 'chev') }}
+        </a>
+        {% endif %}
 
-<div class="section-label">🌟 Shout-outs</div>
-<a class="card tap" href="{{ url_for('shift.shoutouts') }}">
-  {% for s in shoutouts %}
-  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px; align-items:baseline;">
-    <span>🌟</span>
-    <span style="flex:1;"><strong>{{ s.member_name }}</strong>
-      {% if s.value_tag %}<span class="note-cat cat-win">{{ SHOUTOUT_VALUE_LABELS.get(s.value_tag, s.value_tag) }}</span>{% endif %}
-      — {{ s.message | truncate(60) }}</span>
+        {% for t in tasks %}
+        <div class="row">
+          <form class="tick-form" method="post" action="{{ url_for('shift.todo_toggle', task_id=t.id) }}">
+            <input type="hidden" name="done" value="1">
+            <button class="tick" type="submit" aria-label="Mark done: {{ t.title }}"></button>
+          </form>
+          <a class="row-main" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) }}#task-{{ t.id }}">
+            <span class="row-title">{{ t.title }}</span>
+            <span class="row-meta">{% if t.due_date == day %}<span class="due-red">Due today</span>{% elif t.overdue %}<span class="due-red">Overdue · was due {{ short_date(t.due_date) }}</span>{% elif t.due_date %}Due {{ short_date(t.due_date) }}{% else %}To-do{% endif %}{% if t.assigned_by and t.assigned_by != first_name and t.assigned_by != shift_name %} · from {{ 'the Operator' if t.assigned_by == 'Operator' else t.assigned_by }}{% endif %}</span>
+          </a>{{ icon('chev', 'chev') }}
+        </div>
+        {% endfor %}
+        {% if task_total > tasks | length %}
+        <a class="row compact" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) }}">
+          <span class="row-main row-meta" style="margin:0;">All {{ task_total }} of your to-dos</span>{{ icon('chev', 'chev') }}
+        </a>
+        {% endif %}
+
+        {% if to_read %}
+        <a class="row" href="{{ url_for('hub.to_read') }}">
+          <span class="lead-ico navy">{{ icon('bookmark') }}</span>
+          <span class="row-main">
+            <span class="row-title">{{ to_read | length }} page{{ 's' if to_read | length != 1 }} to read</span>
+            <span class="row-meta">{% for p in to_read[:3] %}{{ p.title }}{% if p.last_ack %} (updated){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}{% if to_read | length > 3 %} · +{{ to_read | length - 3 }} more{% endif %}</span>
+          </span>{{ icon('chev', 'chev') }}
+        </a>
+        {% endif %}
+      </div>
+    </section>
+    {% endif %}
   </div>
-  {% else %}
-  <div style="font-size:14px; color:var(--soft);">Catch someone doing it right — give this week's first shout-out.</div>
-  {% endfor %}
-  <div class="progress-note">Tap to recognize a team member</div>
-</a>
 
-<div class="section-label">Today's notes</div>
-{% for n in notes %}
-<div class="card">
-  <span class="note-cat cat-{{ n.category }}">{{ n.category }}</span>
-  <div style="font-size:14px; margin-top:6px; white-space:pre-line;">{{ n.body }}</div>
-  <div class="progress-note">{{ n.author }} · {{ n.created_at }}{% if n.daypart %} · {{ n.daypart }}{% endif %}</div>
+  <div class="col-b">
+    <section class="sec" aria-labelledby="lineup-head">
+      <div class="sec-head"><h2 id="lineup-head">{{ daypart_word }} lineup{% if lineup.started and lineup.open %} <span class="badge b-red">{{ lineup.open }} open</span>{% endif %}</h2><a class="more" href="{{ url_for('shift.lineup') }}">Edit</a></div>
+      <a class="card list" href="{{ url_for('shift.lineup') }}">
+        {% if lineup.started %}
+        <div class="lineup">
+          {% for c in lineup.cells %}
+          {% if c.open %}
+          <div class="open"><div class="pos">{{ c.pos }}</div><div class="who">Open — fill {{ icon('chev', 'xs') }}</div></div>
+          {% else %}
+          <div><div class="pos">{{ c.pos }}</div><div class="who">{{ c.who }}</div></div>
+          {% endif %}
+          {% endfor %}
+        </div>
+        <div class="row compact"><span class="row-main row-meta" style="margin:0;">All {{ lineup.total }} positions · {{ lineup.filled }} filled</span>{{ icon('chev', 'chev') }}</div>
+        {% else %}
+        <div class="row">
+          <span class="lead-ico">{{ icon('users') }}</span>
+          <span class="row-main">
+            <span class="row-title">No {{ daypart_word | lower }} lineup yet</span>
+            <span class="row-meta">Set it up, or copy yesterday's.</span>
+          </span>{{ icon('chev', 'chev') }}
+        </div>
+        {% endif %}
+      </a>
+    </section>
+
+    <section class="sec" aria-labelledby="log-head">
+      <div class="sec-head"><h2 id="log-head">Shift log</h2><a class="more" href="{{ url_for('shift.notes') }}">All notes</a></div>
+      <div class="quick">
+        <a class="btn btn-secondary sm" href="{{ url_for('shift.notes') }}#n-body">{{ icon('plus', 'sm') }}Note</a>
+        <a class="btn btn-secondary sm" href="{{ url_for('shift.recovery') }}#r-name">{{ icon('plus', 'sm') }}Guest</a>
+        <a class="btn btn-secondary sm" href="{{ url_for('shift.shoutouts') }}#s-name">{{ icon('plus', 'sm') }}Shout-out</a>
+      </div>
+      <div class="card list">
+        {% if latest_note %}
+        <a class="row" href="{{ url_for('shift.notes') }}">
+          <span class="lead-ico">{{ icon('note') }}</span>
+          <span class="row-main">
+            <span class="row-title">{{ latest_note.body | truncate(90) }}</span>
+            <span class="row-meta">{{ note_label(latest_note.category) }}{% if latest_note.author %} · {{ latest_note.author }}{% endif %} · {{ clock(latest_note.created_at) }}</span>
+          </span>{{ icon('chev', 'chev') }}
+        </a>
+        {% else %}
+        <a class="row" href="{{ url_for('shift.notes') }}">
+          <span class="lead-ico">{{ icon('note') }}</span>
+          <span class="row-main">
+            <span class="row-title">No notes yet today</span>
+            <span class="row-meta">Leave the next shift a handoff.</span>
+          </span>{{ icon('chev', 'chev') }}
+        </a>
+        {% endif %}
+        {% if latest_shoutout %}
+        {% set s = latest_shoutout %}
+        <a class="row" href="{{ url_for('shift.shoutouts') }}#shout-{{ s.id }}">
+          <span class="lead-ico gold">{{ icon('star') }}</span>
+          <span class="row-main">
+            <span class="row-title">{{ s.member_name }}{% if s.value_tag %} · {{ shoutout_value(s.value_tag) }}{% endif %}</span>
+            <span class="row-meta">{{ s.message | truncate(90) }}{% if s.author %} · from {{ 'the Operator' if s.author == 'Operator' else s.author }}{% endif %}</span>
+          </span>{{ icon('chev', 'chev') }}
+        </a>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="sec" aria-labelledby="goals-head">
+      <div class="sec-head"><h2 id="goals-head">Goals</h2><a class="more" href="{{ url_for('shift.goals') }}">All goals</a></div>
+      <div class="card list">
+        {% for g in goals %}
+        <a class="row goal-row" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}">
+          <span class="row-main">
+            <span class="row-title">{{ g.title }}</span>
+            {% if g.pct is not none %}<span class="bar {{ 'done' if g.pct >= 100 else 'navy' }}"><span style="width:{{ g.pct }}%"></span></span>{% endif %}
+            <span class="row-meta">{{ g.line }}</span>
+          </span>
+          {% if g.value is not none %}<span class="num">{{ g.prefix }}{{ g.value }}{% if g.suffix %}<small>{{ g.suffix }}</small>{% endif %}</span>{% else %}{{ icon('chev', 'chev') }}{% endif %}
+        </a>
+        {% else %}
+        <a class="row" href="{{ url_for('shift.goals') }}">
+          <span class="lead-ico">{{ icon('target') }}</span>
+          <span class="row-main">
+            <span class="row-title">No store goals yet</span>
+            <span class="row-meta">Set one the whole team can chase.</span>
+          </span>{{ icon('chev', 'chev') }}
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
 </div>
-{% else %}
-<div class="empty">No notes yet today — leave the next shift a handoff under 📝.</div>
-{% endfor %}
+
+<section class="sec" aria-labelledby="tiles-head">
+  <div class="sec-head"><h2 id="tiles-head">Everything in Team Hub</h2></div>
+  {% set meetings = (nav.tabs | selectattr('key', 'equalto', 'meetings') | first) if nav else none %}
+  <div class="tiles small">
+    {% if hub_on %}
+    <a class="tile" href="{{ url_for('hub.library') }}"><span class="tile-art">{{ art('procedures') }}</span><span class="tile-name">Systems &amp; Procedures</span><span class="tile-meta">{% if to_read %}{{ to_read | length }} to read{% else %}Up to date{% endif %}</span></a>
+    {% endif %}
+    <a class="tile" href="{{ url_for('shift.checklists') }}"><span class="tile-art">{{ art('checklists') }}</span><span class="tile-name">Checklists</span><span class="tile-meta">{% if due %}{{ due | length }} due now{% else %}All done for now{% endif %}</span></a>
+    <a class="tile" href="{{ url_for('shift.lineup') }}"><span class="tile-art">{{ art('lineup') }}</span><span class="tile-name">Lineups &amp; Setups</span><span class="tile-meta">{% if not lineup.started %}Not set yet{% elif lineup.open %}{{ lineup.open }} open{% else %}All filled{% endif %}</span></a>
+    <a class="tile" href="{{ url_for('shift.goals') }}"><span class="tile-art">{{ art('goals') }}</span><span class="tile-name">Goals</span><span class="tile-meta">{% if goal_count %}{{ goal_count }} active{% else %}None yet{% endif %}</span></a>
+    <a class="tile" href="{{ url_for('shift.oneonone') }}"><span class="tile-art">{{ art('meetings') }}{% if meetings and meetings.count %}<span class="count">{{ meetings.count }}</span>{% endif %}</span><span class="tile-name">Meetings</span><span class="tile-meta">{% if meetings and meetings.count %}{{ meetings.count }} open topic{{ 's' if meetings.count != 1 }}{% else %}Nothing open{% endif %}</span></a>
+    <a class="tile" href="{{ url_for('shift.development') }}"><span class="tile-art">{{ art('ld') }}</span><span class="tile-name">Leadership Development</span><span class="tile-meta">{% if course.total is defined %}{{ course.done }} of {{ course.total }} lessons{% else %}{{ course.leaders }} leader{{ 's' if course.leaders != 1 }} in the course{% endif %}</span></a>
+  </div>
+</section>
 {% endblock %}

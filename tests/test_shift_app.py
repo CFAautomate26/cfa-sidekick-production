@@ -245,9 +245,10 @@ def _today_run(name):
 def test_today_shows_all_day_cleaning_lists(client):
     login_operator(client)
     page = client.get("/shift/").data.decode()
-    current = page[page.index("This daypart's checklists"):]
-    assert "Dining Room &amp; Washrooms — Daily" in current
-    assert "Drive Thru — Daily" in current
+    current = page[page.index("Due now"):]
+    # Sheets with no critical items left fold into one row (Team Hub Today)
+    assert "Station cleaning sheets" in current
+    assert "/shift/checklists#allday" in current
 
 
 def test_due_period_runs_rules():
@@ -1798,7 +1799,7 @@ def test_recovery_contact_route_flow(client):
     assert b"Waiting to come back (1)" in page and b"coming Saturday" in page
 
     today_page = client.get("/shift/").data
-    assert "📞 1 contacted — coming back".encode() in today_page
+    assert b"Jordan is coming back" in today_page
     assert b"Jordan" in today_page
 
     # Second contact from a stale page: told, first stamp kept
@@ -1834,7 +1835,7 @@ def test_recovery_contacted_now_checkbox(client):
     assert b"Nobody left to contact" in page
     # Today card renders in its calm (non-red) awaiting-only form
     today_page = client.get("/shift/").data
-    assert "📞 1 contacted — coming back".encode() in today_page
+    assert b"Sam is coming back" in today_page
     assert b"Hand over what was promised" in today_page
     # More badge must agree: no red "open" badge, a calm coming-back note
     more_page = client.get("/shift/more").data
