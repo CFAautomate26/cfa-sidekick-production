@@ -1186,3 +1186,15 @@ def test_bundle_import_takes_a_text_file_or_several_files(client):
     resp = client.post("/hub/import-bundle", data={"file": (io.BytesIO(b"\xff\xfe"), "bad.txt")},
                        content_type="multipart/form-data", follow_redirects=True)
     assert b"Nothing could be imported" in resp.data and b"not readable UTF-8" in resp.data
+
+
+def test_bundle_import_accepts_pasted_text(client):
+    login_operator(client)
+    text = (_bundle_page("BOH Operations", "Breading") + "\r\n\r\n=====\r\n\r\n"
+            + _bundle_page("FOH Operations", "Drive-thru", section="Service"))
+    resp = client.post("/hub/import-bundle", data={"text": text}, follow_redirects=True)
+    assert b"2 pages published" in resp.data, resp.data[:300]
+    operator = hub_db.Viewer("operator", None, "Operator", "admin")
+    assert [p["title"] for p in hub_db.pages_for_category(operator, category_id("BOH Operations"))] == ["Breading"]
+    resp = client.post("/hub/import-bundle", data={"text": "   "}, follow_redirects=True)
+    assert b"Pick the bundle file first" in resp.data
