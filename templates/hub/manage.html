@@ -1,0 +1,125 @@
+{% extends "hub/base.html" %}
+{% from "hub/_ui.html" import crumbs with context %}
+{% block title %}Manage pages{% endblock %}
+{% block head %}{% include "hub/_style.html" %}
+<style>.more-row .row-title { color: var(--nav); }</style>
+{% endblock %}
+{% block content %}
+{{ crumbs([('Procedures', url_for('hub.library')), ('Manage pages', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Editor tools{% if viewer.is_operator %} · Operator{% endif %}</p>
+  <h1 class="headline">Manage pages</h1>
+  <p class="triage">{{ queues.drafts|length }} draft{{ '' if queues.drafts|length == 1 else 's' }} · {{ queues.review_due|length }} review{{ '' if queues.review_due|length == 1 else 's' }} due · {{ queues.counsel|length }} flagged for a lawyer</p>
+  <div class="btnrow">
+    <a class="btn btn-primary sm" href="{{ url_for('hub.new_page') }}">{{ icon('plus') }}New page</a>
+    {% if viewer.is_operator %}<a class="btn btn-secondary sm" href="{{ url_for('hub.people') }}">{{ icon('key') }}Team Hub access</a>{% endif %}
+  </div>
+</section>
+
+{% macro page_rows(pages, empty, review=false) %}
+  {% if pages %}
+  <div class="card list">
+  {% for p in pages %}
+    <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span>
+      <span class="row-meta">{{ p.category_name }}{% if p.section %} · {{ p.section }}{% endif %} · {{ day(p.updated_at) }} by {{ p.updated_by }}</span>
+      {%- if review and p.review_by %}<span class="row-meta tags"><span class="badge b-red">Review by {{ day(p.review_by) }}</span></span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
+  {% endfor %}
+  </div>
+  {% else %}<p class="note" style="margin-top:0;">{{ empty }}</p>{% endif %}
+{% endmacro %}
+
+{% macro activity_row(a) -%}
+<div class="row compact"><span class="row-main"><span class="row-title">{{ a.action[:1]|upper ~ a.action[1:] }}{% if a.title %} — <a class="textlink" href="{{ url_for('hub.page', page_id=a.page_id) }}">{{ a.title }}</a>{% elif a.detail %} — {{ a.detail }}{% endif %}</span><span class="row-meta">{{ a.who }} · {{ when(a.at) }}</span></span></div>
+{%- endmacro %}
+
+<section class="sec" id="drafts">
+  <div class="sec-head"><h2>Drafts {% if queues.drafts %}<span class="badge b-tan">{{ queues.drafts|length }} waiting</span>{% endif %}</h2></div>
+  {{ page_rows(queues.drafts, 'No drafts.') }}
+</section>
+<section class="sec" id="reviews">
+  <div class="sec-head"><h2>Yearly reviews {% if queues.review_due %}<span class="badge b-red">{{ queues.review_due|length }} due</span>{% endif %}</h2></div>
+  {{ page_rows(queues.review_due, 'Nothing due in the next 30 days.', review=true) }}
+</section>
+<section class="sec" id="counsel">
+  <div class="sec-head"><h2>Lawyer review {% if queues.counsel %}<span class="badge b-red">{{ queues.counsel|length }} flagged</span>{% endif %}</h2></div>
+  {{ page_rows(queues.counsel, 'Nothing flagged.') }}
+</section>
+{% if queues.retired %}
+<details class="card list tool" style="margin-top:20px;">
+  <summary class="row"><span class="row-main"><span class="row-title">Retired pages</span><span class="row-meta">{{ queues.retired|length }} · editors only</span></span>{{ icon('chev', 'chev') }}</summary>
+  {% for p in queues.retired %}
+  <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span><span class="row-meta">{{ p.category_name }} · {{ day(p.updated_at) }} by {{ p.updated_by }}</span></span>{{ icon('chev', 'chev') }}</a>
+  {% endfor %}
+</details>
+{% endif %}
+
+<section class="sec" id="import">
+  <div class="sec-head"><h2>Import a Word doc</h2></div>
+  <form method="post" action="{{ url_for('hub.import_word') }}" enctype="multipart/form-data" class="card">
+    <label class="field" for="imp-cat">Category</label>
+    <select id="imp-cat" name="category_id" required>
+      <option value="">Pick one…</option>
+      {% for c in categories if c.active %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+    </select>
+    <label class="field" for="imp-section">Section <small>(optional)</small></label>
+    <input type="text" id="imp-section" name="section" maxlength="60" placeholder="e.g. Training">
+    <label class="field" for="imp-file">Word file (.docx)</label>
+    <input type="file" id="imp-file" name="file" accept=".docx" required>
+    <p class="fine-line">It becomes a draft page: headings, lists and tables come across. The file itself isn't kept — attach it to the page if people should download it.</p>
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">{{ icon('upload') }}Import</button></div>
+  </form>
+</section>
+
+<section class="sec" id="categories">
+  <div class="sec-head"><h2>Categories</h2></div>
+  <div class="card list">
+  {% for c in categories %}
+  <details class="tool">
+    <summary class="row"><span class="lead-ico">{{ c.icon }}</span><span class="row-main"><span class="row-title">{{ c.name }}</span>
+      {%- if c.leaders_only or c.policy or not c.active %}<span class="row-meta tags">
+        {%- if c.leaders_only %}<span class="badge b-navy">{{ icon('lock', 'xs') }}Leaders</span>{% endif %}
+        {%- if c.policy %}<span class="badge b-red">Operator publishes</span>{% endif %}
+        {%- if not c.active %}<span class="badge b-tan">Hidden</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      {% if viewer.is_operator %}
+      <form method="post" action="{{ url_for('hub.save_category') }}">
+        <input type="hidden" name="category_id" value="{{ c.id }}">
+        {% include "hub/_category_fields.html" %}
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save</button></div>
+      </form>
+      {% else %}<p class="fine-line" style="margin:0;">{{ c.blurb or 'No description.' }} Only the Operator changes categories.</p>{% endif %}
+    </div>
+  </details>
+  {% endfor %}
+  {% if viewer.is_operator %}
+  <details class="tool">
+    <summary class="row"><span class="lead-ico">{{ icon('plus') }}</span><span class="row-main"><span class="row-title">Add a category</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      <form method="post" action="{{ url_for('hub.save_category') }}">
+        {% set c = {'name': '', 'icon': '📘', 'blurb': '', 'leaders_only': 0, 'policy': 0, 'active': 1, 'sort': categories|length} %}
+        {% include "hub/_category_fields.html" %}
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add</button></div>
+      </form>
+    </div>
+  </details>
+  {% endif %}
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><h2>Recent activity</h2></div>
+  <div class="card list">
+  {% for a in log[:10] %}
+    {{ activity_row(a) }}
+  {% else %}
+    <div class="row compact"><span class="row-main"><span class="row-meta">Nothing yet.</span></span></div>
+  {% endfor %}
+  {% if log|length > 10 %}
+  <details class="tool">
+    <summary class="row compact more-row"><span class="row-main"><span class="row-title">Show {{ log|length - 10 }} more</span></span>{{ icon('chev', 'chev') }}</summary>
+    {% for a in log[10:] %}{{ activity_row(a) }}{% endfor %}
+  </details>
+  {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -19,6 +19,11 @@ from slack_coverage import slack_bp
 app = Flask(__name__)
 app.register_blueprint(slack_bp)
 
+# Team Hub's icons, section art and progress rings, for every template.
+import teamhub_ui  # noqa: E402
+
+teamhub_ui.register(app)
+
 # Signed session cookies for the shift leading app. Prefer a dedicated
 # FLASK_SECRET_KEY; otherwise derive a stable key from the secrets actually
 # configured in the environment (so sessions survive deploys). If neither
@@ -59,6 +64,17 @@ try:
 except Exception as e:  # pragma: no cover - defensive boot guard
     shift_db = None
     print(f"WARNING: shift leading app failed to load, bots unaffected: {e!r}")
+
+# The Team Hub shares the shift app's database and logins; registered on its
+# own so a Hub problem can't take down /shift (or the bots).
+if shift_db is not None:
+    try:
+        from hub import hub_bp
+
+        app.register_blueprint(hub_bp)
+        print("Team Hub registered at /hub")
+    except Exception as e:  # pragma: no cover - defensive boot guard
+        print(f"WARNING: Team Hub failed to load, /shift and bots unaffected: {e!r}")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GROUPME_BOT_ID = os.getenv("GROUPME_BOT_ID")

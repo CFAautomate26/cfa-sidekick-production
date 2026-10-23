@@ -12,6 +12,7 @@ should attach a persistent disk and point SHIFT_DB_PATH at it, e.g.
 """
 
 import json
+import math
 import os
 import re
 import secrets
@@ -429,6 +430,140 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_lineup_slot
     ON lineup_assignments(lineup_date, daypart, position_id, member_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_notes_date ON shift_notes(note_date);
 CREATE INDEX IF NOT EXISTS idx_goal_updates_goal ON goal_updates(goal_id);
+
+-- ---------------------------------------------------------------------------
+-- Team Hub (/hub): the store's "how we do it" library — see hub_db.py and
+-- docs/team-hub.md. Processes and policies only, never personnel records.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS hub_categories (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT '📘',
+    blurb TEXT NOT NULL DEFAULT '',
+    leaders_only INTEGER NOT NULL DEFAULT 0,
+    policy INTEGER NOT NULL DEFAULT 0,          -- HR-style: only the Operator publishes
+    sort INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+-- A page's live state; every published version is also kept, immutably,
+-- in hub_page_versions. status: draft (editors only) | published | retired.
+-- version 0 = never published. rev changes on every write, so a form
+-- (edit, publish, file change) saved from a stale copy is refused. Ids are
+-- never reused (AUTOINCREMENT): a deleted draft's history and links can't
+-- attach to a later page.
+CREATE TABLE IF NOT EXISTS hub_pages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id INTEGER NOT NULL REFERENCES hub_categories(id) ON DELETE CASCADE,
+    section TEXT NOT NULL DEFAULT '',           -- e.g. Training, Procedures
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    keywords TEXT NOT NULL DEFAULT '',          -- "also called", for search
+    body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    leaders_only INTEGER NOT NULL DEFAULT 0,
+    required INTEGER NOT NULL DEFAULT 0,        -- everyone with access acknowledges it
+    needs_counsel INTEGER NOT NULL DEFAULT 0,   -- blocks publishing until cleared
+    annual_review INTEGER NOT NULL DEFAULT 0,   -- e.g. OHSA harassment policy
+    review_by TEXT,                             -- YYYY-MM-DD
+    version INTEGER NOT NULL DEFAULT 0,
+    ack_version INTEGER NOT NULL DEFAULT 0,     -- read confirmations count from here
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    published_at TEXT,
+    rev INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_hub_pages_category ON hub_pages(category_id, status);
+
+CREATE TABLE IF NOT EXISTS hub_page_versions (
+    id INTEGER PRIMARY KEY,
+    page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    change_note TEXT NOT NULL DEFAULT '',       -- shown to earlier readers on re-read
+    content_hash TEXT NOT NULL,
+    saved_at TEXT NOT NULL,
+    saved_by TEXT NOT NULL,
+    reviewed_by TEXT,                           -- policy pages: who checked it, when
+    reviewed_at TEXT,
+    files TEXT NOT NULL DEFAULT '[]',           -- JSON: the page's files at this version
+    UNIQUE (page_id, version)
+);
+
+-- A file taken off a published page is only marked removed (earlier
+-- versions and read confirmations still point at it); the Operator can
+-- purge it, which deletes the bytes but keeps this row as a tombstone.
+CREATE TABLE IF NOT EXISTS hub_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,                     -- the uploader's name, display only
+    stored_name TEXT NOT NULL UNIQUE,           -- 32 hex chars + no extension, on disk
+    kind TEXT NOT NULL,                         -- pdf|png|jpg|gif|webp|docx|xlsx|pptx
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    alt TEXT NOT NULL DEFAULT '',               -- images: what it shows
+    text TEXT NOT NULL DEFAULT '',              -- extracted words, for search
+    uploaded_at TEXT NOT NULL,
+    uploaded_by TEXT NOT NULL,
+    photo_no INTEGER,                           -- images: [photo: N], never reused
+    removed_at TEXT,
+    removed_by TEXT,
+    purged_at TEXT
+);
+
+-- Append-only proof a person received a version: never edited or deleted.
+CREATE TABLE IF NOT EXISTS hub_acks (
+    id INTEGER PRIMARY KEY,
+    page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    reader_key TEXT NOT NULL,                   -- member:<id> | leader:<id> | operator
+    reader_name TEXT NOT NULL,
+    wording TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    acked_at TEXT NOT NULL,
+    UNIQUE (page_id, version, reader_key)
+);
+
+CREATE TABLE IF NOT EXISTS hub_reviews (
+    id INTEGER PRIMARY KEY,
+    page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
+    reviewed_at TEXT NOT NULL,
+    reviewed_by TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS hub_audit (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL,
+    who TEXT NOT NULL,
+    action TEXT NOT NULL,
+    page_id INTEGER,
+    detail TEXT NOT NULL DEFAULT ''
+);
+
+-- Who may sign in to the Hub with first name + clock-in number. Kept apart
+-- from team_members (whose rows are read and exported whole) and never in
+-- backups; a restore re-attaches each grant by name (see import_json).
+-- code_hash is an HMAC under meta.hub_pepper, so the same number can't be
+-- given to two people. Sessions carry `nonce`, which is new on every grant
+-- and rotates when the person leaves the roster: removing access (or the
+-- person) signs out every phone they used, for good.
+CREATE TABLE IF NOT EXISTS hub_access (
+    member_id INTEGER PRIMARY KEY REFERENCES team_members(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    granted_at TEXT NOT NULL,
+    granted_by TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS hub_access_member_off
+AFTER UPDATE OF active ON team_members WHEN NEW.active = 0
+BEGIN
+    UPDATE hub_access SET nonce = lower(hex(randomblob(16))) WHERE member_id = NEW.id;
+END;
 """
 
 
@@ -534,6 +669,18 @@ SEED_TEMPLATES = [
     ]),
 ]
 
+# Team Hub categories, seeded once (the Operator renames/adds them in the
+# Hub). (name, icon, blurb, leaders_only, policy)
+HUB_SEED_CATEGORIES = [
+    ("HR", "📋", "Policies, the handbook, and how HR works here", 0, 1),
+    ("FOH Operations", "🥤",
+     "Front counter, drive-thru and dining room — procedures and training", 0, 0),
+    ("BOH Operations", "🍳", "The kitchen — procedures, food safety and training", 0, 0),
+    ("Leadership Development", "🌱", "LDP — for our leaders", 1, 0),
+]
+HUB_PAGE_STATUSES = ("draft", "published", "retired")
+HUB_FILE_KINDS = ("pdf", "png", "jpg", "gif", "webp", "docx", "xlsx", "pptx")
+
 SEED_POSITIONS = [
     # (name, area, sort)
     ("Shift Lead — FOH", "Leadership", 0),
@@ -575,6 +722,7 @@ def init_db() -> None:
             _seed_course(conn)
             _seed_cleaning(conn)
             _seed_schedule_log(conn)
+            _seed_hub(conn)
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -694,6 +842,30 @@ def _migrate(conn) -> None:
                      "ON DELETE SET NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_oneonone_member_holder "
                  "ON oneonone_member_topics(holder_leader_id, member_id, discussed_at)")
+    # Team Hub columns added after the first Hub builds (a database made by
+    # an early build keeps the old shape until these run).
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(hub_pages)")}
+    if "rev" not in cols:
+        conn.execute("ALTER TABLE hub_pages ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(hub_page_versions)")}
+    if "files" not in cols:
+        conn.execute("ALTER TABLE hub_page_versions ADD COLUMN files TEXT NOT NULL "
+                     "DEFAULT '[]'")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(hub_attachments)")}
+    for col_def in ("photo_no INTEGER", "removed_at TEXT", "removed_by TEXT",
+                    "purged_at TEXT"):
+        if col_def.split()[0] not in cols:
+            conn.execute(f"ALTER TABLE hub_attachments ADD COLUMN {col_def}")
+    if "photo_no" not in cols:
+        # Number the photos already there in upload order, per page.
+        conn.execute("UPDATE hub_attachments SET photo_no = (SELECT COUNT(*) FROM "
+                     "hub_attachments b WHERE b.page_id = hub_attachments.page_id "
+                     "AND b.kind IN ('png','jpg','gif','webp') AND b.id <= hub_attachments.id) "
+                     "WHERE kind IN ('png','jpg','gif','webp')")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(hub_access)")}
+    if "nonce" not in cols:
+        conn.execute("ALTER TABLE hub_access ADD COLUMN nonce TEXT NOT NULL DEFAULT ''")
+        conn.execute("UPDATE hub_access SET nonce = lower(hex(randomblob(16)))")
 
 
 def _seed_base(conn) -> None:
@@ -882,6 +1054,18 @@ def _seed_cleaning(conn) -> None:
             added += 1
         conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, stamp))
         print(f"shift_db: seeded {added} station cleaning lists ({key}) at {stamp}")
+
+
+def _seed_hub(conn) -> None:
+    """Seed the Team Hub's starting categories once."""
+    if conn.execute("SELECT 1 FROM meta WHERE key='hub_seeded'").fetchone():
+        return
+    if not conn.execute("SELECT 1 FROM hub_categories LIMIT 1").fetchone():
+        conn.executemany(
+            "INSERT INTO hub_categories (name, icon, blurb, leaders_only, policy, sort) "
+            "VALUES (?,?,?,?,?,?)",
+            [(*c, n) for n, c in enumerate(HUB_SEED_CATEGORIES)])
+    conn.execute("INSERT INTO meta (key, value) VALUES ('hub_seeded', ?)", (now_stamp(),))
 
 
 def _seed_schedule_log(conn) -> None:
@@ -1459,6 +1643,8 @@ def goal_progress_pct(g: dict) -> int | None:
         pct = target / value * 100
     else:
         pct = value / target * 100
+    if not math.isfinite(pct):
+        return None
     return max(0, min(100, round(pct)))
 
 
@@ -1849,6 +2035,35 @@ def tasks_for_leader(leader_id: int) -> tuple[list[dict], list[dict]]:
     for t in open_tasks:
         t["overdue"] = bool(t["due_date"] and t["due_date"] < today)
     return open_tasks, done_tasks
+
+
+def tasks_assigned_by(name: str, days: int = 7) -> list[dict]:
+    """To-dos this person handed to active leaders (assigned_by holds the
+    assigner's sign-in name), for Meetings › You assigned: every open one,
+    newest first, then those done in the last `days` days, most recently
+    done first. Each carries the assignee's leader_name. Read-only."""
+    name = " ".join((name or "").split())
+    if not name:
+        return []
+    since = (now_local() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+    with closing(connect()) as conn:
+        rows = [dict(r) for r in conn.execute(
+            """
+            SELECT t.*, ld.name AS leader_name
+            FROM leader_tasks t
+            JOIN leaders ld ON ld.id = t.leader_id
+            WHERE ld.active = 1 AND t.assigned_by = ?
+              AND (t.completed_at IS NULL OR t.completed_at >= ?)
+            ORDER BY t.completed_at IS NOT NULL,
+                     COALESCE(t.completed_at, t.created_at) DESC, t.id DESC
+            """,
+            (name, since),
+        ).fetchall()]
+    today = today_local()
+    for t in rows:
+        t["overdue"] = bool(not t["completed_at"] and t["due_date"]
+                            and t["due_date"] < today)
+    return rows
 
 
 def open_tasks_for_leader(leader_id: int, limit: int = 5) -> list[dict]:
@@ -2257,6 +2472,19 @@ def oneonone_summary() -> list[dict]:
             ORDER BY ld.name COLLATE NOCASE
             """
         ).fetchall()]
+
+
+def open_topic_total() -> int:
+    """Every leader's open agenda topics plus the Operator's own team-member
+    threads — the Operator's Meetings badge (matches that page's tabs)."""
+    with closing(connect()) as conn:
+        agendas = conn.execute(
+            "SELECT COUNT(*) FROM oneonone_topics t JOIN leaders l ON l.id = t.leader_id "
+            "WHERE l.active=1 AND t.discussed_at IS NULL").fetchone()[0]
+        own_threads = conn.execute(
+            "SELECT COUNT(*) FROM oneonone_member_topics "
+            "WHERE holder_leader_id IS NULL AND discussed_at IS NULL").fetchone()[0]
+    return agendas + own_threads
 
 
 def open_topic_count(leader_id: int | None) -> int:
@@ -3051,7 +3279,11 @@ EXPORT_TABLES = [
     "positions", "lineup_assignments", "shift_notes", "announcements",
     "announcement_reads", "course_lessons", "lesson_progress", "leader_tasks",
     "guest_recoveries", "oneonone_topics", "oneonone_member_topics", "shoutouts",
+    "hub_categories", "hub_pages", "hub_page_versions", "hub_attachments", "hub_acks",
+    "hub_reviews", "hub_audit",
 ]
+# A backup from before the Team Hub existed leaves the Hub as it is.
+HUB_TABLES = [t for t in EXPORT_TABLES if t.startswith("hub_")]
 
 
 def session_epoch() -> str:
@@ -3093,6 +3325,35 @@ def export_json() -> str:
     return json.dumps(payload, ensure_ascii=False, indent=1)
 
 
+def _rekey_hub_acks(conn) -> None:
+    """Read confirmations kept across a restore of an older backup point at
+    roster/leader ids the backup may have reassigned: re-point each at the
+    person of the same name, or retire its key so it can never attach to
+    whoever gets that id next. Two passes (via temporary keys) so swapped
+    ids can't collide with a row that hasn't moved yet."""
+    people: dict[str, dict[str, list[int]]] = {}
+    for kind, table in (("leader", "leaders"), ("member", "team_members")):
+        for r in conn.execute(f"SELECT id, name FROM {table}"):
+            people.setdefault(r["name"].casefold(), {}).setdefault(kind, []).append(r["id"])
+    moves = []
+    for r in conn.execute("SELECT id, reader_key, reader_name FROM hub_acks "
+                          "WHERE reader_key LIKE 'member:%' OR reader_key LIKE 'leader:%'"
+                          ).fetchall():
+        kind, _, old_id = r["reader_key"].partition(":")
+        ids = people.get(r["reader_name"].casefold(), {}).get(kind, [])
+        if old_id.isdigit() and int(old_id) in ids:
+            continue
+        target = f"{kind}:{ids[0]}" if len(ids) == 1 else f"former:{r['reader_key']}"
+        moves.append((r["id"], r["reader_key"], target))
+    for ack_id, _, _ in moves:
+        conn.execute("UPDATE hub_acks SET reader_key=? WHERE id=?", (f"tmp:{ack_id}", ack_id))
+    for ack_id, old_key, target in moves:
+        for key in (target, f"former:{old_key}", f"former:{old_key}:{ack_id}"):
+            if conn.execute("UPDATE OR IGNORE hub_acks SET reader_key=? WHERE id=?",
+                            (key, ack_id)).rowcount:
+                break
+
+
 class _RestoreError(Exception):
     """Raised inside the restore transaction so `with conn:` rolls back."""
 
@@ -3129,6 +3390,14 @@ def import_json(raw: str) -> str | None:
             if not all(isinstance(v, (str, int, float, type(None)))
                        for v in row.values()):
                 return f"Backup section '{table}' has a malformed row."
+    # Hub file rows name files on disk: only names the Hub itself makes.
+    for row in payload.get("hub_attachments", []):
+        if (not re.fullmatch(r"[0-9a-f]{32}", str(row.get("stored_name", "")))
+                or row.get("kind") not in HUB_FILE_KINDS):
+            return "Backup section 'hub_attachments' has a malformed row."
+    for row in payload.get("hub_pages", []):
+        if row.get("status", "draft") not in HUB_PAGE_STATUSES:
+            return "Backup section 'hub_pages' has a malformed row."
 
     # Restored leader accounts get an unmatchable PIN hash: the Operator
     # resets PINs after a restore. Keeping the leaders' original ids is what
@@ -3139,6 +3408,13 @@ def import_json(raw: str) -> str | None:
         with closing(connect()) as conn:
             try:
                 with conn:  # one transaction; any exception rolls it back
+                    # Hub sign-in grants never leave the database; deleting
+                    # the roster cascades them away, so re-attach each by name.
+                    access = conn.execute(
+                        "SELECT m.name, a.code_hash, a.granted_at, a.granted_by "
+                        "FROM hub_access a JOIN team_members m ON m.id = a.member_id"
+                    ).fetchall()
+                    hub_kept = "hub_acks" not in payload
                     conn.execute("DELETE FROM leaders")
                     for row in payload.get("leaders", []):
                         conn.execute(
@@ -3150,6 +3426,8 @@ def import_json(raw: str) -> str | None:
                              row.get("slack_id")),
                         )
                     for table in EXPORT_TABLES:
+                        if table in HUB_TABLES and table not in payload:
+                            continue
                         valid_cols = {r["name"] for r in
                                       conn.execute(f"PRAGMA table_info({table})")}
                         conn.execute(f"DELETE FROM {table}")
@@ -3163,6 +3441,16 @@ def import_json(raw: str) -> str | None:
                                 f"VALUES ({','.join('?' * len(cols))})",
                                 [row[c] for c in cols],
                             )
+                    for row in access:
+                        # A fresh nonce: everyone signs in again after a restore.
+                        conn.execute(
+                            "INSERT OR IGNORE INTO hub_access (member_id, code_hash, nonce, "
+                            "granted_at, granted_by) SELECT id, ?, ?, ?, ? FROM team_members "
+                            "WHERE name=? COLLATE NOCASE",
+                            (row["code_hash"], secrets.token_hex(16), row["granted_at"],
+                             row["granted_by"], row["name"]))
+                    if hub_kept:
+                        _rekey_hub_acks(conn)
                     # Keep the course-seed flag in sync with what the backup
                     # actually restored: a pre-course backup (no lessons)
                     # clears it so the next boot re-seeds from code, and a

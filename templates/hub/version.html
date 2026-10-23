@@ -1,0 +1,31 @@
+{% extends "hub/base.html" %}
+{% from "hub/_ui.html" import crumbs with context %}
+{% block title %}v{{ v.version }} — {{ page.title }}{% endblock %}
+{% block head %}{% include "hub/_style.html" %}{% endblock %}
+{% block content %}
+{{ crumbs([(page.title, url_for('hub.page', page_id=page.id)), ('History', url_for('hub.history', page_id=page.id)), ('Version %d' % v.version, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">History · version {{ v.version }}{% if v.version == page.version %} · live{% endif %}</p>
+  <h1 class="headline">{{ v.title }}</h1>
+  <p class="triage">Published {{ when(v.saved_at) }} by {{ v.saved_by }}{% if v.change_note %} · {{ v.change_note }}{% endif %}</p>
+</section>
+{% if v.version != page.version %}
+<p class="callout tan">{{ icon('history') }}<span>An older copy, kept exactly as it was. <a class="textlink" href="{{ url_for('hub.page', page_id=page.id) }}">See the live page</a></span></p>
+{% endif %}
+<article class="card doc"{% if v.version != page.version %} style="margin-top:12px;"{% endif %}>
+  {% if v.summary %}<p><strong>{{ v.summary }}</strong></p>{% endif %}
+  {{ body }}
+  {% if files %}
+  <div class="files">
+    {% for f in files %}
+    {% if f.att and not f.att.purged_at %}
+    <a class="row" href="{{ url_for('hub.file', file_id=f.id) }}">{{ icon('file', 'file-ico') }}<span class="row-main"><span class="row-title">{{ ('Photo %d · ' % f.photo) if f.photo }}{{ f.name }}</span></span>{{ icon('download', 'chev') }}</a>
+    {% else %}
+    <div class="row">{{ icon('file', 'file-ico') }}<span class="row-main"><span class="row-title">{{ ('Photo %d · ' % f.photo) if f.photo }}{{ f.name }}</span><span class="row-meta">The file itself was deleted for good</span></span></div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+</article>
+<p class="fine-line">Content fingerprint (SHA-256): <span style="overflow-wrap:anywhere;">{{ v.content_hash }}</span></p>
+{% endblock %}

@@ -1,18 +1,39 @@
 {% extends "shift/base.html" %}
 {% block title %}{{ template.name if template else 'New checklist' }}{% endblock %}
+{% block head %}
+<style>
+.tpl-form { margin-top: 18px; padding: 4px 16px 18px; }
+.tpl-form .field:first-child { margin-top: 12px; }
+/* Side by side once the long daypart labels fit; stacked on phones */
+.pair { display: grid; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 600px) { .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 12px; } }
+@media (min-width: 960px) { .tpl-form, .callout { max-width: 760px; } }
+.pair > div { min-width: 0; }
+.hint { font-size: 0.8125rem; color: var(--text-muted); margin: -2px 0 8px; line-height: 1.4; }
+.hint b { color: var(--red-700); }
+.tpl-form textarea { min-height: 260px; }
+.tpl-form .btn { margin-top: 18px; }
+.callout { margin-top: 16px; }
+.more-links { margin-top: 20px; }
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">{{ template.name if template else 'New checklist' }}</h1>
-<div class="sub">{% if template %}Editing the template — past days keep what
-they had.{% else %}A new checklist.{% endif %} Weekly lists run Monday–Sunday
-and monthly lists run the calendar month; each locks when its period ends.</div>
+<section class="hero compact">
+  <p class="eyebrow">Checklists · {{ 'Edit template' if template else 'New template' }}</p>
+  <h1 class="headline">{{ template.name if template else 'New checklist' }}</h1>
+  <p class="triage">{% if template %}Lists already started keep their items.{% else %}It joins the checklists as soon as you save it.{% endif %}</p>
+</section>
 
-<form method="post" class="card"
+<p class="callout">{{ icon('info') }}<span>Weekly lists run Monday–Sunday and monthly lists run the calendar
+month; each locks when its period ends.</span></p>
+
+<form method="post" class="card tpl-form"
       action="{{ url_for('shift.admin_template_edit', template_id=template.id) if template else url_for('shift.admin_template_new') }}">
   <label class="field" for="t-name">Name</label>
   <input type="text" id="t-name" name="name" required value="{{ template.name if template else '' }}"
          placeholder="e.g. Saturday Deep Clean">
-  <div style="display:flex; gap:8px;">
-    <div style="flex:1;">
+  <div class="pair">
+    <div>
       <label class="field" for="t-frequency">How often</label>
       <select id="t-frequency" name="frequency">
         {% for f, label in FREQUENCY_LABELS.items() %}
@@ -20,7 +41,7 @@ and monthly lists run the calendar month; each locks when its period ends.</div>
         {% endfor %}
       </select>
     </div>
-    <div style="flex:1;">
+    <div>
       <label class="field" for="t-due">Weekly: assigned day</label>
       <select id="t-due" name="due_weekday">
         <option value="">Any day (due by the weekend)</option>
@@ -30,8 +51,8 @@ and monthly lists run the calendar month; each locks when its period ends.</div>
       </select>
     </div>
   </div>
-  <div style="display:flex; gap:8px;">
-    <div style="flex:1;">
+  <div class="pair">
+    <div>
       <label class="field" for="t-daypart">Daypart</label>
       <select id="t-daypart" name="daypart">
         {% for dp in CHECKLIST_DAYPARTS %}
@@ -39,20 +60,21 @@ and monthly lists run the calendar month; each locks when its period ends.</div>
         {% endfor %}
       </select>
     </div>
-    <div style="flex:1;">
+    <div>
       <label class="field" for="t-area">Area</label>
       <input type="text" id="t-area" name="area" value="{{ template.area if template else 'All' }}"
              placeholder="Front Counter / Kitchen / All">
     </div>
   </div>
   <label class="field" for="t-items">Items — one per line</label>
-  <div class="progress-note" style="margin:0 0 6px;">Start a line with
-  <strong>!</strong> to mark it critical (food safety / cash — flagged red).</div>
-  <textarea id="t-items" name="items" required style="min-height:220px;"
+  <p class="hint">Start a line with <b>!</b> to mark it critical (food safety / cash — flagged red).</p>
+  <textarea id="t-items" name="items" required
     placeholder="Registers on and tested&#10;! Sanitizer buckets at 200 ppm&#10;Stock sauces">{{ items_text }}</textarea>
-  <div style="margin-top:12px;">
-    <button class="pill primary" type="submit" style="width:100%; padding:12px;">Save</button>
-  </div>
+  <button class="btn btn-primary block" type="submit">Save</button>
 </form>
-<a class="pill small ghost" href="{{ url_for('shift.admin_templates') }}">← All templates</a>
+
+<div class="card list more-links">
+  <a class="row compact" href="{{ url_for('shift.admin_templates') }}"><span class="lead-ico">{{ icon('sliders') }}</span>
+    <span class="row-main"><span class="row-title">All templates</span></span>{{ icon('chev', 'chev') }}</a>
+</div>
 {% endblock %}

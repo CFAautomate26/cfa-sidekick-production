@@ -1,17 +1,16 @@
 {% extends "shift/base.html" %}
-{% block title %}Not configured{% endblock %}
+{% block title %}Almost ready{% endblock %}
 {% block content %}
-<div style="text-align:center; margin: 30px 0;">
-  <div style="font-size:44px;">🐮</div>
-  <h1 class="page">Almost ready</h1>
-  <div class="sub">Chick-fil-A Wharncliffe &amp; Wonderland — Shift Lead</div>
-</div>
-<div class="card">
-  <p style="font-size:15px;">The shift leading app isn't configured yet. Set the
+<section class="hero compact">
+  <p class="eyebrow">Team Hub · setup</p>
+  <h1 class="headline">Almost ready</h1>
+  <p class="triage">The leader side of Team Hub needs one setting first.</p>
+</section>
+<div class="card" style="margin-top:22px;">
+  <p style="font-size:1rem; line-height:1.5; color:var(--text-strong);">Set the
   <strong>SHIFT_ADMIN_PIN</strong> environment variable on the Render service,
   redeploy, then sign in as <strong>Operator</strong> with that PIN to add your
   leadership team.</p>
-  <p style="font-size:13px; color:var(--soft); margin-top:10px;">
-  Full setup guide: docs/shift-leading-app.md in the repo.</p>
+  <p class="row-meta" style="margin-top:10px;">Full setup guide: docs/shift-leading-app.md in the repo.</p>
 </div>
 {% endblock %}

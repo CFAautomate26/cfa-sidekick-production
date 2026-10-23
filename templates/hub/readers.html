@@ -1,0 +1,33 @@
+{% extends "hub/base.html" %}
+{% from "hub/_ui.html" import page_crumbs with context %}
+{% block title %}Who's read — {{ page.title }}{% endblock %}
+{% block head %}{% include "hub/_style.html" %}{% endblock %}
+{% block content %}
+{{ page_crumbs(page, last=true) }}
+<section class="hero compact">
+  <p class="eyebrow">Editor tools · Who's read it</p>
+  <h1 class="headline">Who's read it</h1>
+  <p class="triage">Counting from version {{ page.ack_version }} · everyone who can sign in and see this page{{ ' (leaders only)' if page.leaders_only or page.category_leaders_only }}.</p>
+  <div class="tags">
+    <span class="badge b-green">{{ icon('check', 'xs') }}{{ counts.current }} read</span>
+    <span class="badge b-tan">{{ counts.old }} read an older version</span>
+    <span class="badge b-red">{{ counts.none }} not yet</span>
+  </div>
+</section>
+
+<div class="card list">
+{% for p in people %}
+  <div class="row compact"><span class="row-main"><span class="row-title">{{ p.name }}</span>
+    <span class="row-meta tags">{% if p.leader %}<span class="badge b-navy">Leader</span>{% endif %}
+      {%- if p.state == 'current' %}<span class="badge b-green">{{ icon('check', 'xs') }}v{{ p.ack.version }}</span><span>{{ when(p.ack.acked_at) }}</span>
+      {%- elif p.state == 'old' %}<span class="badge b-tan">v{{ p.ack.version }}</span><span>{{ when(p.ack.acked_at) }}</span>
+      {%- else %}<span class="badge b-red">Not yet</span>{% endif %}</span></span></div>
+{% else %}
+  <div class="row"><span class="row-main"><span class="row-meta">No one can sign in yet — give people access under Team Hub access.</span></span></div>
+{% endfor %}
+</div>
+<div class="btnrow">
+  <a class="btn btn-secondary sm" href="{{ url_for('hub.readers_csv', page_id=page.id) }}">{{ icon('download') }}Download all confirmations (CSV)</a>
+</div>
+<p class="note">{{ icon('info') }}<span>Each confirmation records the person, the time, the wording they agreed to and a fingerprint of exactly what the page said.</span></p>
+{% endblock %}

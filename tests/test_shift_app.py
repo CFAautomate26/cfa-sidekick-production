@@ -54,7 +54,7 @@ def test_requires_login(client):
                  "/shift/oneonone/member/1"]:
         resp = client.get(path)
         assert resp.status_code == 302, path
-        assert "/shift/login" in resp.headers["Location"]
+        assert "/hub/login" in resp.headers["Location"] and "as=leader" in resp.headers["Location"]
 
 
 def test_not_configured_page(client, monkeypatch):
@@ -65,8 +65,15 @@ def test_not_configured_page(client, monkeypatch):
 
 
 def test_manifest_and_icon_public(client):
-    assert client.get("/shift/manifest.webmanifest").status_code == 200
-    assert client.get("/shift/icon.svg").status_code == 200
+    manifest = client.get("/shift/manifest.webmanifest")
+    assert manifest.status_code == 200 and manifest.json["scope"] == "/"
+    assert manifest.json == client.get("/hub/manifest.webmanifest").json   # one Team Hub
+    icon = client.get("/shift/icon.svg")                  # old installs still find an icon
+    assert icon.status_code == 302 and icon.headers["Location"].endswith("/icon-180.png")
+    assert client.get("/static/teamhub/icon-180.png").status_code == 200
+    logo = client.get("/static/teamhub/logo-round.png").data
+    with open("assets/cfa-round-logo.png", "rb") as f:     # the supplied logo, unaltered
+        assert logo == f.read()
 
 
 # --- auth ------------------------------------------------------------------
@@ -238,9 +245,10 @@ def _today_run(name):
 def test_today_shows_all_day_cleaning_lists(client):
     login_operator(client)
     page = client.get("/shift/").data.decode()
-    current = page[page.index("This daypart's checklists"):]
-    assert "Dining Room &amp; Washrooms — Daily" in current
-    assert "Drive Thru — Daily" in current
+    current = page[page.index("Due now"):]
+    # Sheets with no critical items left fold into one row (Team Hub Today)
+    assert "Station cleaning sheets" in current
+    assert "/shift/checklists#allday" in current
 
 
 def test_due_period_runs_rules():
@@ -274,7 +282,7 @@ def test_past_lists_lock_for_leaders_not_the_operator(client):
     _, items = shift_db.run_with_items(past["id"])
     login_leader(client)
     page = client.get(f"/shift/checklists/run/{past['id']}").data
-    assert "🔒".encode() in page and b'class="item"' not in page
+    assert b"This list closed when its" in page and b'class="item"' not in page
     resp = client.post(f"/shift/item/{items[0]['id']}/toggle", data={"done": "1"},
                        follow_redirects=True)
     assert b"closed" in resp.data
@@ -316,9 +324,9 @@ def test_scorecard_page(client):
     page = client.get("/shift/checklists/scorecard").data.decode()
     assert "Checklist scorecard" in page
     for area in ["Dining Room", "Drive Thru", "Food Safety"]:
-        assert f'<div class="section-label">{area}</div>' in page
+        assert f'<h2>{area}</h2>' in page
     assert "fully done" in page and "Most often missed" in page
-    assert b"Checklist scorecard" in client.get("/shift/more").data
+    assert b"/shift/checklists/scorecard" in client.get("/shift/checklists").data
 
 
 def test_admin_template_schedule(client):
@@ -880,10 +888,10 @@ def test_more_badge_shows_my_agenda_count(client):
     make_leader(client)
     maya = shift_db.leaders()[0]
     login_leader(client)
-    assert b"on your agenda" not in client.get("/shift/more").data
+    assert b'Meetings <span class="count">' not in client.get("/shift/more").data
     client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "A"})
     client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "B"})
-    assert "● 2 on your agenda".encode() in client.get("/shift/more").data
+    assert b'Meetings <span class="count">2</span>' in client.get("/shift/more").data
 
 
 def test_goal_leader_tag_via_route(client):
@@ -1026,7 +1034,7 @@ def test_restore_invalidates_leader_sessions(client):
     # Her 30-day cookie predates the restore: next request re-logs-in
     resp = client.get("/shift/", follow_redirects=False)
     assert resp.status_code == 302
-    assert "/shift/login" in resp.headers["Location"]
+    assert "/hub/login" in resp.headers["Location"]
 
 
 # --- team-member 1:1s (Operator-only) ---------------------------------------
@@ -1121,14 +1129,14 @@ def test_leader_picks_any_team_member(client):
     assert f'value="member:{_roster_id("Blake")}"' in picker
     assert ">Maya</option>" not in picker                 # herself / leaders: no
     assert "leader:" not in picker
-    assert "Your 1:1 with the Operator" in page
+    assert "Your agenda with the Operator" in page
     resp = client.get(f"/shift/oneonone?who=member:{_roster_id('Blake')}")
     assert resp.headers["Location"].endswith(f"/shift/oneonone/member/{_roster_id('Blake')}")
     client.post(f"/shift/oneonone/member/{_roster_id('Blake')}/topics",
                 data={"topic": "Wants more drive-thru shifts"})
     page = client.get("/shift/oneonone").data.decode()
     mine = page[page.index('id="team"'):]
-    assert "Blake" in mine and "● 1 waiting" in mine
+    assert "Blake" in mine and "1 to talk about" in mine
     # A roster row with a leader's name isn't a team 1:1
     resp = client.post(f"/shift/oneonone/member/{_roster_id('Maya')}/topics",
                        data={"topic": "x"}, follow_redirects=True)
@@ -1207,7 +1215,7 @@ def test_oneonone_index_picker(client):
     shift_db.set_member_active(_roster_id("Old Timer"), False)
     login_operator(client)
     page = client.get("/shift/oneonone").data.decode()
-    assert "Leaders · shared agendas" in page and "Team members" in page
+    assert "Your 1:1s with leaders" in page and "Team members" in page
     picker = page[page.index('<select name="who"'):page.index("</select>")]
     leaders_group = picker[picker.index('<optgroup label="Leaders">'):
                            picker.index('<optgroup label="Team members">')]
@@ -1241,7 +1249,7 @@ def test_oneonone_index_picker(client):
                 data={"topic": "Check in"})
     page = client.get("/shift/oneonone").data.decode()
     team = page[page.index('id="team"'):]
-    assert "Blake" in team and "● 1 waiting" in team
+    assert "Blake" in team and "1 to talk about" in team
 
 
 def test_oneonone_picker_empty_roster_hint(client):
@@ -1456,12 +1464,12 @@ def test_former_member_threads_show_what_is_waiting(client):
     login_leader(client)
     client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "Check in"})
     shift_db.set_member_active(av, False)                 # Avery left the roster
-    assert "● 1 on your agenda".encode() in client.get("/shift/more").data
+    assert b'Meetings <span class="count">1</span>' in client.get("/shift/more").data
     page = client.get("/shift/oneonone").data.decode()
     assert "No 1:1s with team members yet" not in page    # badge and page agree
     former = page[page.index("Former team members with 1:1 history"):]
-    assert "● 1 waiting" in former
-    assert "<details style=\"margin-bottom:12px;\" open>" in page
+    assert "1 to talk about" in former
+    assert "<details class=\"list-more former\" open>" in page
     # Leaders can get back to their 1:1 page from their agenda
     agenda = client.get(f"/shift/oneonone/{maya['id']}").data.decode()
     assert 'href="/shift/oneonone">← All 1:1s' in agenda
@@ -1791,7 +1799,7 @@ def test_recovery_contact_route_flow(client):
     assert b"Waiting to come back (1)" in page and b"coming Saturday" in page
 
     today_page = client.get("/shift/").data
-    assert "📞 1 contacted — coming back".encode() in today_page
+    assert b"Jordan is coming back" in today_page
     assert b"Jordan" in today_page
 
     # Second contact from a stale page: told, first stamp kept
@@ -1827,12 +1835,12 @@ def test_recovery_contacted_now_checkbox(client):
     assert b"Nobody left to contact" in page
     # Today card renders in its calm (non-red) awaiting-only form
     today_page = client.get("/shift/").data
-    assert "📞 1 contacted — coming back".encode() in today_page
+    assert b"Sam is coming back" in today_page
     assert b"Hand over what was promised" in today_page
     # More badge must agree: no red "open" badge, a calm coming-back note
     more_page = client.get("/shift/more").data
     assert b"open</span>" not in more_page
-    assert "📞 1 coming back".encode() in more_page
+    assert b'<span class="badge b-tan">1 coming back</span>' in more_page
 
 
 def test_recovery_operator_create_and_resolve(client):
@@ -1887,7 +1895,7 @@ def test_recovery_more_badge_counts_open(client):
     assert b"open" not in client.get("/shift/more").data.split(b"Guest recovery")[1][:120]
     client.post("/shift/recovery", data={"guest_name": "Jordan",
                                          "issue": "service", "remedy": "refund"})
-    assert "● 1 open".encode() in client.get("/shift/more").data
+    assert b'<span class="badge b-red">1 open</span>' in client.get("/shift/more").data
 
 
 def test_recovery_textual_phone_still_shown(client):
@@ -2133,3 +2141,51 @@ def test_scheduled_backup_endpoint(client):
     assert resp.status_code == 200
     payload = json.loads(resp.data)
     assert payload["format"] == 1
+
+
+def test_goal_numbers_must_be_finite(client):
+    login_operator(client)
+    client.post("/shift/goals", data={"title": "DT time", "period": "weekly",
+                                      "target_value": "270", "direction": "down"})
+    goal = shift_db.goals_by_status("active")[0]
+    for bad in ("inf", "-inf", "Infinity", "1e400", "nan"):
+        client.post(f"/shift/goals/{goal['id']}/update", data={"value": bad})
+    assert shift_db.goal_with_updates(goal["id"])[1] == []
+    client.post("/shift/goals", data={"title": "Huge", "period": "weekly",
+                                      "target_value": "1e400", "direction": "down"})
+    assert client.get("/shift/").status_code == 200            # never a redirect loop
+    assert client.get("/shift/goals").status_code == 200
+    with shift_db.connect() as conn:                            # even if one slipped in
+        conn.execute("INSERT INTO goal_updates (goal_id, value, note, recorded_by, "
+                     "recorded_at) VALUES (?, 1e400, '', 'x', '2026-01-01 09:00')",
+                     (goal["id"],))
+    assert client.get("/shift/").status_code == 200
+    assert client.get(f"/shift/goals/{goal['id']}").status_code == 200
+
+
+def test_operator_meetings_badge_counts_own_team_threads(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    shift_db.add_member("Avery")
+    av = _roster_id("Avery")
+    login_operator(client)
+    client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "Check in"})
+    client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "Course"})
+    assert b'Meetings <span class="count">2</span>' in client.get("/shift/more").data
+
+
+def test_checklists_page_stops_nagging_for_a_retired_list(client, monkeypatch):
+    login_operator(client)
+    day = shift_db.today_local()
+    shift_db.ensure_runs_for_date(day)
+    daypart = shift_db.current_daypart()
+    tid = shift_db.create_template("Lunch retired", daypart, "All",
+                                   [("Pull product", True), ("Wipe", False)])
+    shift_db.ensure_runs_for_date(day)
+    run = next(r for r in shift_db.runs_for_date(day) if r["template_id"] == tid)
+    _, items = shift_db.run_with_items(run["id"])
+    shift_db.set_item_done(items[1]["id"], True, "Operator")      # ticked, then retired
+    shift_db.set_template_active(tid, False)
+    page = client.get(f"/shift/checklists?daypart={daypart}").data.decode()
+    assert "Lunch retired" not in page                          # no nag for a retired list
+    assert "Lunch retired" in client.get(f"/shift/checklists/run/{run['id']}").data.decode()

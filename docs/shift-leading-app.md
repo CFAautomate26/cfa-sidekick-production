@@ -1,8 +1,10 @@
-# Shift Leading App — setup & guide
+# Leader tools (Team Hub `/shift`) — setup & guide
 
-A phone-first shift leadership tool (in the spirit of Huddle) built into the
-CFA Sidekick Flask service, at **`/shift`** on the Render deployment. It gives
-the leadership team:
+These are the leader sections of **Team Hub** (formerly the "Shift Lead"
+app): a phone-first shift leadership tool (in the spirit of Huddle) built
+into the CFA Sidekick Flask service, at **`/shift`** on the Render
+deployment. Team Hub's look, navigation and sign-in are described in
+[docs/team-hub.md](team-hub.md). It gives the leadership team:
 
 - **Today dashboard** — the current daypart's checklists, lineup, goals,
   unread announcements, and today's notes in one glance.
@@ -263,6 +265,9 @@ scale.
 - **Manual**: Admin → *Download backup (JSON)* — everything except PINs.
   Backups now include guest recovery rows (guest names + contact info), so
   treat exported files with the same care as the database itself.
+- The same backup carries the **Team Hub**'s pages, versions and read
+  confirmations — but not team members' clock-in access or uploaded files;
+  see [Team Hub → Backups](team-hub.md#backups).
 - **Automated**: `GET /scheduled/shift-backup?token=<SCHEDULE_SECRET>`
   returns the same JSON. Point a free cron pinger (e.g. cron-job.org) at it
   daily and keep the response, following the same token convention as the

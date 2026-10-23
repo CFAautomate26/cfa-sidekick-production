@@ -1,61 +1,82 @@
 {% extends "shift/base.html" %}
-{% block title %}Notes{% endblock %}
-{% block content %}
-<h1 class="page">Shift notes</h1>
-<div class="sub">The store logbook — wins, issues, and handoffs for the next shift.</div>
+{% from "shift/_leader_ui.html" import ui_styles, day_label with context %}
+{% block title %}Shift notes{% endblock %}
+{% block head %}{{ ui_styles() }}{% endblock %}
 
-<details class="compose" open>
-  <summary>+ New note</summary>
-  <form method="post" action="{{ url_for('shift.note_create') }}" class="card">
+{% macro cat_label(c) %}{{ c.replace('-', ' ') | capitalize }}{% endmacro %}
+
+{% block content %}
+{% set CAT_TONE = {'win': 'b-green', 'issue': 'b-red', 'equipment': 'b-red', 'food-safety': 'b-red'} %}
+{% set CAT_ICO = {'win': ('star', 'green'), 'issue': ('alert', 'red'), 'equipment': ('gear', 'red'),
+                  'food-safety': ('shield', 'red'), 'staffing': ('users', ''), 'guest': ('heart', ''),
+                  'general': ('note', '')} %}
+{% set today_count = feed | selectattr('note_date', 'equalto', shift_today) | list | length %}
+<section class="hero compact">
+  <p class="eyebrow">Shift notes</p>
+  <h1 class="headline">Shift notes</h1>
+  <p class="triage"><b>{{ today_count }}</b> today · wins, issues and handoffs</p>
+</section>
+
+<div class="split">
+<details class="feature cream composer" open>
+  <summary><span class="plus">{{ icon('plus') }}</span><span class="grow">New note</span>{{ icon('chev', 'chev') }}</summary>
+  <form method="post" action="{{ url_for('shift.note_create') }}">
     <label class="field" for="n-body">What should the next shift know?</label>
     <textarea id="n-body" name="body" data-draft required
       placeholder="e.g. Fryer 2 recovery is slow — maintenance called, ticket #4412. Watch it at dinner."></textarea>
-    <div style="display:flex; gap:8px;">
-      <div style="flex:1;">
+    <div class="two">
+      <div>
         <label class="field" for="n-cat">Category</label>
         <select id="n-cat" name="category">
-          {% for c in NOTE_CATEGORIES %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          {% for c in NOTE_CATEGORIES %}<option value="{{ c }}">{{ cat_label(c) }}</option>{% endfor %}
         </select>
       </div>
-      <div style="flex:1;">
+      <div>
         <label class="field" for="n-dp">Daypart</label>
         <select id="n-dp" name="daypart">
           <option value="">—</option>
-          {% for dp in DAYPARTS %}<option value="{{ dp }}" {{ 'selected' if dp == shift_daypart }}>{{ dp }}</option>{% endfor %}
+          {% for dp in DAYPARTS %}<option value="{{ dp }}" {{ 'selected' if dp == shift_daypart }}>{{ dp | capitalize }}</option>{% endfor %}
         </select>
       </div>
     </div>
-    <div style="margin-top:12px;">
-      <button class="pill primary" type="submit">Post note</button>
-    </div>
+    <button class="btn btn-primary block" type="submit">Post note</button>
   </form>
 </details>
 
-<div class="chiprow">
-  <a class="pill small {{ 'on' if not category }}" href="{{ url_for('shift.notes') }}">All</a>
+<div class="feed">
+<nav class="seg filters" aria-label="Note category">
+  <a href="{{ url_for('shift.notes') }}"{% if not category %} class="on" aria-current="page"{% endif %}>All</a>
   {% for c in NOTE_CATEGORIES %}
-  <a class="pill small {{ 'on' if category == c }}" href="{{ url_for('shift.notes', category=c) }}">{{ c }}</a>
+  <a href="{{ url_for('shift.notes', category=c) }}"{% if category == c %} class="on" aria-current="page"{% endif %}>{{ cat_label(c) }}</a>
+  {% endfor %}
+</nav>
+
+{% for day, notes in feed | groupby('note_date') | reverse %}
+<h3 class="eyebrow grp" style="margin-top:24px;">{{ 'Today' if day == shift_today else day_label(day) }}</h3>
+<div class="card list">
+  {% for n in notes %}
+  {% set ico = CAT_ICO.get(n.category, ('note', '')) %}
+  <div class="row top" id="note-{{ n.id }}">
+    <span class="lead-ico {{ ico[1] }}">{{ icon(ico[0]) }}</span>
+    <div class="row-main">
+      <span class="row-meta tags" style="margin-top:0;"><span class="badge {{ CAT_TONE.get(n.category, 'b-tan') }}">{{ cat_label(n.category) }}</span>{% if n.daypart %}<span>{{ n.daypart | capitalize }}</span>{% endif %}</span>
+      <span class="row-body">{{ n.body }}</span>
+      <div class="acts" style="margin-top:6px;">
+        <span class="row-meta" style="margin:0;">{{ n.author }} · {{ n.created_at[11:16] }}</span>
+        {% if shift_is_admin or n.author == shift_name %}
+        <form method="post" action="{{ url_for('shift.note_delete', note_id=n.id) }}"
+              onsubmit="return confirm('Delete this note?');">
+          <button class="linkbtn" type="submit">Delete</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
   {% endfor %}
 </div>
-
-{% for n in feed %}
-<div class="card">
-  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-    <span class="note-cat cat-{{ n.category }}">{{ n.category }}</span>
-    <span class="progress-note" style="margin:0;">{{ n.note_date }}{% if n.daypart %} · {{ n.daypart }}{% endif %}</span>
-  </div>
-  <div style="font-size:14px; margin-top:8px; white-space:pre-line;">{{ n.body }}</div>
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
-    <div class="progress-note" style="margin:0;">{{ n.author }} · {{ n.created_at[11:] }}</div>
-    {% if shift_is_admin or n.author == shift_name %}
-    <form method="post" action="{{ url_for('shift.note_delete', note_id=n.id) }}"
-          onsubmit="return confirm('Delete this note?');">
-      <button class="pill small ghost" type="submit">Delete</button>
-    </form>
-    {% endif %}
-  </div>
-</div>
 {% else %}
-<div class="empty">No notes {% if category %}in “{{ category }}” {% endif %}yet.</div>
+<div class="empty" style="margin-top:20px;">No notes {% if category %}in “{{ cat_label(category) }}” {% endif %}yet.</div>
 {% endfor %}
+</div>
+</div>
 {% endblock %}

@@ -19,7 +19,19 @@ Canada.
 
 - `app.py` — Flask webhook for GroupMe; OpenAI-backed responses. Team members
   invoke the bot with the `cow:` keyword.
-- `shift_app.py` + `shift_db.py` — the shift leading app at `/shift`
+- **Team Hub** — the one app for the whole team: the leader tools (`/shift`)
+  and Systems & Procedures (`/hub`) under one name, one sign-in
+  (`templates/shared/front_door.html`: team members first name + clock-in
+  number, leaders their PIN; optional "shared phone or computer" session)
+  and one look styled from chick-fil-a.ca's tokens
+  (`templates/shared/cfa_style.html`, `_chrome.html`, `menu.html`; the
+  round logo in `assets/cfa-round-logo.png` is used as supplied, icons in
+  `static/teamhub/`). `teamhub_nav.py` builds each role's tabs and ☰ menu
+  (links only where that role may go — routes stay the gate;
+  `tests/test_roles.py` checks every page × role). The app's front page is
+  `/hub/` (one manifest, scope `/`); a leader's home is Today (`/shift/`).
+  Guide: [docs/team-hub.md](docs/team-hub.md).
+- `shift_app.py` + `shift_db.py` — the leader tools at `/shift` (formerly "Shift Lead")
   (Huddle-style: daily/weekly/monthly checklists with who-did-what stamps,
   Owner + Manager check, lock-at-period-end, and a consistency scorecard
   at `/shift/checklists/scorecard` — station cleaning sheets pinned in
@@ -62,6 +74,24 @@ Canada.
   `assets/shift-qr/` points at the live `/shift` URL;
   `scripts/generate_shift_qr.py` regenerates it (pass a different URL as
   an argument if the service ever moves).
+- `hub.py` + `hub_db.py` + `hub_text.py` — Systems & Procedures at `/hub`: the
+  store's "here's how we do it" library (categories HR / FOH Operations /
+  BOH Operations / Leadership Development, with sections inside; drafts →
+  versioned publishing; required reading with append-only "I've received
+  and read this version" confirmations; search; photos/files; Word import;
+  yearly-review and lawyer-review flags; activity log). Team members sign
+  in with first name + clock-in number (`hub_access`, HMAC under
+  `meta.hub_pepper`, Operator-granted, never exported or logged); leaders
+  reuse the Shift Lead session (`shift_app.leader_session_valid`). Editors
+  = Operator + admin-role leaders; the HR "policy" category is published
+  and changed only by the Operator after the review checks. Same SQLite DB
+  and backups (hub tables in `EXPORT_TABLES`, minus `hub_access`; files in
+  `hub_files/` beside the DB or `SHIFT_HUB_FILES_DIR`, not in backups).
+  Registered fault-isolated after `/shift`. No scripts; strict CSP. Pages
+  hold processes and policies only — never records about a specific
+  person. Templates in `templates/hub/`; guide:
+  [docs/team-hub.md](docs/team-hub.md); crew-room QR poster in
+  `assets/hub-qr/` (`scripts/generate_hub_qr.py`).
 - `slack_coverage.py` — Slack Events API blueprint (`POST /slack/events`)
   that auto-responds in-thread in the #shift-coverage Slack channel:
   validates `🔄 COVERAGE REQUEST` template posts, nags un-released shifts

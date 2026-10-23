@@ -1,23 +1,86 @@
 {% extends "shift/base.html" %}
-{% block title %}Development{% endblock %}
+{% from "shift/_leader_ui.html" import ui_styles, month_day, library_section with context %}
+{% block title %}Leadership Development{% endblock %}
+{% block head %}{{ ui_styles() }}
+<style>
+.stagebar { display: grid; gap: 3px; margin-top: 10px; }
+.stagebar .bar { margin-top: 0; }
+.mine .f-title { display: flex; align-items: baseline; gap: 6px; }
+.mine .f-title small { font-size: 1rem; color: var(--text-muted); font-weight: 700; letter-spacing: 0; }
+.mine .bar { background: #fff; }
+.mine .btn { margin-top: 16px; }
+.stage-no { font-weight: 700; font-size: 1rem; font-variant-numeric: tabular-nums; }
+@media (min-width: 960px) {
+  .cols { display: grid; grid-template-columns: 1.1fr 1fr; gap: 0 40px; align-items: start; }
+}
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">Leadership development</h1>
-<div class="sub">Each leader's progress through the course — open a leader
-when you sit down to go over a lesson together.</div>
+{% set mine = leaders | selectattr('me') | first %}
+<section class="hero compact">
+  <p class="eyebrow">Leadership Development</p>
+  <h1 class="headline">Course progress</h1>
+  <p class="triage"><b>{{ leaders | length }}</b> leader{{ 's' if leaders | length != 1 }} · <b>{{ total }}</b> lessons in {{ stages | length }} stages</p>
+  {% if library %}
+  <nav class="seg fit" aria-label="Leadership Development">
+    <a class="on" href="#course" aria-current="true">Course</a>
+    <a href="#library">Library</a>
+  </nav>
+  {% endif %}
+</section>
 
-{% for l in leaders %}
-<a class="card tap" href="{{ url_for('shift.development_leader', leader_id=l.id) }}">
-  <h2>{{ l.name }} <span style="font-weight:400; color:var(--soft);">· {{ l.role }}</span></h2>
-  <div class="bar {{ 'full' if total and l.done == total }}">
-    <span style="width: {{ (l.done / total * 100) | round if total else 0 }}%"></span>
-  </div>
-  <div class="progress-note">{{ l.done }} of {{ total }} lessons
-    {% if l.last_completed %} · last: {{ l.last_completed }}{% endif %}</div>
+{% if mine %}
+<a class="feature cream mine" href="{{ url_for('shift.development_leader', leader_id=mine.id) }}" style="margin-top:22px;">
+  <p class="f-eyebrow">Your course</p>
+  <p class="f-title"><span class="num">{{ mine.done }}</span><small>of {{ mine.total }} lessons</small></p>
+  <span class="bar navy {{ 'done' if mine.total and mine.done == mine.total }}"><span style="width: {{ (mine.done / mine.total * 100) | round if mine.total else 0 }}%"></span></span>
+  <p class="f-body">{% if mine.next %}Up next: <b>{{ mine.next.title }}</b> · {{ mine.stage }}{% else %}Every lesson done.{% endif %}</p>
+  <span class="btn btn-primary sm">Open your lessons {{ icon('chev', 'sm') }}</span>
 </a>
-{% else %}
-<div class="empty">No leader logins yet — add your leaders under Admin, then
-track their course progress here.</div>
-{% endfor %}
+{% endif %}
 
-<a class="pill small ghost" href="{{ course_url }}" target="_blank" rel="noopener">📁 Open the course folder on Drive</a>
+<div class="cols" id="course">
+  <section class="sec">
+    <div class="sec-head"><h2>{{ 'Every leader' if not mine else 'Your leaders' }}</h2><a class="more" href="{{ course_url }}" target="_blank" rel="noopener">Course folder</a></div>
+    <p class="lockline">{{ icon('lock') }}Each leader sees only their own. Admins and the Operator see everyone's.</p>
+    {% if leaders %}
+    <div class="card list">
+      {% for l in leaders %}
+      <a class="row" href="{{ url_for('shift.development_leader', leader_id=l.id) }}">
+        <span class="av" aria-hidden="true">{{ l.name[:1] | upper }}</span>
+        <span class="row-main">
+          <span class="row-title">{{ l.name }}{% if l.me %} <span class="badge b-tan">You</span>{% endif %}{% if l.role == 'admin' %} <span class="badge b-navy">Admin</span>{% endif %}</span>
+          <span class="row-meta"><b>{{ l.done }}</b> of {{ l.total }} ·
+            {% if not l.done %}not started{% elif l.next %}on {{ l.stage }}{% else %}finished{% endif %}{% if l.last_completed %} · last {{ month_day(l.last_completed[0:10]) }}{% endif %}</span>
+          <span class="stagebar" style="grid-template-columns: {% for s in l.stages %}{{ s.total }}fr {% endfor %};" aria-hidden="true">
+            {% for s in l.stages %}<span class="bar navy {{ 'done' if s.total and s.done == s.total }}"><span style="width: {{ (s.done / s.total * 100) | round if s.total else 0 }}%"></span></span>{% endfor %}
+          </span>
+        </span>{{ icon('chev', 'chev') }}
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">No leader logins yet — add your leaders under Admin, then
+    track their course progress here.</div>
+    {% endif %}
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>The {{ stages | length }} stages</h2></div>
+    <div class="card list">
+      {% for s in stages %}
+      <div class="row">
+        <span class="lead-ico {{ 'green' if leaders and s.finished == leaders | length else '' }}"><span class="stage-no">{{ loop.index }}</span></span>
+        <span class="row-main">
+          <span class="row-title">{{ s.module }}</span>
+          <span class="row-meta tags"><span>{{ s.total }} lessons{% if leaders and s.finished < leaders | length %} · {{ s.finished }} of {{ leaders | length }} leaders finished{% endif %}</span>{% if leaders and s.finished == leaders | length %}<span class="badge b-green">Everyone finished</span>{% endif %}</span>
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    <a class="btn btn-secondary sm" href="{{ course_url }}" target="_blank" rel="noopener">{{ icon('folder') }}Open the course folder on Drive</a>
+  </section>
+</div>
+
+{% if library %}{{ library_section(library) }}{% endif %}
 {% endblock %}

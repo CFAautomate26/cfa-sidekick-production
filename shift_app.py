@@ -14,12 +14,14 @@ Setup guide: docs/shift-leading-app.md
 """
 
 import hmac
+import math
 import os
 import re
 import threading
 import time
 from datetime import date
 from functools import wraps
+from urllib.parse import urlparse
 
 import requests
 from flask import (Blueprint, Response, current_app, flash, redirect,
@@ -27,6 +29,7 @@ from flask import (Blueprint, Response, current_app, flash, redirect,
 
 import shift_course
 import shift_db
+import teamhub_nav
 
 shift_bp = Blueprint("shift", __name__, url_prefix="/shift")
 
@@ -102,6 +105,40 @@ def is_admin() -> bool:
     return session.get("shift_role") == "admin"
 
 
+def _operator_pin_tag() -> str:
+    """Ties an Operator session to the current master PIN: changing
+    SHIFT_ADMIN_PIN signs every Operator session out."""
+    if not SHIFT_ADMIN_PIN:
+        return ""
+    return hmac.new(str(current_app.secret_key).encode(),
+                    b"operator-pin:" + SHIFT_ADMIN_PIN.encode(), "sha256").hexdigest()[:32]
+
+
+def leader_session_valid() -> bool:
+    """Re-check a signed-in leader/Operator against the database on every
+    request (the Shift Lead app and the Team Hub both call this). Clears the
+    session and returns False when it no longer stands."""
+    leader_id = session.get("shift_leader_id")
+    if leader_id:
+        # Deactivated leaders lose access — and role changes (a demoted
+        # admin) take effect — on their next request, not when the cookie
+        # expires. A backup restore can renumber leader ids, so sessions
+        # minted before the restore must re-login rather than attach to a
+        # different row.
+        leader = shift_db.get_leader(leader_id)
+        if (not leader or not leader["active"]
+                or session.get("shift_epoch", "") != shift_db.session_epoch()):
+            session.clear()
+            return False
+        session["shift_role"] = leader["role"]
+        return True
+    tag = _operator_pin_tag()
+    if not tag or not hmac.compare_digest(session.get("shift_pin_tag", ""), tag):
+        session.clear()
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Request guards + template context
 # ---------------------------------------------------------------------------
@@ -115,23 +152,85 @@ def require_login():
         return None
     if not app_configured():
         return render_template("shift/not_configured.html"), 200
+    if shared_device_expired():
+        return redirect(front_door_url())
     if not session.get("shift_name"):
-        return redirect(url_for("shift.login", next=request.path))
-    # Deactivated leaders lose access — and role changes (a demoted admin)
-    # take effect — on their next request, not when the cookie expires.
-    leader_id = session.get("shift_leader_id")
-    if leader_id:
-        leader = shift_db.get_leader(leader_id)
-        if not leader or not leader["active"]:
-            session.clear()
-            return redirect(url_for("shift.login"))
-        # A backup restore can renumber leader ids; sessions minted before
-        # the restore must re-login rather than attach to a different row.
-        if session.get("shift_epoch", "") != shift_db.session_epoch():
-            session.clear()
-            return redirect(url_for("shift.login"))
-        session["shift_role"] = leader["role"]
+        if session.get("hub_member_id"):
+            # A clock-in sign-in only ever opens team-member content.
+            flash("That part of Team Hub is for leaders.")
+            return redirect(url_for("hub.home") if teamhub_nav.hub_up()
+                            else url_for("shift.login"))
+        return redirect(front_door_url(resume_path()))
+    if not leader_session_valid():
+        return redirect(front_door_url())
     return None
+
+
+# "Shared phone or computer" (ticked at sign-in): the cookie lasts only for
+# the browser session, and the session also ends after 30 idle minutes —
+# so the office PC can't stay signed in as the Operator for a month.
+SHARED_IDLE_SECONDS = 30 * 60
+
+
+def start_session(shared: bool) -> None:
+    """Call right after session.clear() on a successful sign-in."""
+    session.permanent = not shared
+    if shared:
+        session["shared_device"] = True
+        session["seen_at"] = int(time.time())
+
+
+def shared_device_expired() -> bool:
+    """Both blueprints call this first: True (and the session cleared) when
+    a shared-device session has sat idle too long."""
+    if not session.get("shared_device"):
+        return False
+    now = int(time.time())
+    if now - int(session.get("seen_at", 0)) > SHARED_IDLE_SECONDS:
+        session.clear()
+        flash("Signed out after 30 minutes away (shared phone or computer).")
+        return True
+    session["seen_at"] = now
+    return False
+
+
+def front_door_url(next_path: str | None = None) -> str:
+    """The leader side of Team Hub's front door (or the /shift sign-in when
+    the Hub blueprint isn't loaded)."""
+    if teamhub_nav.hub_up():
+        return url_for("hub.login", next=next_path, **{"as": "leader"})
+    return url_for("shift.login", next=next_path)
+
+
+def resume_path() -> str | None:
+    """Where to land after signing in: the page asked for (with its query),
+    or — for a form post that can't be replayed — the page it came from."""
+    if request.method == "GET":
+        return request.full_path.rstrip("?")
+    ref = urlparse(request.referrer or "")
+    if ref.netloc == request.host and ref.path.startswith(("/shift", "/hub")):
+        return ref.path
+    return None
+
+
+def _clean_next() -> str:
+    target = request.values.get("next", "")
+    if (target.startswith(("/shift", "/hub")) and "//" not in target
+            and "\\" not in target and target.isprintable()):
+        return target
+    return ""
+
+
+def render_front_door(mode: str, error: str | None = None, picked: str = "",
+                      status: int = 200):
+    """Team Hub's one sign-in page (templates/shared/front_door.html)."""
+    names = [l["name"] for l in shift_db.leaders()]
+    if SHIFT_ADMIN_PIN:
+        names.append(OPERATOR_NAME)
+    return render_template(
+        "shared/front_door.html", mode=mode, error=error, picked=picked, names=names,
+        next_url=_clean_next(), manifest_url=url_for("shift.manifest"),
+        member_ok=teamhub_nav.hub_up(), shared=bool(request.form.get("shared"))), status
 
 
 # Blueprint-scoped (not app-wide): the bot's own pages must never touch the
@@ -165,7 +264,14 @@ def inject_shift_globals():
         "unread_announcements": (
             shift_db.unacked_count(current_name()) if signed_in else 0
         ),
+        "nav": _nav() if signed_in else None,
     }
+
+
+def _nav() -> dict:
+    leader_id = session.get("shift_leader_id")
+    return teamhub_nav.leader_nav("leader" if leader_id else "operator", current_name(),
+                                  session.get("shift_role", ""), leader_id)
 
 
 @shift_bp.app_template_filter("num")
@@ -230,9 +336,11 @@ def _optional_date(value: str | None) -> str:
 
 
 def _safe_next(default_endpoint: str = "shift.today"):
-    """Only redirect back to same-app paths, never off-site."""
+    """Only redirect back to same-app paths (the Shift Lead app or the Team
+    Hub), never off-site."""
     target = request.form.get("next", "") or request.args.get("next", "")
-    if target.startswith("/shift") and "//" not in target:
+    if (target.startswith(("/shift", "/hub")) and "//" not in target
+            and "\\" not in target and target.isprintable()):
         return redirect(target)
     return redirect(url_for(default_endpoint))
 
@@ -246,11 +354,16 @@ def login():
     if not app_configured():
         return render_template("shift/not_configured.html"), 200
 
-    names = [l["name"] for l in shift_db.leaders()]
-    if SHIFT_ADMIN_PIN:
-        names.append(OPERATOR_NAME)
+    if request.method == "GET":
+        # One front door: the Hub's, in leader mode — or right here if the
+        # Hub isn't loaded, so leaders can always sign in.
+        if teamhub_nav.hub_up():
+            return redirect(url_for("hub.login", next=_clean_next() or None,
+                                    **{"as": "leader"}))
+        return render_front_door("leader")
 
     if request.method == "POST":
+        shared = bool(request.form.get("shared"))
         name = (request.form.get("name") or "").strip()
         pin = (request.form.get("pin") or "").strip()
         error = None
@@ -263,9 +376,10 @@ def login():
             if SHIFT_ADMIN_PIN and hmac.compare_digest(pin, SHIFT_ADMIN_PIN):
                 _clear_fails(name)
                 session.clear()
-                session.permanent = True
+                start_session(shared)
                 session["shift_name"] = OPERATOR_NAME
                 session["shift_role"] = "admin"
+                session["shift_pin_tag"] = _operator_pin_tag()
                 return _safe_next()
             error = "Wrong PIN."
             _record_fail(name)
@@ -274,7 +388,7 @@ def login():
             if leader:
                 _clear_fails(name)
                 session.clear()
-                session.permanent = True
+                start_session(shared)
                 session["shift_name"] = leader["name"]
                 session["shift_role"] = leader["role"]
                 session["shift_leader_id"] = leader["id"]
@@ -283,16 +397,13 @@ def login():
             error = "Wrong name or PIN."
             _record_fail(name)
 
-        return render_template("shift/login.html", names=names, error=error,
-                               picked=name), 401
-
-    return render_template("shift/login.html", names=names, error=None, picked="")
+        return render_front_door("leader", error, name, 401)
 
 
 @shift_bp.route("/logout", methods=["POST"])
 def logout():
     session.clear()
-    return redirect(url_for("shift.login"))
+    return redirect(url_for("hub.login") if teamhub_nav.hub_up() else url_for("shift.login"))
 
 
 # ---------------------------------------------------------------------------
@@ -301,33 +412,327 @@ def logout():
 
 @shift_bp.route("/")
 def today():
+    """A leader's home: what needs them right now, then the shift at a
+    glance. Reads only what the shift already keeps — no new tables."""
     day = shift_db.today_local()
     shift_db.ensure_runs_for_date(day)
     runs = shift_db.runs_for_date(day)
     daypart = shift_db.current_daypart()
-    announcements = [a for a in shift_db.active_announcements(reader=current_name())
-                     if not a["acked"]]
+    name = current_name()
     leader_id = session.get("shift_leader_id")
+
+    due = _due_now(runs, daypart, day)
+    critical = sum(1 for row in due if row["critical"])
+    unread = [a for a in shift_db.active_announcements(reader=name) if not a["acked"]]
     open_recs, awaiting_recs, _ = shift_db.recovery_feed(resolved_limit=0)
-    daily = [r for r in runs if r["frequency"] == "daily"]
+    guests = len(open_recs) + len(awaiting_recs)
+    open_tasks = shift_db.tasks_for_leader(leader_id)[0] if leader_id else []
+    active_goals = shift_db.goals_by_status("active")
+    # Leader-tagged goals are 1:1 material: Today shows store goals only,
+    # and the Goals tile counts what this viewer's Goals page lists.
+    # Goals with a number to show come first (newest first within each).
+    store_goals = sorted((g for g in active_goals if not g["leader_id"]),
+                         key=lambda g: g["progress_pct"] is None)
+    goal_count = sum(1 for g in active_goals
+                     if not g["leader_id"] or _can_view_oneonone(g["leader_id"]))
+    notes = shift_db.notes_for_date(day)
+    shoutouts = shift_db.recent_shoutouts(limit=1)
+    if leader_id:
+        modules = shift_db.course_overview(leader_id)
+        course = {"done": sum(m["done"] for m in modules),
+                  "total": sum(m["total"] for m in modules)}
+    else:
+        course = {"leaders": len(shift_db.leader_course_summary())}
+    guest_rows = _guest_rows(open_recs, awaiting_recs)
+
     return render_template(
         "shift/today.html",
-        current_runs=[r for r in daily if r["daypart"] in (daypart, "allday")],
-        other_runs=[r for r in daily if r["daypart"] not in (daypart, "allday")],
-        due_runs=_due_period_runs(runs, day),
-        announcements=announcements,
-        lineup=shift_db.lineup_for(day, daypart),
-        positions=shift_db.active_positions(),
-        goals=shift_db.goals_by_status("active", store_only=True),
-        notes=shift_db.notes_for_date(day)[:3],
-        my_tasks=shift_db.open_tasks_for_leader(leader_id) if leader_id else [],
+        eyebrow=_today_eyebrow(daypart, day, shift_db.now_local()),
+        # The Operator login is "Operator", not a name: its headline goes without.
+        first_name=(name.split() or [""])[0] if leader_id else "",
+        need_count=critical + guests + len(unread),
+        triage=[(n, word) for n, word in (
+            (critical, "critical list" if critical == 1 else "critical lists"),
+            (guests, "guest" if guests == 1 else "guests"),
+            (len(unread), "announcement" if len(unread) == 1 else "announcements"),
+        ) if n],
+        due=due,
+        announcement=_announcement_card(unread[0], day, name) if unread else None,
+        more_unread=max(len(unread) - 1, 0),
+        guest_rows=guest_rows,
+        guests_hidden=guests - len(guest_rows),
+        open_guests=len(open_recs),
+        coming_back=len(awaiting_recs),
+        tasks=open_tasks[:3],
+        task_total=len(open_tasks),
         my_leader_id=leader_id,
-        open_recoveries=open_recs,
-        awaiting_recoveries=awaiting_recs,
-        RECOVERY_ISSUE_LABELS=shift_db.RECOVERY_ISSUE_LABELS,
-        shoutouts=shift_db.recent_shoutouts(),
-        SHOUTOUT_VALUE_LABELS=shift_db.SHOUTOUT_VALUE_LABELS,
+        to_read=_hub_to_read(),
+        hub_on=teamhub_nav.hub_up(),
+        daypart_word=_daypart_word(daypart),
+        lineup=_lineup_grid(shift_db.active_positions(), shift_db.lineup_for(day, daypart)),
+        latest_note=notes[0] if notes else None,
+        latest_shoutout=shoutouts[0] if shoutouts else None,
+        goals=[_goal_card(g) for g in store_goals[:2]],
+        goal_count=goal_count,
+        course=course,
+        day=day,
+        clock=_clock,
+        short_date=_short_date,
+        note_label=_note_label,
+        shoutout_value=_shoutout_value,
     )
+
+
+_DAYPART_FROM = {"breakfast": "From breakfast", "lunch": "From lunch",
+                 "afternoon": "From the afternoon", "dinner": "From dinner"}
+
+
+def _due_now(runs: list[dict], daypart: str, day: str) -> list[dict]:
+    """Today's "Due now" rows, built from runs_for_date(day) alone (pure:
+    no queries, no request), in this order:
+
+      1. this daypart's daily lists that aren't finished;
+      2. earlier dayparts' lists with critical items still open, badged
+         "From breakfast" (etc.);
+      3. all-day station sheets with critical items open, one row each;
+      4. every other all-day sheet folded into one "Station cleaning
+         sheets" row (shown while it has items left);
+      5. weekly and monthly lists that are due (_due_period_runs).
+
+    Lists with critical items left move to the top; otherwise that order
+    holds. Retired lists and empty ones never nag; later dayparts wait for
+    the Checklists page.
+
+    Each row: kind ("run" | "cleaning"), run_id, title, done, total, left,
+    critical (critical items left), tags [(label, badge class)] and meta
+    (one gray line); the "cleaning" row also carries count."""
+    order = {d: i for i, d in enumerate(shift_db.DAYPARTS)}
+    now_at = order.get(daypart, 0)
+    current, leftover, allday_critical, sheets = [], [], [], []
+    for r in runs:
+        if r["frequency"] != "daily" or not r.get("scheduled", True) or not r["total"]:
+            continue
+        if r["daypart"] == "allday":
+            if r["critical_remaining"]:
+                allday_critical.append(
+                    _due_row(r, meta=f"All day · {r['done']} of {r['total']}"))
+            else:
+                sheets.append(r)
+        elif r["daypart"] == daypart:
+            if r["done"] < r["total"]:
+                current.append(_due_row(r))
+        elif order.get(r["daypart"], 99) < now_at and r["critical_remaining"]:
+            # The ring already says how many are left: keep the row to its
+            # badges (and who owns it) so it stays one line on a phone.
+            leftover.append(_due_row(
+                r, tags=[(_DAYPART_FROM.get(r["daypart"], "From earlier"), "b-tan")],
+                meta=f"owner {r['owner']}" if r.get("owner") else ""))
+
+    folded = []
+    done, total = sum(r["done"] for r in sheets), sum(r["total"] for r in sheets)
+    if done < total:
+        n = len(sheets)
+        folded.append({
+            "kind": "cleaning", "run_id": None, "title": "Station cleaning sheets",
+            "count": n, "done": done, "total": total, "left": total - done,
+            "critical": 0, "tags": [],
+            "meta": f"{n} all-day list{'s' if n != 1 else ''} · {done} of {total} done",
+        })
+
+    period = [_due_row(r, tags=[_period_tag(r, day)])
+              for r in _due_period_runs(runs, day) if r["total"]]
+
+    rows = current + leftover + allday_critical + folded + period
+    rows.sort(key=lambda row: not row["critical"])      # stable: order kept within
+    return rows
+
+
+def _due_row(r: dict, tags: list | None = None, meta: str | None = None) -> dict:
+    if meta is None:
+        meta = f"{r['done']} of {r['total']}" + (
+            f" · owner {r['owner']}" if r.get("owner") else "")
+    return {"kind": "run", "run_id": r["id"], "title": r["name"], "done": r["done"],
+            "total": r["total"], "left": r["total"] - r["done"],
+            "critical": r["critical_remaining"], "tags": tags or [], "meta": meta}
+
+
+def _period_tag(r: dict, day: str) -> tuple[str, str]:
+    """The badge on a due weekly/monthly list: due today, overdue, or by when."""
+    today = date.fromisoformat(day)
+    if r["frequency"] == "weekly":
+        due_day = r["due_weekday"] if r["due_weekday"] is not None else 5
+        if today.weekday() == due_day:
+            return ("Due today", "b-tan")
+        if r["due_weekday"] is not None and today.weekday() > due_day:
+            return (f"Overdue · was due {shift_db.WEEKDAY_LABELS[due_day]}", "b-red")
+        return (f"Due {shift_db.WEEKDAY_LABELS[due_day]}", "b-tan")
+    end = date.fromisoformat(r["period_end"])
+    if end <= today:
+        return ("Due today", "b-tan")
+    return (f"Due by {end.strftime('%b')} {end.day}", "b-tan")
+
+
+def _daypart_word(daypart: str) -> str:
+    """"Lunch (10:30–2)" -> "Lunch"."""
+    return shift_db.DAYPART_LABELS.get(daypart, daypart).split(" (")[0]
+
+
+def _clock(stamp: str) -> str:
+    """"13:07" (or a whole now_stamp) -> "1:07"."""
+    try:
+        h, m = int((stamp or "")[-5:-3]), stamp[-2:]
+    except ValueError:
+        return stamp or ""
+    return f"{h % 12 or 12}:{m}"
+
+
+def _today_eyebrow(daypart: str, day: str, now) -> str:
+    """"Lunch is in session · Fri, Oct 23 · 12:07" — the business date, so a
+    1am close still reads as the shift it belongs to."""
+    d = date.fromisoformat(day)
+    return (f"{_daypart_word(daypart)} is in session · "
+            f"{d.strftime('%a, %b')} {d.day} · {_clock(now.strftime('%H:%M'))}")
+
+
+def _short_date(iso: str | None) -> str:
+    """"2026-10-26" -> "Mon, Oct 26" (a bad value comes back as is)."""
+    try:
+        d = date.fromisoformat(iso or "")
+    except ValueError:
+        return iso or ""
+    return f"{d.strftime('%a, %b')} {d.day}"
+
+
+def _stamp_label(stamp: str, day: str) -> str:
+    """A now_stamp() as Today reads it: the time if it's from this business
+    day, else the date."""
+    if not stamp:
+        return ""
+    if shift_db.business_date(stamp) == day:
+        return _clock(stamp)
+    try:
+        d = date.fromisoformat(stamp[:10])
+    except ValueError:
+        return stamp
+    return f"{d.strftime('%b')} {d.day}"
+
+
+# A Systems & Procedures page linked in an announcement ("…/hub/page/40").
+_HUB_PAGE_LINK = re.compile(r"(?:https?://[^\s/]+)?/hub/page/(\d+)(?:[/?#][^\s)\]]*)?")
+
+
+def _announcement_card(a: dict, day: str, reader: str = "") -> dict:
+    """The announcement on Today's feature card. A link to a Systems &
+    Procedures page in its text becomes an "Open the page" link."""
+    body, page_id = a["body"], None
+    match = _HUB_PAGE_LINK.search(body)
+    if match and teamhub_nav.hub_up():
+        page_id = int(match.group(1))
+        head, rest = body[:match.start()].rstrip(), body[match.end():]
+        rest = rest if rest[:1] in tuple(".,;:!?)]") else " " + rest.lstrip()
+        body = (head + rest).strip()
+    author = a.get("author") or ""
+    label = ("you" if reader and author == reader
+             else "the Operator" if author == OPERATOR_NAME else author)
+    return dict(a, body=body, page_id=page_id, author_label=label,
+                when=_stamp_label(a.get("created_at") or "", day))
+
+
+def _guest_rows(open_recs: list[dict], awaiting: list[dict], cap: int = 3) -> list[dict]:
+    """Guest recoveries for "Also needs you": guests nobody has reached yet
+    first (longest waiting on top), then guests coming back for what we
+    promised. Guest name and the promise only — contact details stay on
+    the recovery page."""
+    rows = []
+    for r in (open_recs + awaiting)[:cap]:
+        coming = r.get("contacted_at") is not None
+        rows.append({
+            "id": r["id"], "name": r["guest_name"], "coming": coming,
+            "call_back": bool(r.get("follow_up")) and not coming,
+            "issue": shift_db.RECOVERY_ISSUE_LABELS.get(r["issue"], r["issue"]).split(" (")[0],
+            "remedy": shift_db.RECOVERY_REMEDY_LABELS.get(
+                r["remedy"], r["remedy"]).split(" (")[0],
+            "details": (r.get("details") or "").strip(),
+            "note": (r.get("contact_note") or "").strip(),
+            "age": r.get("age_days") or 0, "stale": bool(r.get("stale")),
+            "waiting": r.get("waiting_days") or 0,
+        })
+    return rows
+
+
+def _lineup_grid(positions: list[dict], lineup: dict, cap: int = 8) -> dict:
+    """The daypart's lineup for Today: open positions (active, nobody on
+    them) first, then who's where, capped for the phone."""
+    filled = [p for p in positions if lineup.get(p["id"])]
+    gaps = [p for p in positions if not lineup.get(p["id"])]
+    cells = ([{"pos": p["name"], "open": True, "who": ""} for p in gaps]
+             + [{"pos": p["name"], "open": False,
+                 "who": ", ".join(a["member_name"] for a in lineup[p["id"]])}
+                for p in filled])
+    return {"started": bool(filled), "cells": cells[:cap], "total": len(positions),
+            "filled": len(filled), "open": len(gaps)}
+
+
+_GOAL_PERIOD_WORDS = {"daily": "today", "weekly": "this week", "monthly": "this month"}
+
+
+def _goal_card(g: dict) -> dict:
+    """A store goal as Today shows it: the latest number, a bar, one line."""
+    unit = (g.get("unit") or "").strip()
+    value, target = g.get("latest_value"), g.get("target_value")
+    card = {"id": g["id"], "title": g["title"], "pct": g.get("progress_pct"),
+            "value": None, "prefix": "", "suffix": "", "line": ""}
+    if value is not None:
+        card["value"] = fmt_num(value)
+        if unit == "$":
+            card["prefix"] = "$"
+        elif len(unit) <= 4:
+            card["suffix"] = unit
+    when = _GOAL_PERIOD_WORDS.get(g.get("period") or "", "")
+    if value is not None and target is not None:
+        gap = (value - target) if g.get("direction") == "down" else (target - value)
+        if gap <= 0:
+            card["line"] = "Target hit" + (f" {when}" if when else "")
+        else:
+            amount = fmt_num(round(gap, 2))
+            amount = (f"${amount}" if unit == "$" else f"{amount}%" if unit == "%"
+                      else f"{amount} {unit}".strip())
+            card["line"] = f"{amount} to go" + (f" {when}" if when else "")
+    else:
+        period = (g.get("period") or "").replace("-", " ")
+        card["line"] = (f"{period.capitalize()} goal" if period else "Goal") + (
+            f" · due {_short_date(g['due_date'])}" if g.get("due_date") else "") \
+            + " · tap to log progress"
+    return card
+
+
+def _note_label(category: str) -> str:
+    """"food-safety" -> "Food safety"."""
+    return (category or "general").replace("-", " ").capitalize()
+
+
+def _shoutout_value(tag: str | None) -> str:
+    """"⭐ 2nd-mile service" -> "2nd-mile service" (the feed keeps the emoji)."""
+    label = shift_db.SHOUTOUT_VALUE_LABELS.get(tag or "", "")
+    return label.split(" ", 1)[1] if " " in label else label
+
+
+def _hub_to_read() -> list[dict]:
+    """Required Systems & Procedures pages this leader hasn't confirmed yet.
+    The Hub is optional to /shift: if it isn't loaded or has trouble, Today
+    just shows nothing to read."""
+    if not teamhub_nav.hub_up():
+        return []
+    try:
+        import hub_db
+        leader_id = session.get("shift_leader_id")
+        viewer = (hub_db.Viewer("leader", leader_id, current_name(),
+                                session.get("shift_role", "lead"))
+                  if leader_id else hub_db.Viewer("operator", None, OPERATOR_NAME, "admin"))
+        return hub_db.to_read(viewer)
+    except Exception as e:          # the Hub's trouble must never break Today
+        print(f"Today: couldn't read the Team Hub's pages to read: {e}")
+        return []
 
 
 def _due_period_runs(runs: list[dict], day: str) -> list[dict]:
@@ -369,11 +774,113 @@ def _can_edit_run(run: dict) -> bool:
 
 @shift_bp.route("/checklists")
 def checklists():
+    """One daypart's checklists (?daypart=, default the one we're in) on one
+    day (?date=, default today). Live (today, the current daypart) it leads
+    with the list to open now: a read-only preview of what's left. Ticking
+    stays on the run page, so the checklist script never meets a second
+    progress block. Then the rest that's due now (critical first, with
+    earlier dayparts' lists still owing critical items and the weekly and
+    monthly lists that are due), the all-day station sheets, what's coming
+    up later today, and this week's and month's lists."""
+    today = shift_db.today_local()
     day = _valid_date(request.args.get("date"))
-    if day == shift_db.today_local():
+    is_today = day == today
+    if is_today:
         shift_db.ensure_runs_for_date(day)
-    return render_template("shift/checklists.html", day=day,
-                           runs=shift_db.runs_for_date(day))
+    runs = shift_db.runs_for_date(day)
+    parts = shift_db.DAYPARTS
+    now_part = shift_db.current_daypart()
+    daypart = _valid_checklist_daypart(request.args.get("daypart"))
+    if daypart not in parts:                    # all-day sheets show on every daypart
+        daypart = now_part
+    pos, now_pos = parts.index(daypart), parts.index(now_part)
+    live = is_today and daypart == now_part
+
+    def short(dp: str) -> str:
+        return shift_db.DAYPART_LABELS[dp].split(" (")[0]
+
+    def nice(iso: str, weekday: bool = False) -> str:
+        d = date.fromisoformat(iso)
+        return (f"{d:%a}, " if weekday else "") + f"{d:%b} {d.day}"
+
+    def critical_first(rows: list[dict]) -> list[dict]:
+        return sorted(rows, key=lambda r: not r["critical_remaining"])   # stable
+
+    weekday = date.fromisoformat(day).weekday()
+    for r in runs:
+        r["finished"] = bool(r["total"]) and r["done"] == r["total"]
+        r["daypart_name"] = short(r["daypart"]) if r["daypart"] in parts else "All day"
+        r["due_badge"] = None
+        if r["frequency"] == "monthly":
+            r["due_by"] = nice(r["period_end"])
+        if not is_today or r["frequency"] == "daily" or r["finished"]:
+            continue
+        if r["frequency"] == "weekly":
+            due_day = r["due_weekday"] if r["due_weekday"] is not None else 5
+            r["due_badge"] = (f"Due {shift_db.WEEKDAY_LABELS[due_day]}" if weekday < due_day
+                              else "Due today" if weekday == due_day or r["due_weekday"] is None
+                              else "Overdue")
+        else:
+            left = (date.fromisoformat(r["period_end"]) - date.fromisoformat(day)).days
+            r["due_badge"] = ("Due today" if left <= 0
+                              else f"{left} day{'s' if left != 1 else ''} left")
+
+    # A list retired (or rescheduled) after someone ticked it keeps its
+    # ticks for the day's record but no longer counts as due — same rule
+    # as Today's _due_now.
+    daily = [r for r in runs if r["frequency"] == "daily" and r.get("scheduled", True)]
+    allday = [r for r in daily if r["daypart"] == "allday"]
+    mine = [r for r in daily if r["daypart"] == daypart]
+    open_now, also_due, done_now, coming = None, [], [], []
+    if live:
+        current = critical_first([r for r in mine if not r["finished"]])
+        done_now = [r for r in mine if r["finished"]]
+        leftovers = [r for r in daily if r["daypart"] in parts[:pos]
+                     and r["critical_remaining"] and not r["finished"]]
+        for r in leftovers:
+            r["from_daypart"] = r["daypart_name"]
+        open_now = current[0] if current else None
+        also_due = critical_first(current[1:] + leftovers + _due_period_runs(runs, day))
+        if open_now is None and also_due:
+            open_now = also_due.pop(0)
+        coming = [r for r in daily if r["daypart"] in parts[pos + 1:]]
+
+    open_items, open_more = [], 0
+    if open_now:
+        _, items = shift_db.run_with_items(open_now["id"])
+        left = sorted((i for i in items if not i["done"]), key=lambda i: not i["critical"])
+        open_items, open_more = left[:3], max(len(left) - 3, 0)
+
+    # The scorecard's headline number: daily-list items checked off over the
+    # last 7 finished open days (lists lock when their day ends, so it's real).
+    score_done = score_total = score_days = 0
+    for card in shift_db.checklist_scorecard():
+        if card["frequency"] == "daily":
+            recent = card["history"][:7]
+            score_days = max(score_days, len(recent))
+            score_done += sum(h["done"] for h in recent)
+            score_total += sum(h["total"] for h in recent)
+
+    lists = (([open_now] if open_now else []) + also_due) if live else mine
+    return render_template(
+        "shift/checklists.html", day=day, runs=runs, is_today=is_today, live=live,
+        daypart=daypart, now_part=now_part,
+        when=("past" if day < today else "future" if day > today
+              else "now" if live else "later" if pos > now_pos else "earlier"),
+        day_label=nice(day, weekday=True), part_name=short(daypart),
+        part_hours=shift_db.DAYPART_LABELS[daypart].partition(" (")[2].rstrip(")"),
+        daypart_names={dp: short(dp) for dp in parts},
+        mine=mine, open_now=open_now, open_items=open_items, open_more=open_more,
+        also_due=also_due, done_now=done_now, allday=allday, coming=coming,
+        week=[r for r in runs if r["frequency"] == "weekly"],
+        month=[r for r in runs if r["frequency"] == "monthly"],
+        list_count=len(lists), finished_count=sum(1 for r in mine if r["finished"]),
+        critical_left=sum(r["critical_remaining"] for r in lists),
+        allday_done=sum(r["done"] for r in allday),
+        allday_total=sum(r["total"] for r in allday),
+        score_pct=round(score_done / score_total * 100) if score_total else None,
+        score_days=score_days,
+    )
 
 
 @shift_bp.route("/checklists/scorecard")
@@ -561,6 +1068,8 @@ def goal_create():
         target = float(target_raw) if target_raw else None
     except ValueError:
         target = None
+    if target is not None and not math.isfinite(target):
+        target = None
     period = (request.form.get("period") or "weekly").strip()
     if period not in shift_db.GOAL_PERIODS:
         period = "weekly"
@@ -614,6 +1123,8 @@ def goal_update(goal_id):
     try:
         value = float(value_raw) if value_raw else None
     except ValueError:
+        value = math.nan
+    if value is not None and not math.isfinite(value):
         flash("The progress number wasn't a number.")
         return redirect(url_for("shift.goal_detail", goal_id=goal_id))
     if value is None and not note:
@@ -745,14 +1256,17 @@ def roster_toggle(member_id):
 
 @shift_bp.route("/more")
 def more():
-    open_recs, awaiting_recs, _ = shift_db.recovery_feed(resolved_limit=0)
-    return render_template(
-        "shift/more.html",
-        open_recoveries=len(open_recs),
-        awaiting_recoveries=len(awaiting_recs),
-        my_open_topics=(shift_db.open_topic_count(session.get("shift_leader_id"))
-                        + shift_db.open_member_topic_count(session.get("shift_leader_id"))),
-    )
+    """The Team Hub menu (also at /hub/menu): served here too so leaders
+    keep it even if the Hub blueprint failed to load."""
+    return menu_page(_nav(), "shift.today", url_for("shift.manifest"))
+
+
+def menu_page(nav: dict, home_endpoint: str, manifest_url: str):
+    back = request.args.get("from", "")
+    if not (back.startswith(("/shift", "/hub")) and "//" not in back and "\\" not in back
+            and back.isprintable()) or back.rstrip("?").endswith(("/more", "/menu")):
+        back = url_for(home_endpoint)
+    return render_template("shared/menu.html", nav=nav, back=back, manifest_url=manifest_url)
 
 
 # ---------------------------------------------------------------------------
@@ -788,14 +1302,83 @@ def _can_view_oneonone(leader_id: int) -> bool:
     return _is_operator() or session.get("shift_leader_id") == leader_id
 
 
+LD_CATEGORY = "leadership development"
+
+
+def _ld_library() -> dict | None:
+    """The Library on Leadership Development: the published pages of the
+    Hub's "Leadership Development" category, read as this leader (or the
+    Operator) so hub_db's own visibility rules decide what's listed. None
+    when the Hub isn't loaded or the category is gone — the page then
+    just leaves the section out; the Hub's trouble never breaks /shift."""
+    if not teamhub_nav.hub_up():
+        return None
+    try:
+        import hub_db
+        leader_id = session.get("shift_leader_id")
+        viewer = (hub_db.Viewer("leader", leader_id, current_name(),
+                                session.get("shift_role", "lead"))
+                  if leader_id else hub_db.Viewer("operator", None, OPERATOR_NAME, "admin"))
+        category = next((c for c in hub_db.categories(viewer)
+                         if " ".join(c["name"].split()).lower() == LD_CATEGORY), None)
+        if not hub_db.can_view_category(viewer, category):
+            return None
+        pages = [p for p in hub_db.pages_for_category(viewer, category["id"])
+                 if p["status"] == "published"]
+        unread = {p["id"] for p in hub_db.to_read(viewer)}
+        groups: dict[str, list[dict]] = {}
+        for p in pages:
+            groups.setdefault(p["section"] or "General", []).append(
+                dict(p, url=url_for("hub.page", page_id=p["id"]), to_read=p["id"] in unread))
+        return {
+            "groups": list(groups.items()),
+            "count": len(pages),
+            "new_url": (url_for("hub.new_page", category=category["id"])
+                        if viewer.is_editor else None),
+        }
+    except Exception as e:      # noqa: BLE001 — the Hub's trouble stays the Hub's
+        print(f"Leadership Development library unavailable: {e}")
+        return None
+
+
+def _course_progress(modules: list[dict]) -> dict:
+    """One leader's course at a glance: per-stage done/total, the stage
+    they're on and their next lesson (None once everything's done)."""
+    stages = [{"module": m["module"], "done": m["done"], "total": m["total"]}
+              for m in modules]
+    upcoming = next(((m["module"], l) for m in modules for l in m["lessons"]
+                     if not l["done"]), None)
+    return {
+        "stages": stages,
+        "done": sum(s["done"] for s in stages),
+        "total": sum(s["total"] for s in stages),
+        "stage": upcoming[0] if upcoming else None,
+        "next": upcoming[1] if upcoming else None,
+    }
+
+
 @shift_bp.route("/development")
 def development():
     if is_admin():
+        me = session.get("shift_leader_id")
+        leaders = []
+        for l in shift_db.leader_course_summary():
+            leaders.append(dict(l, me=l["id"] == me,
+                                **_course_progress(shift_db.course_overview(l["id"]))))
+        leaders.sort(key=lambda l: not l["me"])      # an admin leader sees their own first
+        # The course's stages (no leader has id 0, so this is the bare
+        # course) and how many leaders have finished each one.
+        stages = [{"module": m["module"], "total": m["total"],
+                   "finished": sum(1 for l in leaders for s in l["stages"]
+                                   if s["module"] == m["module"] and s["done"] == s["total"])}
+                  for m in shift_db.course_overview(0)]
         return render_template(
             "shift/development.html",
-            leaders=shift_db.leader_course_summary(),
+            leaders=leaders,
+            stages=stages,
             total=shift_db.course_lesson_count(),
             course_url=shift_course.COURSE_FOLDER_URL,
+            library=_ld_library(),
         )
     leader_id = session.get("shift_leader_id")
     if not leader_id:
@@ -814,11 +1397,16 @@ def development_leader(leader_id):
         flash("That leader doesn't exist.")
         return redirect(url_for("shift.development"))
     modules = shift_db.course_overview(leader_id)
-    done = sum(m["done"] for m in modules)
-    total = sum(m["total"] for m in modules)
+    progress = _course_progress(modules)
+    # The stage being worked on opens; finished and later ones fold away.
+    # After a save, the lesson just touched (?lesson=) opens with its stage.
+    opened = _optional_int(request.args.get("lesson"))
     return render_template(
         "shift/development_leader.html", leader=leader, modules=modules,
-        done=done, total=total, course_url=shift_course.COURSE_FOLDER_URL,
+        done=progress["done"], total=progress["total"], next_lesson=progress["next"],
+        current_stage=progress["stage"], opened_lesson=opened,
+        is_me=session.get("shift_leader_id") == leader_id,
+        course_url=shift_course.COURSE_FOLDER_URL, library=_ld_library(),
     )
 
 
@@ -834,13 +1422,85 @@ def development_update(leader_id, lesson_id):
             flash("That lesson doesn't exist any more — reload the page.")
     elif action == "uncomplete":
         shift_db.clear_lesson_done(lesson_id, leader_id)
-    return redirect(url_for("shift.development_leader", leader_id=leader_id)
-                    + f"#lesson-{lesson_id}")
+    return redirect(url_for("shift.development_leader", leader_id=leader_id,
+                            lesson=lesson_id) + f"#lesson-{lesson_id}")
 
 
 # ---------------------------------------------------------------------------
 # Leader to-dos
 # ---------------------------------------------------------------------------
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+           "Oct", "Nov", "Dec")
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _meetings_day(value: str | None, weekday: bool = False) -> str:
+    """How a date reads on the Meetings pages: 'Oct 13', or 'Mon, Oct 26'
+    with weekday; the year only when it isn't this one. Takes a YYYY-MM-DD
+    date or a now_stamp() (its 4am-rollover business date)."""
+    if not value:
+        return ""
+    try:
+        d = date.fromisoformat(shift_db.business_date(value) if len(value) > 10
+                               else value)
+    except ValueError:
+        return value
+    text = f"{_MONTHS[d.month - 1]}\u00a0{d.day}"     # "Oct 13" never splits
+    if d.year != date.fromisoformat(shift_db.today_local()).year:
+        text += f", {d.year}"
+    return f"{_WEEKDAYS[d.weekday()]}, {text}" if weekday else text
+
+
+def _meetings_due(due: str | None) -> tuple[str, bool]:
+    """(label, urgent) for a to-do's due date: urgent (red) when it is due
+    today or overdue."""
+    if not due:
+        return "No due date", False
+    today = date.fromisoformat(shift_db.today_local())
+    try:
+        d = date.fromisoformat(due)
+    except ValueError:
+        return f"Due {due}", False
+    if d < today:
+        return f"Overdue · was due {_meetings_day(due)}", True
+    if d == today:
+        return "Due today", True
+    if (d - today).days == 1:
+        return "Due tomorrow", False
+    return f"Due {_meetings_day(due, weekday=True)}", False
+
+
+def _meetings_when(stamp: str | None) -> str:
+    """'today 4:12 pm', 'yesterday 4:12 pm' or 'Oct 20' for a now_stamp()."""
+    if not stamp:
+        return ""
+    day = shift_db.business_date(stamp)
+    today = date.fromisoformat(shift_db.today_local())
+    try:
+        ago = (today - date.fromisoformat(day)).days
+        hour, minute = int(stamp[11:13]), stamp[14:16]
+    except ValueError:
+        return stamp
+    if ago in (0, 1):
+        clock = f"{hour % 12 or 12}:{minute} {'am' if hour < 12 else 'pm'}"
+        return f"{'today' if ago == 0 else 'yesterday'} {clock}"
+    return _meetings_day(stamp)
+
+
+# Date wording shared by every Meetings template (1:1s and to-dos).
+_MEETINGS_FMT = {"day": _meetings_day, "due": _meetings_due, "when": _meetings_when}
+
+
+def _back_to_meetings(default: str, anchor: str) -> str:
+    """Forms on a leader's Meetings page (their agenda and to-dos inline)
+    post back=meetings so the leader lands back where they tapped; without
+    it a route keeps its usual page. Only ever /shift/oneonone, which runs
+    its own access checks."""
+    if request.form.get("back") == "meetings":
+        return url_for("shift.oneonone") + anchor
+    return default
+
 
 # Any leader can assign to-dos and browse the per-leader lists (the
 # Operator opened this up from admin-only); completing a task stays with
@@ -849,7 +1509,8 @@ def development_update(leader_id, lesson_id):
 def todo():
     return render_template("shift/todo.html",
                            leaders=shift_db.leader_task_summary(),
-                           my_leader_id=session.get("shift_leader_id"))
+                           my_leader_id=session.get("shift_leader_id"),
+                           **_MEETINGS_FMT)
 
 
 @shift_bp.route("/todo/<int:leader_id>")
@@ -860,7 +1521,10 @@ def todo_leader(leader_id):
         return redirect(url_for("shift.todo"))
     open_tasks, done_tasks = shift_db.tasks_for_leader(leader_id)
     return render_template("shift/todo_leader.html", leader=leader,
-                           open_tasks=open_tasks, done_tasks=done_tasks)
+                           open_tasks=open_tasks, done_tasks=done_tasks,
+                           own=session.get("shift_leader_id") == leader_id,
+                           can_check=_can_view_development(leader_id),
+                           **_MEETINGS_FMT)
 
 
 @shift_bp.route("/todo/<int:leader_id>/assign", methods=["POST"])
@@ -987,8 +1651,9 @@ def todo_toggle(task_id):
     # Operator marks it done themself during a review.
     if done and session.get("shift_leader_id"):
         _notify_completion(task_id)
-    return redirect(url_for("shift.todo_leader", leader_id=task["leader_id"])
-                    + f"#task-{task_id}")
+    return redirect(_back_to_meetings(
+        url_for("shift.todo_leader", leader_id=task["leader_id"]) + f"#task-{task_id}",
+        "#todos"))
 
 
 @shift_bp.route("/todo/task/<int:task_id>/delete", methods=["POST"])
@@ -1214,7 +1879,9 @@ def oneonone():
                                team=shift_db.member_oneonone_index(),
                                people=shift_db.oneonone_people(),
                                leader_threads=shift_db.leader_member_threads(),
-                               slack_synced_at=shift_db.slack_roster_synced_at())
+                               slack_synced_at=shift_db.slack_roster_synced_at(),
+                               assigned=shift_db.tasks_assigned_by(current_name()),
+                               **_MEETINGS_FMT)
     leader_id = session.get("shift_leader_id")
     if not leader_id:
         flash("Your login isn't linked to a leader profile — ask the Operator.")
@@ -1226,14 +1893,24 @@ def oneonone():
         return redirect(url_for("shift.oneonone_member", member_id=choice[1]))
     if choice:
         return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
-    _, history = shift_db.oneonone_for_leader(leader_id)
+    agenda, history = shift_db.oneonone_for_leader(leader_id, meetings=1)
+    modules = shift_db.course_overview(leader_id)
     return render_template(
         "shift/oneonone_mine.html",
         me=shift_db.get_leader(leader_id),
-        my_open=shift_db.open_topic_count(leader_id),
+        agenda=agenda,
+        my_open=len(agenda),
         my_last_met=history[0]["date"] if history else None,
+        course_done=sum(m["done"] for m in modules),
+        course_total=sum(m["total"] for m in modules),
+        goal_count=len(shift_db.goals_by_status("active", leader_id=leader_id)),
+        open_tasks=shift_db.tasks_for_leader(leader_id)[0],
+        # Your own to-dos already show under Yours.
+        assigned=[t for t in shift_db.tasks_assigned_by(current_name())
+                  if t["leader_id"] != leader_id],
         team=shift_db.member_oneonone_index(holder_id=leader_id),
         people=[p for p in shift_db.oneonone_people() if p["kind"] == "member"],
+        **_MEETINGS_FMT,
     )
 
 
@@ -1255,6 +1932,8 @@ def oneonone_leader(leader_id):
         course_done=sum(m["done"] for m in modules),
         course_total=sum(m["total"] for m in modules),
         open_tasks=shift_db.tasks_for_leader(leader_id)[0],
+        own=session.get("shift_leader_id") == leader_id,
+        **_MEETINGS_FMT,
     )
 
 
@@ -1266,9 +1945,10 @@ def oneonone_topic_add(leader_id):
     if not shift_db.add_oneonone_topic(leader_id, request.form.get("topic", ""),
                                        current_name()):
         flash("A talking point needs some words.")
-        return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
-    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id)
-                    + "#agenda")
+        return redirect(_back_to_meetings(
+            url_for("shift.oneonone_leader", leader_id=leader_id), "#mine"))
+    return redirect(_back_to_meetings(
+        url_for("shift.oneonone_leader", leader_id=leader_id) + "#agenda", "#mine"))
 
 
 @shift_bp.route("/oneonone/topic/<int:topic_id>/toggle", methods=["POST"])
@@ -1295,8 +1975,9 @@ def oneonone_topic_toggle(topic_id):
     # there), so land on the agenda to keep the meeting flowing; a reopened
     # topic is back on the agenda where its anchor exists.
     anchor = "#agenda" if discussed else f"#topic-{topic_id}"
-    return redirect(url_for("shift.oneonone_leader",
-                            leader_id=topic["leader_id"]) + anchor)
+    return redirect(_back_to_meetings(
+        url_for("shift.oneonone_leader", leader_id=topic["leader_id"]) + anchor,
+        "#mine"))
 
 
 @shift_bp.route("/oneonone/topic/<int:topic_id>/delete", methods=["POST"])
@@ -1309,8 +1990,8 @@ def oneonone_topic_delete(topic_id):
         flash("Only whoever added a topic (or the Operator) can remove it.")
     elif not shift_db.delete_topic(topic_id):
         flash("That topic was already discussed — it's part of meeting history now.")
-    return redirect(url_for("shift.oneonone_leader",
-                            leader_id=topic["leader_id"]))
+    return redirect(_back_to_meetings(
+        url_for("shift.oneonone_leader", leader_id=topic["leader_id"]), "#mine"))
 
 
 @shift_bp.route("/oneonone/<int:leader_id>/action", methods=["POST"])
@@ -1327,8 +2008,8 @@ def oneonone_action(leader_id):
     )
     if not ok:
         flash("A to-do needs a title (and a leader who still exists).")
-    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id)
-                    + "#actions")
+    return redirect(_back_to_meetings(
+        url_for("shift.oneonone_leader", leader_id=leader_id) + "#actions", "#todos"))
 
 
 # Team-member 1:1s. Each thread is (member, holder): the Operator master
@@ -1408,7 +2089,8 @@ def oneonone_member(member_id, holder_id):
         "shift/oneonone_member.html", member=member, agenda=agenda,
         history=history, leader=leader, holder=holder_leader,
         topics_url=_member_thread_url(member_id, holder,
-                                      "shift.oneonone_member_topic_add"))
+                                      "shift.oneonone_member_topic_add"),
+        **_MEETINGS_FMT)
 
 
 @shift_bp.route("/oneonone/member/<int:member_id>/topics", methods=["POST"],
@@ -1915,26 +2597,10 @@ def admin_import():
 
 @shift_bp.route("/manifest.webmanifest")
 def manifest():
-    return {
-        "name": "CFA Shift Lead",
-        "short_name": "Shift Lead",
-        "start_url": "/shift/",
-        "display": "standalone",
-        "background_color": "#FFFAF2",
-        "theme_color": "#E31937",
-        "icons": [{"src": "/shift/icon.svg", "sizes": "any", "type": "image/svg+xml"}],
-    }, 200, {"Content-Type": "application/manifest+json"}
-
-
-_ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
-<rect width="180" height="180" rx="40" fill="#E31937"/>
-<text x="90" y="88" font-family="Helvetica, Arial, sans-serif" font-size="56"
- font-weight="bold" fill="#fff" text-anchor="middle">CFA</text>
-<text x="90" y="132" font-family="Helvetica, Arial, sans-serif" font-size="30"
- fill="#FFFAF2" text-anchor="middle">Shift</text>
-</svg>"""
+    return teamhub_nav.manifest(), 200, {"Content-Type": "application/manifest+json"}
 
 
 @shift_bp.route("/icon.svg")
 def icon():
-    return Response(_ICON_SVG, mimetype="image/svg+xml")
+    # Old "Shift Lead" home-screen installs keep resolving their icon.
+    return redirect(url_for("static", filename="teamhub/icon-180.png"))

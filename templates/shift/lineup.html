@@ -1,77 +1,159 @@
 {% extends "shift/base.html" %}
-{% block title %}Lineup{% endblock %}
+{% from "shift/_leader_ui.html" import ui_styles, day_label with context %}
+{% block title %}Lineups &amp; Setups{% endblock %}
+{% block head %}{{ ui_styles() }}
+<style>
+.dayform { display: flex; gap: 8px; align-items: center; margin-top: 14px; max-width: 480px; }
+.dayform input[type=date] { flex: 1; min-width: 0; min-height: 44px; }
+.copies { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.copies form { margin: 0; }
+.slots { display: grid; grid-template-columns: 1fr; }
+.slot { padding: 12px 14px 14px 16px; min-width: 0; }
+.slot + .slot { border-top: 1px solid var(--rule); }
+.slot .pos { font-size: 0.6875rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.slot .who { font-weight: 700; color: var(--text-strong); font-size: 1rem; margin-top: 2px; }
+.slot.open { background: var(--red-050); }
+.slot.open .pos { color: var(--red-700); }
+.slot.open .who { color: var(--accent); display: flex; align-items: center; gap: 4px; }
+.slot.open .who .i { width: 15px; height: 15px; stroke-width: 2.4; }
+.slot .add { display: flex; gap: 8px; margin-top: 8px; }
+.slot .add input { flex: 1; min-width: 0; min-height: 44px; }
+.slot .add .btn { flex: 0 0 auto; }
+.names { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.names .assignee button { display: grid; place-items: center; }
+.names .assignee .i { width: 12px; height: 12px; stroke-width: 2.6; }
+details.more-name > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; min-height: 32px;
+  padding: 0 10px; border-radius: var(--r-full); font-size: 0.875rem; font-weight: 700; color: var(--nav);
+  box-shadow: inset 0 0 0 1px var(--gray-400); }
+details.more-name > summary::-webkit-details-marker { display: none; }
+details.more-name > summary .i { width: 14px; height: 14px; stroke-width: 2.6; }
+details.more-name[open] { flex-basis: 100%; }
+details.more-name[open] > summary { display: none; }
+details.more-name .add { margin-top: 2px; }
+@media (min-width: 960px) {
+  .slots { grid-template-columns: 1fr 1fr; }
+  .slot + .slot { border-top: 0; }
+  .slots .slot:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  .slots .slot:nth-child(odd) { border-right: 1px solid var(--rule); }
+}
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">Lineup</h1>
-<div class="sub">Who's where for {{ DAYPART_LABELS[daypart] }}{{ '' if day == shift_today else ' · ' + day }}</div>
+{% set ns = namespace(open=[], filled=0, total=0) %}
+{% for area, positions in areas.items() %}{% for p in positions %}
+  {% set ns.total = ns.total + 1 %}
+  {% if assignments.get(p.id) %}{% set ns.filled = ns.filled + 1 %}{% else %}{% set ns.open = ns.open + [(area, p)] %}{% endif %}
+{% endfor %}{% endfor %}
 
-<div class="chiprow">
-  {% for dp in DAYPARTS %}
-  <a class="pill {{ 'on' if dp == daypart }}" href="{{ url_for('shift.lineup', date=day, daypart=dp) }}">{{ dp | capitalize }}</a>
-  {% endfor %}
-</div>
-<form method="get" action="{{ url_for('shift.lineup') }}" class="inline-form" style="margin-bottom:12px;">
-  <input type="hidden" name="daypart" value="{{ daypart }}">
-  <input type="date" name="date" value="{{ day }}">
-  <button class="pill" type="submit">Go</button>
-</form>
-
-{% if not assignments %}
-<div class="empty">No lineup for {{ DAYPART_LABELS[daypart] }} yet.
-  {% if prev_date or prev_daypart %}Start from a copy below, or assign positions one by one.{% endif %}
-</div>
-{% endif %}
-<div class="pillrow">
-  {% if prev_date %}
-  <form method="post" action="{{ url_for('shift.lineup_copy') }}">
-    <input type="hidden" name="from_date" value="{{ prev_date }}">
-    <input type="hidden" name="from_daypart" value="{{ daypart }}">
-    <input type="hidden" name="to_date" value="{{ day }}">
-    <input type="hidden" name="to_daypart" value="{{ daypart }}">
-    <button class="pill small" type="submit">⧉ Copy {{ prev_date }}'s {{ daypart }}</button>
+<section class="hero compact">
+  <p class="eyebrow">Lineups &amp; Setups · {{ day_label(day) }}</p>
+  <h1 class="headline">{{ daypart | capitalize }} lineup</h1>
+  <p class="triage">{% if assignments %}<b>{{ ns.filled }}</b> of <b>{{ ns.total }}</b> positions filled{% if ns.open %} · <b>{{ ns.open | length }}</b> open{% endif %}{% else %}Nobody's on it yet · {{ DAYPART_LABELS[daypart] }}{% endif %}{% if day != shift_today %} · not today{% endif %}</p>
+  <nav class="seg fit" aria-label="Daypart">
+    {% for dp in DAYPARTS %}
+    <a href="{{ url_for('shift.lineup', date=day, daypart=dp) }}"{% if dp == daypart %} class="on" aria-current="page"{% endif %}>{{ dp | capitalize }}{% if day == shift_today and dp == shift_daypart %} <span class="live" aria-label="now"></span>{% endif %}</a>
+    {% endfor %}
+  </nav>
+  <form method="get" action="{{ url_for('shift.lineup') }}" class="dayform">
+    <input type="hidden" name="daypart" value="{{ daypart }}">
+    <label class="sr" for="l-date">Day</label>
+    <input type="date" id="l-date" name="date" value="{{ day }}">
+    <button class="btn btn-secondary sm" type="submit">Go</button>
+    {% if day != shift_today %}<a class="btn btn-secondary sm" href="{{ url_for('shift.lineup', daypart=daypart) }}">Today</a>{% endif %}
   </form>
+  {% if prev_date or prev_daypart %}
+  <div class="copies">
+    {% if prev_date %}
+    <form method="post" action="{{ url_for('shift.lineup_copy') }}">
+      <input type="hidden" name="from_date" value="{{ prev_date }}">
+      <input type="hidden" name="from_daypart" value="{{ daypart }}">
+      <input type="hidden" name="to_date" value="{{ day }}">
+      <input type="hidden" name="to_daypart" value="{{ daypart }}">
+      <button class="btn btn-secondary sm" type="submit">{{ icon('history') }}Copy {{ day_label(prev_date) }}’s {{ daypart }}</button>
+    </form>
+    {% endif %}
+    {% if prev_daypart %}
+    <form method="post" action="{{ url_for('shift.lineup_copy') }}">
+      <input type="hidden" name="from_date" value="{{ day }}">
+      <input type="hidden" name="from_daypart" value="{{ prev_daypart }}">
+      <input type="hidden" name="to_date" value="{{ day }}">
+      <input type="hidden" name="to_daypart" value="{{ daypart }}">
+      <button class="btn btn-secondary sm" type="submit">{{ icon('history') }}Copy from {{ prev_daypart }}</button>
+    </form>
+    {% endif %}
+  </div>
   {% endif %}
-  {% if prev_daypart %}
-  <form method="post" action="{{ url_for('shift.lineup_copy') }}">
-    <input type="hidden" name="from_date" value="{{ day }}">
-    <input type="hidden" name="from_daypart" value="{{ prev_daypart }}">
-    <input type="hidden" name="to_date" value="{{ day }}">
-    <input type="hidden" name="to_daypart" value="{{ daypart }}">
-    <button class="pill small" type="submit">⧉ Copy from {{ prev_daypart }}</button>
-  </form>
-  {% endif %}
-</div>
+</section>
 
 <datalist id="roster-names">
   {% for n in suggest %}<option value="{{ n }}">{% endfor %}
 </datalist>
 
-{% for area, positions in areas.items() %}
-<div class="section-label">{{ area }}</div>
-<div class="card">
-  {% for p in positions %}
-  <div style="padding:8px 0; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <div style="font-weight:700; font-size:14px; margin-bottom:6px;">{{ p.name }}</div>
-    <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
-      {% for a in assignments.get(p.id, []) %}
-      <span class="assignee">{{ a.member_name }}
-        <form method="post" action="{{ url_for('shift.lineup_unassign', assignment_id=a.id) }}">
-          <input type="hidden" name="date" value="{{ day }}">
-          <input type="hidden" name="daypart" value="{{ daypart }}">
-          <button type="submit" title="Remove">✕</button>
-        </form>
-      </span>
-      {% endfor %}
-      <form method="post" action="{{ url_for('shift.lineup_assign') }}" class="inline-form" style="flex:1; min-width:170px;">
+{% if not ns.total %}
+<div class="empty" style="margin-top:24px;">No positions are set up. Ask an admin to add them.</div>
+{% endif %}
+
+{% if ns.open %}
+<section class="sec" id="open">
+  <div class="sec-head"><h2>Open <span class="badge b-red">{{ ns.open | length }} open</span></h2></div>
+  {% if not assignments %}<p class="sec-note">No {{ DAYPART_LABELS[daypart] }} lineup yet.{% if prev_date or prev_daypart %} Start from a copy above, or fill positions one by one.{% endif %}</p>{% endif %}
+  <div class="card list slots">
+    {% for area, p in ns.open %}
+    <div class="slot open" id="pos-{{ p.id }}">
+      <div class="pos">{{ p.name }} · {{ area }}</div>
+      <div class="who">Open — fill</div>
+      <form method="post" action="{{ url_for('shift.lineup_assign') }}" class="add">
         <input type="hidden" name="date" value="{{ day }}">
         <input type="hidden" name="daypart" value="{{ daypart }}">
         <input type="hidden" name="position_id" value="{{ p.id }}">
-        <input type="text" name="member_name" list="roster-names" placeholder="Add name…"
-               autocomplete="off" style="padding:8px;">
-        <button class="pill small" type="submit">Add</button>
+        <label class="sr" for="name-{{ p.id }}">Who's on {{ p.name }}</label>
+        <input type="text" id="name-{{ p.id }}" name="member_name" list="roster-names" placeholder="Add name…" autocomplete="off">
+        <button class="btn btn-secondary sm" type="submit">Add</button>
       </form>
     </div>
+    {% endfor %}
   </div>
+</section>
+{% endif %}
+
+{% if assignments %}
+<section class="sec" id="filled">
+  <div class="sec-head"><h2>Who's where <span class="badge b-green">{{ ns.filled }} filled</span></h2></div>
+  {% for area, positions in areas.items() %}
+  {% set filled = positions | selectattr('id', 'in', assignments) | list %}
+  {% if filled %}
+  <h3 class="eyebrow grp">{{ area }}</h3>
+  <div class="card list slots">
+    {% for p in filled %}
+    <div class="slot" id="pos-{{ p.id }}">
+      <div class="pos">{{ p.name }}</div>
+      <div class="names">
+        {% for a in assignments.get(p.id, []) %}
+        <span class="assignee">{{ a.member_name }}
+          <form method="post" action="{{ url_for('shift.lineup_unassign', assignment_id=a.id) }}">
+            <input type="hidden" name="date" value="{{ day }}">
+            <input type="hidden" name="daypart" value="{{ daypart }}">
+            <button type="submit" title="Remove" aria-label="Remove {{ a.member_name }} from {{ p.name }}">{{ icon('close') }}</button>
+          </form>
+        </span>
+        {% endfor %}
+        <details class="more-name">
+          <summary aria-label="Add someone else to {{ p.name }}">{{ icon('plus') }}Add</summary>
+          <form method="post" action="{{ url_for('shift.lineup_assign') }}" class="add">
+            <input type="hidden" name="date" value="{{ day }}">
+            <input type="hidden" name="daypart" value="{{ daypart }}">
+            <input type="hidden" name="position_id" value="{{ p.id }}">
+            <label class="sr" for="name-{{ p.id }}">Add someone to {{ p.name }}</label>
+            <input type="text" id="name-{{ p.id }}" name="member_name" list="roster-names" placeholder="Add name…" autocomplete="off">
+            <button class="btn btn-secondary sm" type="submit">Add</button>
+          </form>
+        </details>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% endfor %}
-</div>
-{% endfor %}
+</section>
+{% endif %}
 {% endblock %}

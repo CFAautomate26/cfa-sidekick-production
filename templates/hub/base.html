@@ -1,0 +1,24 @@
+{% from "shared/_chrome.html" import head_tags, masthead, tabbar, foot, flashes %}
+<!doctype html>
+<html lang="en">
+<head>
+{{ head_tags(url_for('hub.manifest')) }}
+<title>{% block title %}{% endblock %}{% if self.title() %} · {% endif %}Team Hub</title>
+{% include "shared/cfa_style.html" %}
+{% block head %}{% endblock %}
+</head>
+<body>
+{{ masthead(nav) }}
+{% if data_at_risk and viewer and viewer.is_operator %}
+<div class="banner-risk">⚠ SHIFT_DB_PATH is not set — Hub pages and files will NOT survive a deploy.</div>
+{% endif %}
+
+<main class="wrap">
+  {{ flashes() }}
+  {% block content %}{% endblock %}
+  {{ foot(nav) }}
+</main>
+
+{{ tabbar(nav) }}
+</body>
+</html>

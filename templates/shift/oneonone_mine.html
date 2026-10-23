@@ -1,75 +1,104 @@
 {% extends "shift/base.html" %}
-{% block title %}1:1 meetings{% endblock %}
+{% from "shift/_oneonone_macros.html" import styles, topic_rows, add_topic, stats, thread_row, my_task, assigned_row, rule_note with context %}
+{% block title %}Meetings{% endblock %}
+{% block head %}{{ styles() }}{% endblock %}
 {% block content %}
-<h1 class="page">1:1 meetings</h1>
-<div class="sub">Your agenda with the Operator, plus 1:1s with anyone on
-the team.</div>
+{% set team_open = (team.threads | sum(attribute='open')) + (team.former | sum(attribute='open')) %}
+<section class="hero compact">
+  <p class="eyebrow">Meetings</p>
+  <h1 class="headline">Your 1:1s &amp; to-dos.</h1>
+  <nav class="seg fit" aria-label="Meetings">
+    <a class="on" href="#mine">My 1:1{% if my_open %} <span class="count">{{ my_open }}</span>{% endif %}</a>
+    <a href="#team">Team 1:1s{% if team_open %} <span class="count">{{ team_open }}</span>{% endif %}</a>
+    <a href="#todos">To-dos{% if open_tasks %} <span class="count">{{ open_tasks | length }}</span>{% endif %}</a>
+  </nav>
+</section>
 
-<a class="card tap" href="{{ url_for('shift.oneonone_leader', leader_id=me.id) }}">
-  <h2>🤝 Your 1:1 with the Operator
-    {% if my_open %}<span class="critical-flag">● {{ my_open }} on the agenda</span>{% endif %}</h2>
-  <div class="progress-note">
-    {% if my_last_met %}last 1:1 {{ my_last_met }}{% else %}no 1:1 logged yet{% endif %}
-    · goals, course, and to-dos in one place</div>
-</a>
-
-<div class="section-label" id="team">🔒 Your 1:1s with the team</div>
-<form method="get" action="{{ url_for('shift.oneonone') }}" class="inline-form" style="margin-bottom:12px;">
-  <select name="who" autocomplete="off" aria-label="Open a 1:1 with"
-          onchange="if (this.value) this.form.submit();">
-    <option value="">Open a 1:1 with…</option>
-    {% for p in people %}<option value="member:{{ p.id }}">{{ p.name }}</option>{% endfor %}
-  </select>
-  <button class="pill primary" type="submit">Open</button>
-</form>
-<script>
-// Back-button pages restore the last pick; reset it so choosing the same
-// person again still fires onchange.
-window.addEventListener('pageshow', function () {
-  var who = document.querySelector('select[name=who]');
-  if (who) who.value = '';
-});
-</script>
-{% if not people %}
-<div class="progress-note" style="margin:-4px 0 12px;">The team list is
-empty — the Operator fills it from Slack.</div>
-{% endif %}
-
-{% if team.threads %}
-<div class="card" style="padding: 4px 14px;">
-  {% for m in team.threads %}
-  <a href="{{ url_for('shift.oneonone_member', member_id=m.id) }}"
-     style="display:block; padding:10px 0; text-decoration:none; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <div style="font-weight:700; font-size:15px;">{{ m.name }}
-      {% if m.open %}<span class="critical-flag">● {{ m.open }} waiting</span>{% endif %}</div>
-    <div class="progress-note" style="margin-top:2px;">
-      {% if m.last_met %}last 1:1 {{ m.last_met }}{% else %}no 1:1 logged yet{% endif %}</div>
-  </a>
-  {% endfor %}
+<div class="meet-grid">
+<div class="meet-col">
+<article class="feature cream agenda" id="mine">
+  <div class="top">
+    <p class="lockline">{{ icon('lock') }}Only you and the Operator see this agenda</p>
+    <h2 class="f-title">Your agenda with the Operator</h2>
+    <p class="meta">{% if my_last_met %}Last 1:1 on {{ day(my_last_met) }}{% else %}No 1:1 logged yet{% endif %} · add topics as they come up</p>
+    {{ stats(me.id, course_done, course_total, open_tasks | length, goal_count,
+             '#todos', url_for('shift.oneonone_leader', leader_id=me.id) ~ '#goals', True) }}
+  </div>
+  {{ topic_rows(agenda, 'shift.oneonone_topic_toggle', 'shift.oneonone_topic_delete',
+                action_url=url_for('shift.oneonone_action', leader_id=me.id), back=True) }}
+  {{ add_topic(url_for('shift.oneonone_topic_add', leader_id=me.id), 'Add a topic for your next 1:1', back=True) }}
+  <div class="foot-links">
+    <a href="{{ url_for('shift.oneonone_leader', leader_id=me.id) }}">Past 1:1s and goals{{ icon('chev') }}</a>
+    {% if agenda %}<span>To-do + puts a topic on your to-dos, which other leaders can see.</span>{% endif %}
+  </div>
+</article>
 </div>
-{% elif not team.former %}
-<div class="empty">No 1:1s with team members yet — pick someone above to
-start one.</div>
-{% endif %}
 
-{% if team.former %}
-<details style="margin-bottom:12px;" {{ 'open' if team.former | selectattr('open') | list }}>
-  <summary style="font-size:13px; color:var(--soft); cursor:pointer; padding:6px 0;">Former team members with 1:1 history ({{ team.former | length }})</summary>
-  <div class="card" style="padding: 4px 14px; margin-top:8px;">
-    {% for m in team.former %}
-    <a href="{{ url_for('shift.oneonone_member', member_id=m.id) }}"
-       style="display:flex; align-items:center; min-height:44px; text-decoration:none; color:var(--soft); {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-      <span style="flex:1; font-size:14px;">{{ m.name }}</span>
-      {% if m.open %}<span class="critical-flag" style="margin-right:6px;">● {{ m.open }} waiting</span>{% endif %}
-      <span class="progress-note" style="margin:0;">{% if m.last_met %}last 1:1 {{ m.last_met }}{% endif %}</span>
-    </a>
+<div class="meet-col">
+<section class="sec" id="team">
+  <div class="sec-head"><h2>Your 1:1s with the team</h2></div>
+  <p class="lockline">{{ icon('lock') }}Only you and the Operator see these, not other leaders or admins.</p>
+  <form method="get" action="{{ url_for('shift.oneonone') }}" class="pick">
+    <select name="who" autocomplete="off" aria-label="Open a 1:1 with"
+            onchange="if (this.value) this.form.submit();">
+      <option value="">Open a 1:1 with…</option>
+      {% for p in people %}<option value="member:{{ p.id }}">{{ p.name }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-secondary" type="submit">Open</button>
+  </form>
+  <script>
+  // Back-button pages restore the last pick; reset it so choosing the same
+  // person again still fires onchange.
+  window.addEventListener('pageshow', function () {
+    var who = document.querySelector('select[name=who]');
+    if (who) who.value = '';
+  });
+  </script>
+  {% if not people %}
+  <p class="sec-note">The team list is empty. The Operator fills it from Slack.</p>
+  {% endif %}
+
+  {% if team.threads %}
+  <div class="card list">
+    {% for m in team.threads %}
+    {{ thread_row(url_for('shift.oneonone_member', member_id=m.id), m.name, m.last_met, m.open) }}
     {% endfor %}
   </div>
-</details>
-{% endif %}
+  {% elif not team.former %}
+  <div class="empty">No 1:1s with team members yet. Pick someone above to start one.</div>
+  {% endif %}
 
-<div class="sub">Your 1:1s with team members are visible to you and the
-Operator only — other leaders (admins included) never see them. Growth &amp;
-coaching only: conduct, discipline, attendance, wage, and health
-conversations never go in this app.</div>
+  {% if team.former %}
+  <details class="list-more former" {{ 'open' if team.former | selectattr('open') | list }}>
+    <summary>Former team members with 1:1 history ({{ team.former | length }}){{ icon('chev') }}</summary>
+    <div class="card list">
+      {% for m in team.former %}
+      {{ thread_row(url_for('shift.oneonone_member', member_id=m.id), m.name, m.last_met, m.open, 'Not on the roster') }}
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</section>
+
+<section class="sec" id="todos">
+  <div class="sec-head"><h2>To-dos</h2><a class="more" href="{{ url_for('shift.todo') }}">Assign one</a></div>
+  <h3 class="eyebrow sub-eyebrow">Yours</h3>
+  <div class="card list">
+    {% for t in open_tasks %}
+    {{ my_task(t, back=True) }}
+    {% else %}
+    <p class="muted-line">Nothing open. You're all caught up.</p>
+    {% endfor %}
+  </div>
+  {% if assigned %}
+  <h3 class="eyebrow sub-eyebrow">You assigned</h3>
+  <div class="card list">
+    {% for t in assigned %}{{ assigned_row(t) }}{% endfor %}
+  </div>
+  {% endif %}
+</section>
+</div>
+</div>
+
+{{ rule_note() }}
 {% endblock %}

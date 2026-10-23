@@ -1,0 +1,36 @@
+{% extends "hub/base.html" %}
+{% from "hub/_ui.html" import search_form, leaders_badge with context %}
+{% block title %}Search{% endblock %}
+{% block head %}{% include "hub/_style.html" %}{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">Systems &amp; Procedures · Search</p>
+  <h1 class="headline">{{ 'Search results' if q else 'Search all pages' }}</h1>
+  {% if not q %}<p class="triage">Try a word like “drive-thru”, “fryer” or “uniform”.</p>{% endif %}
+  {{ search_form(q=q, placeholder='Try “drive-thru” or “fryer”', autofocus=not q) }}
+</section>
+{% if q %}
+  {% if results %}
+  <section class="sec">
+    <div class="sec-head"><h2>{{ results|length }} page{{ '' if results|length == 1 else 's' }}</h2></div>
+    <div class="card list">
+    {% for p in results %}
+      <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span>
+        <span class="row-meta tags"><span>{{ p.category_name }}{% if p.section %} · {{ p.section }}{% endif %}</span>{% if p.leaders_only or p.category_leaders_only %}{{ leaders_badge() }}{% endif %}</span>
+        {%- if p.snippet %}<span class="row-meta snip">{% for text, hit in p.snippet %}{% if hit %}<mark>{{ text }}</mark>{% else %}{{ text }}{% endif %}{% endfor %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <div class="empty">Nothing matched “{{ q }}”. Try a shorter word — or ask a leader.</div>
+  {% endif %}
+{% else %}
+<section class="sec">
+  <div class="sec-head"><h2>Or browse</h2></div>
+  <div class="card list">
+    <a class="row" href="{{ url_for('hub.library') }}"><span class="lead-ico">{{ icon('book') }}</span><span class="row-main"><span class="row-title">Systems &amp; Procedures</span><span class="row-meta">Every category and section</span></span>{{ icon('chev', 'chev') }}</a>
+    {% if not viewer.is_operator %}<a class="row" href="{{ url_for('hub.to_read') }}"><span class="lead-ico">{{ icon('bookmark') }}</span><span class="row-main"><span class="row-title">To read</span><span class="row-meta">Your required reading</span></span>{% if hub_to_read %}<span class="badge b-red">{{ hub_to_read }} to read</span>{% endif %}{{ icon('chev', 'chev') }}</a>{% endif %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

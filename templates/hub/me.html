@@ -1,0 +1,52 @@
+{% extends "hub/base.html" %}
+{% block title %}Me{% endblock %}
+{% block head %}{% include "hub/_style.html" %}
+<style>
+.who-card { display: flex; gap: 14px; align-items: center; }
+.who-card .av { width: 52px; height: 52px; font-size: 1.25rem; }
+.signout { margin-top: 24px; }
+.signout .btn { width: 100%; }
+</style>
+{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">Me</p>
+  <h1 class="headline">{{ viewer.name }}</h1>
+  <p class="triage">{% if viewer.is_operator %}Operator — you manage Team Hub and who can sign in.
+    {%- elif viewer.kind == 'leader' %}Shift leader{{ ' · editor' if viewer.is_editor }} — signed in with your PIN.
+    {%- else %}Team member — signed in with your clock-in number.{% endif %}</p>
+</section>
+
+{% if viewer.is_leader %}
+<div class="card list">
+  <a class="row" href="{{ url_for('shift.today') }}"><span class="lead-ico">{{ icon('home') }}</span><span class="row-main"><span class="row-title">Today</span><span class="row-meta">Checklists, lineups, goals and notes</span></span>{{ icon('chev', 'chev') }}</a>
+  {% if viewer.is_operator %}
+  <a class="row" href="{{ url_for('hub.people') }}"><span class="lead-ico">{{ icon('key') }}</span><span class="row-main"><span class="row-title">Team Hub access</span><span class="row-meta">Give team members access with their clock-in number</span></span>{{ icon('chev', 'chev') }}</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if not viewer.is_operator %}
+<section class="sec">
+  <div class="sec-head"><h2>What you've confirmed</h2>{% if hub_to_read %}<a class="more" href="{{ url_for('hub.to_read') }}">{{ hub_to_read }} to read</a>{% endif %}</div>
+  {% if done %}
+  <div class="card list">
+  {% for p in done %}
+    <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span>
+      <span class="row-meta tags"><span>{{ p.category_name }} · confirmed {{ day(p.ack.acked_at) }}</span>
+      {%- if p.ack.version >= p.ack_version %}<span class="badge b-green">{{ icon('check', 'xs') }}Read v{{ p.ack.version }}</span>
+      {%- else %}<span class="badge b-tan">Updated · read again</span>{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+  {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">Nothing yet. Pages you confirm show up here.</div>
+  {% endif %}
+</section>
+{% endif %}
+
+<form method="post" action="{{ url_for('hub.logout') }}" class="signout">
+  <button class="btn btn-secondary" type="submit">{{ icon('signout') }}Sign out</button>
+</form>
+{% if viewer.is_leader %}<p class="fine-line" style="text-align:center;">Signs you out of the leader tools too.</p>{% endif %}
+<p class="callout" style="margin-top:20px;">{{ icon('phone') }}<span>Tip: open Team Hub in Safari or Chrome and tap “Add to Home Screen” for one-tap access.</span></p>
+{% endblock %}

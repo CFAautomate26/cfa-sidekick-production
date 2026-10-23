@@ -1,0 +1,34 @@
+{% extends "hub/base.html" %}
+{% from "hub/_ui.html" import page_crumbs with context %}
+{% block title %}Remove {{ att.filename }}{% endblock %}
+{% block head %}{% include "hub/_style.html" %}
+<style>.rm-photo img { width: 100%; height: auto; border-radius: var(--r-xl); }</style>
+{% endblock %}
+{% block content %}
+{{ page_crumbs(page, last=true) }}
+<section class="hero compact">
+  <p class="eyebrow">Editor tools · Remove a file</p>
+  <h1 class="headline">Remove {{ 'photo %d' % att.photo_no if att.photo_no else 'a file' }}?</h1>
+  <p class="triage">{{ att.filename }}</p>
+</section>
+{% if att.photo_no %}
+<div class="card rm-photo"><img src="{{ url_for('hub.file', file_id=att.id) }}" alt="{{ att.alt or att.filename }}"></div>
+{% endif %}
+{% if error %}<p class="callout warm">{{ icon('alert') }}<span>{{ error }}</span></p>{% endif %}
+<form method="post" action="{{ url_for('hub.remove_file', file_id=att.id) }}" class="card"{% if error %} style="margin-top:12px;"{% endif %}>
+  {% if page.version %}
+  <p class="fine-line" style="margin-top:0;">This page is published, so removing the file makes a new version.
+    The file stays in the page's History (the Operator can delete it for good from there).
+    {% if att.photo_no %}Any “[photo: {{ att.photo_no }}]” left in the text simply shows nothing.{% endif %}</p>
+  {% set field_id = 'rm' %}
+  {% include "hub/_change_fields.html" %}
+  {% else %}
+  <input type="hidden" name="rev" value="{{ page.rev }}">
+  <p class="fine-line" style="margin-top:0;">It's a draft, so the file is deleted.</p>
+  {% endif %}
+  <div class="btnrow">
+    <button class="btn btn-primary sm" type="submit">Remove it</button>
+    <a class="btn btn-secondary sm" href="{{ url_for('hub.page', page_id=page.id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

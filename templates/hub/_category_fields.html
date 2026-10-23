@@ -1,0 +1,13 @@
+{# One category's fields (Operator only). Needs `c`. #}
+<label class="field" for="cat-name-{{ c.id|default('new') }}">Name</label>
+<div class="inline-form" style="margin-top:0;">
+  <input type="text" name="icon" value="{{ c.icon }}" maxlength="8" aria-label="Icon (emoji)" style="flex:0 0 64px; text-align:center;">
+  <input type="text" id="cat-name-{{ c.id|default('new') }}" name="name" value="{{ c.name }}" maxlength="60" placeholder="Name" required>
+</div>
+<label class="field" for="cat-blurb-{{ c.id|default('new') }}">Description</label>
+<input type="text" id="cat-blurb-{{ c.id|default('new') }}" name="blurb" value="{{ c.blurb }}" maxlength="200">
+<label class="field" for="cat-sort-{{ c.id|default('new') }}">Order</label>
+<input type="number" id="cat-sort-{{ c.id|default('new') }}" name="sort" value="{{ c.sort }}" min="0" max="999" style="width:100px;">
+<label class="checkline"><input type="checkbox" name="leaders_only" value="1" {{ 'checked' if c.leaders_only }}> <span>Leaders only</span></label>
+<label class="checkline"><input type="checkbox" name="policy" value="1" {{ 'checked' if c.policy }}> <span>Policy category — only the Operator publishes, after the review checks</span></label>
+<label class="checkline"><input type="checkbox" name="active" value="1" {{ 'checked' if c.active }}> <span>Shown</span></label>
