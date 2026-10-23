@@ -15,18 +15,14 @@ deployment. Team Hub's look, navigation and sign-in are described in
   unread. Daily goals are private to each leader and the Operator (like
   1:1s); the Operator sees every leader's on Goals › Daily goals, and each
   leader sees their own last week there.
-- **Shift checklists** — FOH/BOH opening, afternoon reset, and closing
-  lists generated fresh every day. Tapping an
+- **Shift checklists** — FOH/BOH opening, breakfast→lunch transition,
+  afternoon reset, and closing lists generated fresh every day. Tapping an
   item stamps *who* checked it and *when*. Items marked **critical**
   (food-safety / cash) are flagged red until done. Both closing lists carry
   their own red nightly drain-cleaning item (FOH and BOH drains), so the
   scorecard shows whether drains got done every night; FOH Closing also
   has "Manager's office cleaned". Later additions like these reach the
-  live lists once on deploy (`LIST_ADDITIONS` in `shift_db.py`). Lists the
-  Operator takes off for good are retired the same way, once, by name
-  (`LIST_RETIREMENTS`): the breakfast→lunch changeover (transition) and any
-  parking lot lists came off in October 2026 to keep Checklists to the
-  areas that matter most — Admin › Restore brings one back. Templates are
+  live lists once on deploy (`LIST_ADDITIONS` in `shift_db.py`). Templates are
   editable in the admin area; past days keep their history exactly as it
   happened.
 - **Station cleaning lists** — the posted wall sheets, built in
@@ -260,7 +256,7 @@ scale.
    4+ digit PIN (role `lead`, or `admin` for directors who should manage
    templates/announcements/backups).
 4. **Admin → Edit checklist templates**: the app ships with seeded FOH/BOH
-   opening, afternoon, and closing lists — walk them with a
+   opening, transition, afternoon, and closing lists — walk them with a
    senior director and reword to match the store before launch. One item per
    line; a leading `!` marks it critical.
 5. Have every leader open the site, sign in (sessions last 30 days), and

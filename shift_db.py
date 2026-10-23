@@ -627,17 +627,6 @@ LIST_ADDITIONS = [
      rf"\boffice\b.*\b{_CLEANING}|\b{_CLEANING}\w*\b.*\boffice\b"),
 ]
 
-# Lists the Operator took off to keep Checklists to the areas that matter
-# most: (meta key that marks it applied, what they are, name pattern). Each
-# entry retires every ACTIVE list whose name matches, once — what Admin's
-# Retire button does, so past days stay in History and Restore brings a
-# list back, scorecard and all — see _retire_lists. New databases don't
-# seed them.
-LIST_RETIREMENTS = [
-    ("changeover_parking_retired", "changeover + parking lot lists",
-     r"change\s*-?\s*over|\btransition|\bparking\b|\blot\b"),
-]
-
 SEED_TEMPLATES = [
     ("FOH Opening", "breakfast", "Front Counter", [
         ("Registers + ServicePoint logged in and tested", False),
@@ -662,6 +651,17 @@ SEED_TEMPLATES = [
         ("Biscuit + Grill breakfast timeline started", False),
         ("Prep list reviewed and started (produce, sauces)", False),
         ("Date labels checked on all open product (FIFO)", True),
+    ]),
+    ("Breakfast → Lunch Transition", "lunch", "All", [
+        ("Menu boards + kiosks switched to lunch by 10:30", False),
+        ("Breakfast product pulled and waste logged at 10:30", True),
+        ("Fry station switched: hash browns → waffle fries", False),
+        ("Breading station rotated for lunch volume", False),
+        ("Boards stocked: buns, cheese, produce for rush", False),
+        ("Sauces + lids + bags restocked front and DT", False),
+        ("Dining room reset before 11:30 rush", False),
+        ("Lunch lineup reviewed with team + breaks planned", False),
+        ("Headset battery swap for rush", False),
     ]),
     ("Afternoon Reset", "afternoon", "All", [
         ("Dining room + washroom deep check after lunch", False),
@@ -751,7 +751,6 @@ def init_db() -> None:
             _seed_course(conn)
             _seed_cleaning(conn)
             _seed_schedule_log(conn)
-            _retire_lists(conn)
             _seed_hub(conn)
             conn.commit()
         except BaseException:
@@ -1110,31 +1109,6 @@ def _seed_schedule_log(conn) -> None:
         "SELECT t.id, '', t.frequency, t.active FROM checklist_templates t "
         "WHERE NOT EXISTS (SELECT 1 FROM checklist_schedule_log l "
         "WHERE l.template_id = t.id)")
-
-
-def _retire_lists(conn) -> None:
-    """Apply each LIST_RETIREMENTS entry once: retire every ACTIVE list whose
-    name matches (any case) and log the change as the Retire button does, so
-    it's off today's lists (a run already ticked keeps its ticks) and owes
-    nothing from today. Runs after _seed_schedule_log, so each list's
-    baseline is already there. The deploy log names what was retired and
-    every list still on."""
-    for key, what, pattern in LIST_RETIREMENTS:
-        if conn.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone():
-            continue
-        retired = []
-        for t in conn.execute("SELECT id, name FROM checklist_templates WHERE active=1 "
-                              "ORDER BY sort, id").fetchall():
-            if re.search(pattern, t["name"], re.I):
-                conn.execute("UPDATE checklist_templates SET active=0 WHERE id=?",
-                             (t["id"],))
-                _log_schedule(conn, t["id"])
-                retired.append(f"#{t['id']} {t['name']!r}")
-        left = [r["name"] for r in conn.execute(
-            "SELECT name FROM checklist_templates WHERE active=1 ORDER BY sort, id")]
-        conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, now_stamp()))
-        print(f"shift_db: retired {what} — {'; '.join(retired) or 'none active'}; "
-              f"{len(left)} lists still on: {', '.join(left)}")
 
 
 def _log_schedule(conn, template_id: int) -> None:
@@ -3480,9 +3454,6 @@ def export_json() -> str:
                            "closing_drains_added": drains["value"] if drains else None,
                            "list_additions": ",".join(
                                key for key, *_ in LIST_ADDITIONS if conn.execute(
-                                   "SELECT 1 FROM meta WHERE key=?", (key,)).fetchone()),
-                           "list_retirements": ",".join(
-                               key for key, *_ in LIST_RETIREMENTS if conn.execute(
                                    "SELECT 1 FROM meta WHERE key=?", (key,)).fetchone())}
         # SELECTs run in autocommit by default; an explicit transaction makes
         # the whole export one consistent snapshot (WAL gives repeatable
@@ -3684,20 +3655,6 @@ def import_json(raw: str) -> str | None:
                     # count against it: the backup says since when (older
                     # backups predate the button entirely).
                     _seed_schedule_log(conn)
-                    # Lists taken off since (LIST_RETIREMENTS): a backup from
-                    # before brings them back on, so retire them again; one
-                    # from after keeps any the Operator restored. After the
-                    # baseline above, as at boot.
-                    listed = meta.get("list_retirements")
-                    for key, *_ in LIST_RETIREMENTS:
-                        held = (key in listed.split(",") if listed is not None
-                                else not templates)
-                        if held:
-                            conn.execute("INSERT OR IGNORE INTO meta (key, value) "
-                                         "VALUES (?, ?)", (key, now_stamp()))
-                        else:
-                            conn.execute("DELETE FROM meta WHERE key=?", (key,))
-                    _retire_lists(conn)
                     runs = payload.get("checklist_runs", [])
                     if "manager_check_since" in meta:
                         since = meta["manager_check_since"]
