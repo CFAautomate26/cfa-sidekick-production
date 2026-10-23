@@ -102,7 +102,7 @@ def test_requires_sign_in(client):
         assert "/hub/login" in resp.headers["Location"]
     assert client.get("/hub/login").status_code == 200
     assert client.get("/hub/manifest.webmanifest").status_code == 200
-    assert client.get("/hub/icon.svg").status_code == 200
+    assert client.get("/hub/icon.svg").status_code == 302
 
 
 def test_member_sign_in_first_name_or_full_name(client):
@@ -153,16 +153,17 @@ def test_leader_session_carries_over_and_next_returns_to_hub(client):
     make_leader(client)
     resp = client.post("/shift/login?next=/hub/search", data={"name": "Maya", "pin": "4721"})
     assert resp.headers["Location"].endswith("/hub/search")
-    assert client.get("/hub/").status_code == 200
+    assert client.get("/hub/").headers["Location"].endswith("/shift/")   # a leader's home is Today
+    assert client.get("/hub/library").status_code == 200
     assert b"Maya" in client.get("/hub/me").data
 
 
 def test_operator_pin_change_signs_operator_out(client, monkeypatch):
     login_operator(client)
-    assert client.get("/hub/").status_code == 200
+    assert client.get("/hub/library").status_code == 200
     assert client.get("/shift/").status_code == 200
     monkeypatch.setattr(shift_app, "SHIFT_ADMIN_PIN", "1234")
-    assert client.get("/hub/").status_code == 302
+    assert "/hub/login" in client.get("/hub/library").headers["Location"]
     login_operator(client)
     assert client.get("/shift/").status_code == 302
 

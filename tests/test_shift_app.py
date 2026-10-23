@@ -65,8 +65,15 @@ def test_not_configured_page(client, monkeypatch):
 
 
 def test_manifest_and_icon_public(client):
-    assert client.get("/shift/manifest.webmanifest").status_code == 200
-    assert client.get("/shift/icon.svg").status_code == 200
+    manifest = client.get("/shift/manifest.webmanifest")
+    assert manifest.status_code == 200 and manifest.json["scope"] == "/"
+    assert manifest.json == client.get("/hub/manifest.webmanifest").json   # one Team Hub
+    icon = client.get("/shift/icon.svg")                  # old installs still find an icon
+    assert icon.status_code == 302 and icon.headers["Location"].endswith("/icon-180.png")
+    assert client.get("/static/teamhub/icon-180.png").status_code == 200
+    logo = client.get("/static/teamhub/logo-round.png").data
+    with open("assets/cfa-round-logo.png", "rb") as f:     # the supplied logo, unaltered
+        assert logo == f.read()
 
 
 # --- auth ------------------------------------------------------------------
@@ -318,7 +325,7 @@ def test_scorecard_page(client):
     for area in ["Dining Room", "Drive Thru", "Food Safety"]:
         assert f'<div class="section-label">{area}</div>' in page
     assert "fully done" in page and "Most often missed" in page
-    assert b"Checklist scorecard" in client.get("/shift/more").data
+    assert b"/shift/checklists/scorecard" in client.get("/shift/checklists").data
 
 
 def test_admin_template_schedule(client):
@@ -880,10 +887,10 @@ def test_more_badge_shows_my_agenda_count(client):
     make_leader(client)
     maya = shift_db.leaders()[0]
     login_leader(client)
-    assert b"on your agenda" not in client.get("/shift/more").data
+    assert b'Meetings <span class="count">' not in client.get("/shift/more").data
     client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "A"})
     client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "B"})
-    assert "● 2 on your agenda".encode() in client.get("/shift/more").data
+    assert b'Meetings <span class="count">2</span>' in client.get("/shift/more").data
 
 
 def test_goal_leader_tag_via_route(client):
@@ -1456,7 +1463,7 @@ def test_former_member_threads_show_what_is_waiting(client):
     login_leader(client)
     client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "Check in"})
     shift_db.set_member_active(av, False)                 # Avery left the roster
-    assert "● 1 on your agenda".encode() in client.get("/shift/more").data
+    assert b'Meetings <span class="count">1</span>' in client.get("/shift/more").data
     page = client.get("/shift/oneonone").data.decode()
     assert "No 1:1s with team members yet" not in page    # badge and page agree
     former = page[page.index("Former team members with 1:1 history"):]
@@ -1832,7 +1839,7 @@ def test_recovery_contacted_now_checkbox(client):
     # More badge must agree: no red "open" badge, a calm coming-back note
     more_page = client.get("/shift/more").data
     assert b"open</span>" not in more_page
-    assert "📞 1 coming back".encode() in more_page
+    assert b'<span class="badge b-tan">1 coming back</span>' in more_page
 
 
 def test_recovery_operator_create_and_resolve(client):
@@ -1887,7 +1894,7 @@ def test_recovery_more_badge_counts_open(client):
     assert b"open" not in client.get("/shift/more").data.split(b"Guest recovery")[1][:120]
     client.post("/shift/recovery", data={"guest_name": "Jordan",
                                          "issue": "service", "remedy": "refund"})
-    assert "● 1 open".encode() in client.get("/shift/more").data
+    assert b'<span class="badge b-red">1 open</span>' in client.get("/shift/more").data
 
 
 def test_recovery_textual_phone_still_shown(client):

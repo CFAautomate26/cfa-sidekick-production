@@ -1,96 +1,24 @@
+{% from "shared/_chrome.html" import head_tags, masthead, tabbar, foot, flashes %}
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#E31937">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="manifest" href="{{ url_for('hub.manifest') }}">
-<link rel="icon" href="{{ url_for('hub.icon') }}" type="image/svg+xml">
-<link rel="apple-touch-icon" href="{{ url_for('hub.icon') }}">
-<title>{% block title %}Team Hub{% endblock %} — CFA Wharncliffe &amp; Wonderland</title>
+{{ head_tags(url_for('hub.manifest')) }}
+<title>{% block title %}{% endblock %}{% if self.title() %} · {% endif %}Team Hub</title>
 {% include "shared/cfa_style.html" %}
-<style>
-  .doc { font-size: 16px; line-height: 1.55; }
-  .doc > :first-child { margin-top: 0; }
-  .doc h2 { font-size: 19px; margin: 18px 0 6px; }
-  .doc h3 { font-size: 17px; margin: 16px 0 6px; }
-  .doc h4 { font-size: 15px; margin: 14px 0 4px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--soft); }
-  .doc p { margin: 0 0 10px; }
-  .doc ul, .doc ol { margin: 0 0 12px 22px; }
-  .doc li { margin: 4px 0; }
-  .doc a { color: var(--cfa-red); }
-  .doc figure { margin: 12px 0; }
-  .doc img, .gallery img { max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); display: block; }
-  .gallery figure { margin: 0 0 12px; }
-  .gallery figcaption { font-size: 13px; color: var(--soft); margin-top: 4px; }
-  .badge { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line);
-    color: var(--soft); background: var(--cream); vertical-align: middle; }
-  .badge.req { color: var(--cfa-red); border-color: var(--cfa-red); }
-  .badge.ok { color: var(--good); border-color: var(--good); }
-  .badge.warn { color: #8a5a00; border-color: #e8c98a; background: #fff6e6; }
-  .crumbs { font-size: 13px; color: var(--soft); margin-bottom: 6px; }
-  .crumbs a { color: var(--soft); }
-  .pagelist a.card { display: block; text-decoration: none; }
-  .pagelist .title { font-weight: 700; font-size: 15px; }
-  .pagelist .summary { font-size: 13px; color: var(--soft); margin-top: 2px; }
-  .catgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
-  .catgrid a.card { margin: 0; text-decoration: none; }
-  .catgrid .ico { font-size: 26px; }
-  .catgrid .name { font-weight: 700; font-size: 15px; margin-top: 4px; }
-  .catgrid .count { font-size: 12px; color: var(--soft); }
-  mark { background: #ffe9a8; color: inherit; border-radius: 3px; padding: 0 1px; }
-  .callout { background: #fff6e6; border: 1px solid #e8c98a; color: #6b4b12; border-radius: 12px;
-    padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
-  .callout.red { background: #fdecee; border-color: #f2b8c0; color: #7a1220; }
-  .hrfoot { font-size: 13px; color: var(--soft); border-top: 1px solid var(--line); margin-top: 16px; padding-top: 10px; }
-  .tools { display: flex; gap: 8px; flex-wrap: wrap; }
-  .tools form { margin: 0; }
-  details.more > summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--soft); list-style: none; }
-  details.more > summary::-webkit-details-marker { display: none; }
-  details.more[open] > summary { margin-bottom: 8px; }
-  .checkline { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; margin: 8px 0; }
-  .checkline input { margin-top: 3px; accent-color: var(--cfa-red); }
-  .muted { color: var(--soft); font-size: 13px; }
-  .row-between { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-  pre.help { white-space: pre-wrap; font-family: inherit; font-size: 13px; color: var(--soft); background: var(--cream);
-    border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
-</style>
 {% block head %}{% endblock %}
 </head>
 <body>
-{% if viewer %}
-<div class="topbar">
-  <a class="brand" href="{{ url_for('hub.home') }}">Team Hub
-    <small>CFA Wharncliffe &amp; Wonderland</small></a>
-  <a class="whoami" href="{{ url_for('hub.me') }}">{{ viewer.name.split()[0] if viewer.kind == 'member' else viewer.name }}
-    {% if hub_to_read %}<span class="dot" title="Pages to read"></span>{% endif %}</a>
-</div>
-{% endif %}
+{{ masthead(nav) }}
 {% if data_at_risk and viewer and viewer.is_operator %}
 <div class="banner-risk">⚠ SHIFT_DB_PATH is not set — Hub pages and files will NOT survive a deploy.</div>
 {% endif %}
 
-<div class="wrap">
-  {% with messages = get_flashed_messages() %}
-    {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
-  {% endwith %}
+<main class="wrap">
+  {{ flashes() }}
   {% block content %}{% endblock %}
-</div>
+  {{ foot(nav) }}
+</main>
 
-{% if viewer %}
-<nav class="tabbar">
-  {% set ep = request.endpoint or '' %}
-  <a href="{{ url_for('hub.home') }}" class="{{ 'on' if ep in ('hub.home', 'hub.category', 'hub.page') }}"><span class="ico">📚</span>Home</a>
-  <a href="{{ url_for('hub.search') }}" class="{{ 'on' if ep == 'hub.search' }}"><span class="ico">🔎</span>Search</a>
-  <a href="{{ url_for('hub.to_read') }}" class="{{ 'on' if ep == 'hub.to_read' }}"><span class="ico">📖</span>To read{% if hub_to_read %} ({{ hub_to_read }}){% endif %}</a>
-  {% if viewer.is_editor %}
-  <a href="{{ url_for('hub.manage') }}" class="{{ 'on' if ep in ('hub.manage', 'hub.people', 'hub.new_page', 'hub.edit_page') }}"><span class="ico">🛠</span>Manage</a>
-  {% endif %}
-  <a href="{{ url_for('hub.me') }}" class="{{ 'on' if ep == 'hub.me' }}"><span class="ico">🙂</span>Me</a>
-</nav>
-{% endif %}
+{{ tabbar(nav) }}
 </body>
 </html>

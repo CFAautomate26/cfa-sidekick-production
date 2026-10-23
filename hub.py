@@ -27,6 +27,7 @@ import hub_db
 import hub_text
 import shift_app
 import shift_db
+import teamhub_nav
 
 hub_bp = Blueprint("hub", __name__, url_prefix="/hub")
 
@@ -74,6 +75,14 @@ def _record_miss(name_key: str) -> None:
 # ---------------------------------------------------------------------------
 
 _PUBLIC_ENDPOINTS = {"hub.login", "hub.logout", "hub.manifest", "hub.icon"}
+
+
+def _nav(viewer: hub_db.Viewer | None) -> dict | None:
+    if viewer is None:
+        return None
+    if viewer.kind == "member":
+        return teamhub_nav.member_nav(viewer)
+    return teamhub_nav.leader_nav(viewer.kind, viewer.name, viewer.role, viewer.id)
 
 
 def _load_viewer() -> hub_db.Viewer | None:
@@ -157,6 +166,7 @@ def _globals():
     viewer = getattr(g, "viewer", None)
     return {
         "viewer": viewer,
+        "nav": _nav(viewer),
         "hub_to_read": len(hub_db.to_read(viewer)) if viewer else 0,
         "data_at_risk": shift_app.DATA_AT_RISK,
     }
@@ -242,11 +252,26 @@ def logout():
 
 @hub_bp.route("/")
 def home():
+    """Team Hub's front page: a leader's is Today (/shift/); a team
+    member's is their own home (reading, categories, recently updated)."""
     viewer = g.viewer
-    cats = hub_db.categories(viewer)
+    if viewer.is_leader:
+        return redirect(url_for("shift.today"))
     return render_template(
-        "hub/home.html", categories=cats, counts=hub_db.category_counts(viewer),
-        to_read=hub_db.to_read(viewer), recent=hub_db.recent_updates(viewer),
+        "hub/home.html", categories=hub_db.categories(viewer),
+        counts=hub_db.category_counts(viewer), to_read=hub_db.to_read(viewer),
+        recent=hub_db.recent_updates(viewer), queues=None)
+
+
+@hub_bp.route("/library")
+def library():
+    """Systems & Procedures: the categories, search and (for editors) the
+    editor tools — the same for every viewer, filtered by what they may see."""
+    viewer = g.viewer
+    return render_template(
+        "hub/home.html", categories=hub_db.categories(viewer),
+        counts=hub_db.category_counts(viewer), to_read=hub_db.to_read(viewer),
+        recent=hub_db.recent_updates(viewer),
         queues=hub_db.editor_queues() if viewer.is_editor else None)
 
 
@@ -783,26 +808,16 @@ def bulk_grant():
 
 @hub_bp.route("/manifest.webmanifest")
 def manifest():
-    return {
-        "name": "CFA Team Hub",
-        "short_name": "Team Hub",
-        "start_url": "/hub/",
-        "display": "standalone",
-        "background_color": "#FFFAF2",
-        "theme_color": "#E31937",
-        "icons": [{"src": "/hub/icon.svg", "sizes": "any", "type": "image/svg+xml"}],
-    }, 200, {"Content-Type": "application/manifest+json"}
-
-
-_ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
-<rect width="180" height="180" rx="40" fill="#E31937"/>
-<text x="90" y="88" font-family="Helvetica, Arial, sans-serif" font-size="56"
- font-weight="bold" fill="#fff" text-anchor="middle">CFA</text>
-<text x="90" y="132" font-family="Helvetica, Arial, sans-serif" font-size="30"
- fill="#FFFAF2" text-anchor="middle">Hub</text>
-</svg>"""
+    return teamhub_nav.manifest(), 200, {"Content-Type": "application/manifest+json"}
 
 
 @hub_bp.route("/icon.svg")
 def icon():
-    return Response(_ICON_SVG, mimetype="image/svg+xml")
+    return redirect(url_for("static", filename="teamhub/icon-180.png"))
+
+
+@hub_bp.route("/menu")
+def menu():
+    return shift_app.menu_page(_nav(g.viewer),
+                               "hub.home" if g.viewer.kind == "member" else "shift.today",
+                               url_for("hub.manifest"))

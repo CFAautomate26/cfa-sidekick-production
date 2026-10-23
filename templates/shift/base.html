@@ -1,48 +1,25 @@
+{% from "shared/_chrome.html" import head_tags, masthead, tabbar, foot, flashes %}
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#E31937">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="manifest" href="{{ url_for('shift.manifest') }}">
-<link rel="icon" href="{{ url_for('shift.icon') }}" type="image/svg+xml">
-<link rel="apple-touch-icon" href="{{ url_for('shift.icon') }}">
-<title>{% block title %}Shift Lead{% endblock %} — CFA Wharncliffe &amp; Wonderland</title>
+{{ head_tags(url_for('shift.manifest')) }}
+<title>{% block title %}{% endblock %}{% if self.title() %} · {% endif %}Team Hub</title>
 {% include "shared/cfa_style.html" %}
 {% block head %}{% endblock %}
 </head>
 <body>
-{% if session.get('shift_name') %}
-<div class="topbar">
-  <a class="brand" href="{{ url_for('shift.today') }}">Shift Lead
-    <small>CFA Wharncliffe &amp; Wonderland</small></a>
-  <a class="whoami" href="{{ url_for('shift.more') }}">{{ shift_name }}
-    {% if unread_announcements %}<span class="dot" title="New announcements"></span>{% endif %}</a>
-</div>
-{% endif %}
+{{ masthead(nav) }}
 {% if data_at_risk and shift_is_admin %}
 <div class="banner-risk">⚠ SHIFT_DB_PATH is not set — data will NOT survive a deploy. See the admin page.</div>
 {% endif %}
 
-<div class="wrap">
-  {% with messages = get_flashed_messages() %}
-    {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
-  {% endwith %}
+<main class="wrap">
+  {{ flashes() }}
   {% block content %}{% endblock %}
-</div>
+  {{ foot(nav) }}
+</main>
 
-{% if session.get('shift_name') %}
-<nav class="tabbar">
-  {% set ep = request.endpoint or '' %}
-  <a href="{{ url_for('shift.today') }}" class="{{ 'on' if ep == 'shift.today' }}"><span class="ico">🏠</span>Today</a>
-  <a href="{{ url_for('shift.checklists') }}" class="{{ 'on' if ep.startswith('shift.checklists') or ep == 'shift.run_detail' }}"><span class="ico">✅</span>Checklists</a>
-  <a href="{{ url_for('shift.lineup') }}" class="{{ 'on' if ep.startswith('shift.lineup') }}"><span class="ico">🧢</span>Lineup</a>
-  <a href="{{ url_for('shift.goals') }}" class="{{ 'on' if ep.startswith('shift.goal') }}"><span class="ico">🎯</span>Goals</a>
-  <a href="{{ url_for('shift.notes') }}" class="{{ 'on' if ep.startswith('shift.note') }}"><span class="ico">📝</span>Notes</a>
-</nav>
-{% endif %}
+{{ tabbar(nav) }}
 
 <script>
 // Progressive enhancement: checklist toggles post in the background and the

@@ -1,0 +1,58 @@
+{# Team Hub chrome, shared by both bases: the white masthead (red
+   hamburger, round logo on the hairline, red Search), the bottom tab bar
+   (a top row on the office desktop) and the fine-print footer. `nav` comes
+   from teamhub_nav.nav_for — it only ever links where the viewer may go. #}
+
+{% macro head_tags(manifest_url) %}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Team Hub">
+<link rel="manifest" href="{{ manifest_url }}">
+<link rel="icon" href="{{ url_for('static', filename='teamhub/icon-192.png') }}" type="image/png">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='teamhub/icon-180.png') }}">
+{% endmacro %}
+
+{% macro masthead(nav) %}
+<header class="masthead">
+  {% if nav %}
+  <a class="burger" href="{{ nav.menu }}?from={{ request.full_path.rstrip('?')|urlencode }}" aria-label="Open the Team Hub menu"><span></span><span></span><span></span></a>
+  {% if nav.search %}<a class="action" href="{{ nav.search }}">Search</a>{% endif %}
+  {% endif %}
+  <div class="rule"></div>
+  <a class="logo" href="{{ nav.home if nav else login_url() }}" aria-label="Team Hub home"><img src="{{ url_for('static', filename='teamhub/logo-round.png') }}" alt="Chick-fil-A" width="64" height="64"></a>
+  {% if nav %}
+  <a class="under left" href="{{ nav.home }}">Team Hub</a>
+  <a class="under right" href="{{ nav.me or nav.menu }}">{{ icon('user', 'sm') }}{{ nav.first }}</a>
+  {% endif %}
+</header>
+{% endmacro %}
+
+{% macro tabbar(nav) %}
+{% if nav %}
+<nav class="tabbar" aria-label="Team Hub sections"><div class="tabs">
+  {% for t in nav.tabs %}
+  <a href="{{ t.url }}"{% if t.on %} class="on" aria-current="page"{% endif %}>{{ icon(t.icon) }}<span>{{ t.label }}</span>{% if t.count %}<span class="count">{{ t.count }}</span>{% endif %}</a>
+  {% endfor %}
+</div></nav>
+{% endif %}
+{% endmacro %}
+
+{% macro foot(nav) %}
+<footer class="foot">
+  <span>Team Hub · Chick-fil-A Wharncliffe &amp; Wonderland, London ON</span>
+  {% if nav %}
+  <form method="post" action="{{ nav.logout }}" style="margin:0;">
+    <button type="submit" class="textlink" style="background:none;border:0;cursor:pointer;font:inherit;font-weight:700;color:var(--gray-700);padding:0;">{% if nav.member %}Not {{ nav.first }}? Sign out{% else %}Sign out{% endif %}</button>
+  </form>
+  {% endif %}
+</footer>
+{% endmacro %}
+
+{% macro flashes() %}
+{% with messages = get_flashed_messages() %}
+  {% for m in messages %}<div class="flash" role="status">{{ m }}</div>{% endfor %}
+{% endwith %}
+{% endmacro %}

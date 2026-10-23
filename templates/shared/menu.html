@@ -1,0 +1,43 @@
+{# The full-screen Team Hub menu (chick-fil-a.ca's opened hamburger):
+   big navy section words with chevrons, then small gray rows. Served at
+   /hub/menu and /shift/more, so leaders keep it even without the Hub. #}
+{% from "shared/_chrome.html" import head_tags %}
+<!doctype html>
+<html lang="en">
+<head>
+{{ head_tags(manifest_url) }}
+<title>Menu · Team Hub</title>
+{% include "shared/cfa_style.html" %}
+</head>
+<body class="menu-sheet">
+<header class="sheet-top">
+  <a class="close" href="{{ back }}" aria-label="Close the menu">{{ icon('close') }}</a>
+  {% if nav.search %}<a class="action" href="{{ nav.search }}">Search</a>{% endif %}
+</header>
+<main class="wrap">
+  <nav class="menu-big" aria-label="Team Hub sections">
+    {% for b in nav.big %}
+      {% if b.caption %}<p class="cap">{{ b.caption }}</p>
+      {% else %}<a href="{{ b.url }}"{% if b.on %} aria-current="page"{% endif %}><span class="w">{{ b.label }}{% if b.count %} <span class="count">{{ b.count }}</span>{% endif %}</span>{{ icon('chev') }}</a>{% endif %}
+    {% endfor %}
+  </nav>
+
+  <div class="menu-hr"></div>
+
+  <nav class="menu-small" aria-label="More">
+    {% for r in nav.small %}
+      {% if r.caption %}<p class="cap">{{ r.caption }}</p>
+      {% else %}<a href="{{ r.url }}">{{ icon(r.icon) }}<span class="grow">{{ r.label }}</span>{% if r.badge %}<span class="badge {{ r.tone }}">{{ r.badge }}</span>{% endif %}</a>{% endif %}
+    {% endfor %}
+  </nav>
+
+  <div class="menu-hr"></div>
+
+  <nav class="menu-small" aria-label="You">
+    <a class="who" href="{{ nav.me or nav.home }}"><span class="av">{{ nav.initial }}</span><span class="grow">{{ nav.name }}<small>{{ nav.role_label }}</small></span>{{ icon('chev', 'chev') }}</a>
+    <form method="post" action="{{ nav.logout }}"><button type="submit">{{ icon('signout') }}<span class="grow">Sign out</span></button></form>
+  </nav>
+  <p class="fine">Team Hub · Chick-fil-A Wharncliffe &amp; Wonderland, London ON</p>
+</main>
+</body>
+</html>

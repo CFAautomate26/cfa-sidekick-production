@@ -27,6 +27,7 @@ from flask import (Blueprint, Response, current_app, flash, redirect,
 
 import shift_course
 import shift_db
+import teamhub_nav
 
 shift_bp = Blueprint("shift", __name__, url_prefix="/shift")
 
@@ -187,7 +188,14 @@ def inject_shift_globals():
         "unread_announcements": (
             shift_db.unacked_count(current_name()) if signed_in else 0
         ),
+        "nav": _nav() if signed_in else None,
     }
+
+
+def _nav() -> dict:
+    leader_id = session.get("shift_leader_id")
+    return teamhub_nav.leader_nav("leader" if leader_id else "operator", current_name(),
+                                  session.get("shift_role", ""), leader_id)
 
 
 @shift_bp.app_template_filter("num")
@@ -770,14 +778,17 @@ def roster_toggle(member_id):
 
 @shift_bp.route("/more")
 def more():
-    open_recs, awaiting_recs, _ = shift_db.recovery_feed(resolved_limit=0)
-    return render_template(
-        "shift/more.html",
-        open_recoveries=len(open_recs),
-        awaiting_recoveries=len(awaiting_recs),
-        my_open_topics=(shift_db.open_topic_count(session.get("shift_leader_id"))
-                        + shift_db.open_member_topic_count(session.get("shift_leader_id"))),
-    )
+    """The Team Hub menu (also at /hub/menu): served here too so leaders
+    keep it even if the Hub blueprint failed to load."""
+    return menu_page(_nav(), "shift.today", url_for("shift.manifest"))
+
+
+def menu_page(nav: dict, home_endpoint: str, manifest_url: str):
+    back = request.args.get("from", "")
+    if not (back.startswith(("/shift", "/hub")) and "//" not in back and "\\" not in back
+            and back.isprintable()) or back.rstrip("?").endswith(("/more", "/menu")):
+        back = url_for(home_endpoint)
+    return render_template("shared/menu.html", nav=nav, back=back, manifest_url=manifest_url)
 
 
 # ---------------------------------------------------------------------------
@@ -1940,26 +1951,10 @@ def admin_import():
 
 @shift_bp.route("/manifest.webmanifest")
 def manifest():
-    return {
-        "name": "CFA Shift Lead",
-        "short_name": "Shift Lead",
-        "start_url": "/shift/",
-        "display": "standalone",
-        "background_color": "#FFFAF2",
-        "theme_color": "#E31937",
-        "icons": [{"src": "/shift/icon.svg", "sizes": "any", "type": "image/svg+xml"}],
-    }, 200, {"Content-Type": "application/manifest+json"}
-
-
-_ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
-<rect width="180" height="180" rx="40" fill="#E31937"/>
-<text x="90" y="88" font-family="Helvetica, Arial, sans-serif" font-size="56"
- font-weight="bold" fill="#fff" text-anchor="middle">CFA</text>
-<text x="90" y="132" font-family="Helvetica, Arial, sans-serif" font-size="30"
- fill="#FFFAF2" text-anchor="middle">Shift</text>
-</svg>"""
+    return teamhub_nav.manifest(), 200, {"Content-Type": "application/manifest+json"}
 
 
 @shift_bp.route("/icon.svg")
 def icon():
-    return Response(_ICON_SVG, mimetype="image/svg+xml")
+    # Old "Shift Lead" home-screen installs keep resolving their icon.
+    return redirect(url_for("static", filename="teamhub/icon-180.png"))

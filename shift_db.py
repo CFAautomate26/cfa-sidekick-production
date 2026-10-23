@@ -2418,6 +2418,14 @@ def oneonone_summary() -> list[dict]:
         ).fetchall()]
 
 
+def open_topic_total() -> int:
+    """Every leader's open agenda topics — the Operator's Meetings badge."""
+    with closing(connect()) as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM oneonone_topics t JOIN leaders l ON l.id = t.leader_id "
+            "WHERE l.active=1 AND t.discussed_at IS NULL").fetchone()[0]
+
+
 def open_topic_count(leader_id: int | None) -> int:
     """Open-agenda badge for the More card; 0 for the Operator session."""
     if leader_id is None:

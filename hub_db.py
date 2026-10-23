@@ -250,6 +250,11 @@ def recent_updates(viewer: Viewer, limit: int = 6) -> list[dict]:
     return [p for p in rows if can_view(viewer, p)][:limit]
 
 
+def draft_count() -> int:
+    with closing(connect()) as conn:
+        return conn.execute("SELECT COUNT(*) FROM hub_pages WHERE status='draft'").fetchone()[0]
+
+
 def editor_queues() -> dict:
     """What needs an editor: drafts, flagged pages, reviews coming due."""
     soon = (date.fromisoformat(today_local())

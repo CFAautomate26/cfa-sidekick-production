@@ -19,6 +19,11 @@ from slack_coverage import slack_bp
 app = Flask(__name__)
 app.register_blueprint(slack_bp)
 
+# Team Hub's icons, section art and progress rings, for every template.
+import teamhub_ui  # noqa: E402
+
+teamhub_ui.register(app)
+
 # Signed session cookies for the shift leading app. Prefer a dedicated
 # FLASK_SECRET_KEY; otherwise derive a stable key from the secrets actually
 # configured in the environment (so sessions survive deploys). If neither
