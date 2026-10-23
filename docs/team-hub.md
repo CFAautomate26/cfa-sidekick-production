@@ -127,13 +127,17 @@ from the Shift Lead app.
   deleted tracked changes and comments (and says so). Old `.doc` files:
   open in Word → Save As `.docx` first.
 - **Library bundles** (Operator only, Manage → *Import a library bundle*):
-  many pages at once from a `.zip` of `.md` files. Each file starts with a
-  header between `---` lines — `category:`, `section:`, `title:`, optional
+  many pages at once. A bundle is one `.txt`/`.md` file holding the pages
+  separated by a line of five `=` signs, a `.zip` of one `.md` per page, or
+  several `.md` files picked together. Each page starts with a header
+  between `---` lines — `category:`, `section:`, `title:`, optional
   `summary:` / `keywords:`, `publish: yes` (or `no` to leave a draft),
   `leaders_only: yes/no` — then the page text in the format above. Pages go
-  in file-name order; a title already in its category is skipped, so
-  importing the same bundle twice is safe; pages for a policy category
-  (HR) always arrive as drafts for the Operator's review checks. This is
+  in file order; a title already in its category is skipped, so importing
+  the same bundle twice is safe; pages for a policy category (HR) always
+  arrive as drafts for the Operator's review checks. On a phone use the
+  one-file `.txt` form: phones unzip a downloaded `.zip` and then won't
+  let you pick the folder. This is
   how the Chick-fil-A Operational Requirements Guide was loaded: that text
   is confidential to the Chick-fil-A system, so it travels as a bundle the
   Operator uploads, never through the (public) code repository.

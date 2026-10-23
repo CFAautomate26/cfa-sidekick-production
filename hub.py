@@ -819,17 +819,25 @@ def import_word():
 @hub_bp.route("/import-bundle", methods=["POST"])
 @operator_required
 def import_bundle():
-    """A zip of .md pages becomes many pages at once (see
-    hub_text.bundle_entries for the file format)."""
+    """Many pages at once: a zip of .md pages, one text file of pages
+    separated by ===== lines, or several .md files picked together (see
+    hub_text.bundle_entries for the page format)."""
     request.max_content_length = _UPLOAD_LIMIT
-    upload = request.files.get("file")
-    data = upload.read(hub_db.MAX_FILE_BYTES + 1) if upload else b""
-    if not data or len(data) > hub_db.MAX_FILE_BYTES or not data.startswith(b"PK"):
-        flash("That isn't a .zip bundle under 15 MB.")
+    uploads = [u for u in request.files.getlist("file") if u and u.filename]
+    entries, notes = [], []
+    for upload in uploads[:hub_text.BUNDLE_MAX_FILES]:
+        data = upload.read(hub_db.MAX_FILE_BYTES + 1)
+        if not data or len(data) > hub_db.MAX_FILE_BYTES:
+            notes.append(f"{_shown_name(upload.filename)}: empty or over 15 MB")
+            continue
+        got, why = hub_text.bundle_entries(data, _shown_name(upload.filename))
+        entries += got
+        notes += why
+    if not uploads:
+        flash("Pick the bundle file first (a .zip, or the .txt/.md version).")
         return redirect(url_for("hub.manage"))
-    entries, notes = hub_text.bundle_entries(data)
     if not entries:
-        flash("Nothing could be imported from that bundle"
+        flash("Nothing could be imported from that file"
               + (": " + "; ".join(notes[:5]) if notes else "") + ".")
         return redirect(url_for("hub.manage"))
     result = hub_db.import_bundle(g.viewer, entries)
@@ -847,6 +855,11 @@ def import_bundle():
             + ("; …" if len(skipped) > 6 else "") + ")")
     flash("Bundle imported — " + ", ".join(parts) + "." if parts else "Nothing to import.")
     return redirect(url_for("hub.manage"))
+
+
+def _shown_name(filename: str) -> str:
+    """An uploaded file's name as it may appear in a message."""
+    return os.path.basename(" ".join(hub_text.clean(filename or "").split()))[:80] or "file"
 
 
 def _split_title(text: str, filename: str) -> tuple[str, str]:

@@ -1154,7 +1154,7 @@ def test_bundle_import_is_repeat_safe_and_operator_only(client):
     assert len(hub_db.pages_for_category(operator, category_id("BOH Operations"))) == 1
     resp = client.post("/hub/import-bundle", data={"file": (io.BytesIO(b"nope"), "x.zip")},
                        content_type="multipart/form-data", follow_redirects=True)
-    assert b"a .zip bundle under 15 MB" in resp.data
+    assert b"Nothing could be imported" in resp.data
     resp = _import_bundle(client, {"a.txt": "x"})
     assert b"Nothing could be imported" in resp.data
     client.post("/shift/logout")
@@ -1165,3 +1165,24 @@ def test_bundle_import_is_repeat_safe_and_operator_only(client):
     assert resp.status_code == 302 and "/import-bundle" not in resp.headers["Location"]
     assert len(hub_db.pages_for_category(operator, category_id("BOH Operations"))) == 1
     assert "Import a library bundle".encode() not in client.get("/hub/manage").data
+
+
+def test_bundle_import_takes_a_text_file_or_several_files(client):
+    login_operator(client)
+    text = (_bundle_page("BOH Operations", "Breading") + "\n\n=====\n\n"
+            + _bundle_page("FOH Operations", "Drive-thru", section="Service"))
+    resp = client.post("/hub/import-bundle", data={"file": [
+        (io.BytesIO(text.encode("utf-8")), "cfa-org-library.txt"),
+        (io.BytesIO(_bundle_page("BOH Operations", "Cooking").encode("utf-8")), "cooking.md"),
+        (io.BytesIO(_bundle_zip({"z.md": _bundle_page("BOH Operations", "Thawing")})), "more.zip"),
+    ]}, content_type="multipart/form-data", follow_redirects=True)
+    assert b"4 pages published" in resp.data, resp.data[:300]
+    operator = hub_db.Viewer("operator", None, "Operator", "admin")
+    titles = {p["title"] for p in hub_db.pages_for_category(operator, category_id("BOH Operations"))}
+    assert titles == {"Breading", "Cooking", "Thawing"}
+    resp = client.post("/hub/import-bundle", data={}, content_type="multipart/form-data",
+                       follow_redirects=True)
+    assert b"Pick the bundle file first" in resp.data
+    resp = client.post("/hub/import-bundle", data={"file": (io.BytesIO(b"\xff\xfe"), "bad.txt")},
+                       content_type="multipart/form-data", follow_redirects=True)
+    assert b"Nothing could be imported" in resp.data and b"not readable UTF-8" in resp.data

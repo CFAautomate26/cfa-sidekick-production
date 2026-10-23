@@ -74,11 +74,12 @@
 <section class="sec" id="bundle">
   <div class="sec-head"><h2>Import a library bundle</h2></div>
   <form method="post" action="{{ url_for('hub.import_bundle') }}" enctype="multipart/form-data" class="card">
-    <label class="field" for="bundle-file">Bundle (.zip of .md pages)</label>
-    <input type="file" id="bundle-file" name="file" accept=".zip" required>
+    <label class="field" for="bundle-file">Bundle file <small>(.txt or .md of pages, a .zip of them, or several .md files picked together)</small></label>
+    <input type="file" id="bundle-file" name="file" accept=".txt,.md,.zip,text/plain,text/markdown,application/zip" multiple required>
     <p class="fine-line">Many pages at once, each with its category, section and title in its header. Pages marked
       to publish go live now (except in a policy category, where they wait as drafts for your review checks);
-      a title that's already in its category is left alone, so importing the same bundle twice is safe.</p>
+      a title that's already in its category is left alone, so importing the same bundle twice is safe.
+      On a phone, pick the .txt version — phones unzip a downloaded .zip and then won't let you pick the folder.</p>
     <div class="btnrow"><button class="btn btn-primary sm" type="submit">{{ icon('upload') }}Import bundle</button></div>
   </form>
 </section>
