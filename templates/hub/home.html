@@ -1,66 +1,105 @@
 {% extends "hub/base.html" %}
-{% block title %}Home{% endblock %}
+{% from "hub/_ui.html" import search_form, paid_time with context %}
+{% block head %}{% include "hub/_style.html" %}
+<style>
+.reading { margin-top: 26px; padding: 20px 18px 18px; }
+.reading .top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.reading .f-title { margin-top: 4px; }
+.reading .prog { font-weight: 700; color: var(--ok); font-size: 0.9375rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.reading .bar { height: 8px; background: #fff; margin-top: 12px; }
+.rlist { background: #fff; border-radius: var(--r-2xl); margin-top: 14px; overflow: hidden; }
+.rlist .row { padding-left: 14px; }
+.rlist .done-row .row-title { color: var(--text-muted); font-weight: 400; font-size: 0.9375rem; }
+.rlist .more-row .row-title { color: var(--nav); font-size: 0.9375rem; }
+.reading .btn { margin-top: 16px; }
+.reading .callout { margin-top: 14px; background: #fff; }
+.lead { margin-top: 32px; display: flex; gap: 16px; align-items: center; }
+.lead .f-title { font-size: 1.25rem; margin: 0; }
+.lead .f-body { font-size: 0.9375rem; margin-top: 4px; }
+.lead .btn { margin-top: 12px; }
+.lead .art { flex: 0 0 auto; }
+.lead .art svg { width: 64px; height: 64px; display: block; }
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">Here's how we do it</h1>
-<div class="sub">Systems, processes, training and policies for Chick-fil-A Wharncliffe &amp; Wonderland.</div>
+<section class="hero">
+  <p class="eyebrow">{{ today }}</p>
+  <h1 class="headline">Hi {{ first }}. Here's how we do it.</h1>
+  <p class="lede">Procedures, training and policies for everyone on the team, in one place.</p>
+</section>
 
-<form method="get" action="{{ url_for('hub.search') }}" class="inline-form" style="margin-bottom:14px;">
-  <input type="text" name="q" placeholder="Search — e.g. drive-thru, fryer, uniform" maxlength="100"
-         aria-label="Search the Hub">
-  <button class="pill primary" type="submit">Search</button>
-</form>
-
-{% if to_read %}
-<div class="section-label">To read ({{ to_read|length }})</div>
-<div class="callout">Required reading counts as paid work time — read it on shift, or tell
-  a leader how long it took you.</div>
-<div class="pagelist">
-{% for p in to_read[:5] %}
-  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
-    <div class="title">{{ p.title }} {% if p.last_ack %}<span class="badge warn">Updated</span>{% endif %}</div>
-    <div class="summary">{{ p.category_icon }} {{ p.category_name }}{% if p.summary %} · {{ p.summary }}{% endif %}</div>
-  </a>
-{% endfor %}
-{% if to_read|length > 5 %}<a class="pill small" href="{{ url_for('hub.to_read') }}">See all {{ to_read|length }}</a>{% endif %}
-</div>
-{% endif %}
-
-<div class="section-label">Categories</div>
-{% if categories %}
-<div class="catgrid">
-{% for c in categories %}
-  <a class="card" href="{{ url_for('hub.category', category_id=c.id) }}">
-    <div class="ico">{{ c.icon }}</div>
-    <div class="name">{{ c.name }}</div>
-    <div class="count">{{ counts.get(c.id, 0) }} page{{ '' if counts.get(c.id, 0) == 1 else 's' }}{% if c.leaders_only %} · leaders{% endif %}</div>
-  </a>
-{% endfor %}
-</div>
-{% else %}
-<div class="empty">No categories yet.</div>
-{% endif %}
-
-{% if queues %}
-<div class="section-label">For editors</div>
-<a class="card tap" href="{{ url_for('hub.manage') }}">
-  <h2>🛠 Manage the Hub</h2>
-  <div class="progress-note">
-    {{ queues.drafts|length }} draft{{ '' if queues.drafts|length == 1 else 's' }}
-    · {{ queues.review_due|length }} review{{ '' if queues.review_due|length == 1 else 's' }} due
-    · {{ queues.counsel|length }} flagged for counsel
+{% if total %}
+<article class="feature cream reading" aria-label="Your required reading">
+  <div class="top">
+    <p class="f-eyebrow">{{ 'Start here' if to_read else 'Required reading' }}</p>
+    <span class="prog">{{ done }} of {{ total }} done</span>
   </div>
-</a>
+  <p class="f-title">{{ 'Your required reading' if to_read else "You're all caught up" }}</p>
+  <span class="bar green" role="img" aria-label="{{ done }} of {{ total }} required pages read"><span style="width:{{ (100 * done / total)|round|int }}%"></span></span>
+  <div class="rlist">
+    {% for p in to_read[:5] %}
+    <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}">
+      <span class="tick off"></span>
+      <span class="row-main">
+        <span class="row-title">{{ p.title }}</span>
+        <span class="row-meta tags"><span>{{ p.category_name }}{% if p.section %} · {{ p.section }}{% endif %}</span>
+          {%- if loop.first %}<span class="badge b-red">Up next</span>{% endif %}
+          {%- if p.last_ack %}<span class="badge b-tan">Updated {{ day(p.published_at) }}</span>{% endif %}</span>
+      </span>{{ icon('chev', 'chev') }}
+    </a>
+    {% endfor %}
+    {% if to_read|length > 5 %}
+    <a class="row more-row" href="{{ url_for('hub.to_read') }}"><span class="row-main"><span class="row-title">{{ to_read|length - 5 }} more to read</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endif %}
+    {% if read %}
+    <a class="row done-row" href="{{ url_for('hub.me') }}">
+      <span class="tick on">{{ icon('check', 'xs') }}</span>
+      <span class="row-main"><span class="row-title">{{ read|length }} already read: {{ read[:3]|map(attribute='title')|join(', ') }}{% if read|length > 3 %} and {{ read|length - 3 }} more{% endif %}</span></span>
+    </a>
+    {% endif %}
+  </div>
+  {% if to_read %}
+  <a class="btn btn-primary block" href="{{ url_for('hub.page', page_id=to_read[0].id) }}">Read the next page</a>
+  {{ paid_time() }}
+  {% endif %}
+</article>
 {% endif %}
+
+<section class="sec">
+  {{ search_form(placeholder='Try “drive-thru” or “fryer”') }}
+</section>
+
+<section class="sec">
+  <div class="sec-head"><h2>Systems &amp; Procedures</h2></div>
+  <div class="tiles">
+    {% for t in tiles %}
+    <a class="tile" href="{{ t.url }}"><span class="tile-art">{{ art(t.art) }}{% if t.to_read %}<span class="badge b-red">{{ t.to_read }} to read</span>{% endif %}</span>
+      <span class="tile-name">{{ t.name }} {{ icon('chev') }}</span>
+      <span class="tile-meta">{{ t.meta }}</span></a>
+    {% endfor %}
+    <a class="tile" href="{{ url_for('hub.search') }}"><span class="tile-art cool">{{ art('search') }}</span>
+      <span class="tile-name">Search all pages {{ icon('chev') }}</span>
+      <span class="tile-meta">Can't find it? Look it up</span></a>
+  </div>
+</section>
 
 {% if recent %}
-<div class="section-label">Recently updated</div>
-<div class="pagelist">
-{% for p in recent %}
-  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
-    <div class="title">{{ p.title }}</div>
-    <div class="summary">{{ p.category_icon }} {{ p.category_name }} · {{ (p.published_at or '')[:10] }}</div>
-  </a>
-{% endfor %}
-</div>
+<section class="sec">
+  <div class="sec-head"><h2>Recently updated</h2><a class="more" href="{{ url_for('hub.library', view='updated') }}">See all</a></div>
+  <div class="card list">
+    {% for p in recent %}
+    <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span><span class="row-meta">{{ p.category_name }}{% if p.section %} · {{ p.section }}{% endif %} · {{ day(p.published_at) }}{% if photos.get(p.id) %} · {{ photos[p.id] }} photo{{ 's' if photos[p.id] != 1 }}{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+</section>
 {% endif %}
+
+<article class="feature cool lead">
+  <span class="art">{{ art('ld') }}</span>
+  <div>
+    <p class="f-title">Want to lead one day?</p>
+    <p class="f-body">Leadership applications are open all year.</p>
+    <a class="btn btn-secondary sm" href="/apply">Apply to lead</a>
+  </div>
+</article>
 {% endblock %}

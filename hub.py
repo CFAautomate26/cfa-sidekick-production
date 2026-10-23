@@ -16,11 +16,13 @@ import hmac
 import io
 import os
 import time
+from collections import Counter
+from datetime import date
 from functools import wraps
 from urllib.parse import urlparse
 
-from flask import (Blueprint, Response, abort, flash, g, redirect, render_template,
-                   request, send_file, session, url_for)
+from flask import (Blueprint, Response, abort, current_app, flash, g, redirect,
+                   render_template, request, send_file, session, url_for)
 from werkzeug.exceptions import RequestEntityTooLarge
 
 import hub_db
@@ -155,6 +157,26 @@ def _too_big(e):
     return redirect(_same_site_referrer() or url_for("hub.home"))
 
 
+def _day(stamp: str | None) -> str:
+    """'2026-10-22 14:05' -> 'Oct 22' (with the year when it isn't this one)."""
+    try:
+        d = date.fromisoformat((stamp or "")[:10])
+    except ValueError:
+        return stamp or ""
+    this_year = shift_db.today_local()[:4]
+    return f"{d:%b} {d.day}" + ("" if str(d.year) == this_year else f", {d.year}")
+
+
+def _when(stamp: str | None) -> str:
+    """'2026-10-22 14:05' -> 'Oct 22, 2:05 pm'."""
+    clock = (stamp or "")[11:16]
+    try:
+        hour, minute = int(clock[:2]), int(clock[3:5])
+    except ValueError:
+        return _day(stamp)
+    return f"{_day(stamp)}, {hour % 12 or 12}:{minute:02d} {'am' if hour < 12 else 'pm'}"
+
+
 @hub_bp.context_processor
 def _globals():
     viewer = getattr(g, "viewer", None)
@@ -163,6 +185,8 @@ def _globals():
         "nav": _nav(viewer),
         "hub_to_read": len(hub_db.to_read(viewer)) if viewer else 0,
         "data_at_risk": shift_app.DATA_AT_RISK,
+        "day": _day,
+        "when": _when,
     }
 
 
@@ -246,28 +270,105 @@ def logout():
 # Reading
 # ---------------------------------------------------------------------------
 
+# Each category's tile drawing, by name; anything else gets the open book.
+_TILE_ART = {"hr": "hr", "foh operations": "foh", "boh operations": "boh",
+             "leadership development": "ld"}
+
+
+def _published(viewer: hub_db.Viewer, categories: list[dict]) -> list[dict]:
+    """Every published page this viewer may open, category by category."""
+    return [p for c in categories for p in hub_db.pages_for_category(viewer, c["id"])
+            if p["status"] == "published"]
+
+
+def _tiles(viewer: hub_db.Viewer, categories: list[dict], pages: list[dict],
+           to_read: list[dict], policy_meta: bool = True) -> list[dict]:
+    """The category tiles. A leader's Leadership Development tile opens
+    /shift/development, which holds the course and the library (one room)."""
+    counts = Counter(p["category_id"] for p in pages)
+    unread = Counter(p["category_id"] for p in to_read)
+    course_up = viewer.is_leader and "shift" in current_app.blueprints
+    tiles = []
+    for c in categories:
+        n = counts.get(c["id"], 0)
+        art = _TILE_ART.get(" ".join(c["name"].split()).casefold(), "procedures")
+        course = course_up and art == "ld"
+        meta = f"{n} page{'s' * (n != 1)}"
+        if course:
+            meta += " + the course" if viewer.is_operator else " + your course"
+        elif c["policy"] and policy_meta:
+            meta += " · policy"
+        tiles.append({
+            "name": c["name"], "art": art, "leaders_only": bool(c["leaders_only"]),
+            "url": (url_for("shift.development") if course
+                    else url_for("hub.category", category_id=c["id"])),
+            "to_read": unread.get(c["id"], 0), "meta": meta})
+    return tiles
+
+
+def _photo_counts(pages: list[dict]) -> dict[int, int]:
+    return {p["id"]: sum(1 for f in hub_db.attachments(p["id"])
+                         if f["kind"] in hub_db.IMAGE_KINDS) for p in pages}
+
+
+def _and(names: list[str]) -> str:
+    """['HR', 'FOH', 'BOH'] -> 'HR, FOH and BOH'."""
+    return ", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else "".join(names)
+
+
 @hub_bp.route("/")
 def home():
     """Team Hub's front page: a leader's is Today (/shift/); a team
-    member's is their own home (reading, categories, recently updated)."""
+    member's is their own home (required reading, categories, recently
+    updated)."""
     viewer = g.viewer
     if viewer.is_leader:
         return redirect(url_for("shift.today"))
+    categories = hub_db.categories(viewer)
+    pages = _published(viewer, categories)
+    to_read = hub_db.to_read(viewer)
+    done, total = hub_db.required_progress(viewer)
+    acks = hub_db.my_acks(viewer)
+    # Required pages already confirmed at the version that counts, newest first.
+    read = sorted((p for p in pages if p["required"] and p["id"] in acks
+                   and acks[p["id"]]["version"] >= p["ack_version"]),
+                  key=lambda p: acks[p["id"]]["acked_at"], reverse=True)
+    recent = hub_db.recent_updates(viewer, 3)
+    today = date.fromisoformat(shift_db.today_local())
     return render_template(
-        "hub/home.html", categories=hub_db.categories(viewer),
-        counts=hub_db.category_counts(viewer), to_read=hub_db.to_read(viewer),
-        recent=hub_db.recent_updates(viewer), queues=None)
+        "hub/home.html", first=viewer.name.split()[0] if viewer.name else "",
+        today=f"{today:%A}, {today:%b} {today.day}",
+        tiles=_tiles(viewer, categories, pages, to_read, policy_meta=False),
+        to_read=to_read, done=done, total=total, read=read,
+        recent=recent, photos=_photo_counts(recent))
 
 
 @hub_bp.route("/library")
 def library():
-    """Systems & Procedures: the categories, search and (for editors) the
-    editor tools — the same for every viewer, filtered by what they may see."""
+    """Systems & Procedures: the categories, search, sections and (for
+    editors) the editor tools — the same for every viewer, filtered by what
+    they may see. ?view=updated lists everything recently updated;
+    ?section=<name> lists one section's pages across the categories."""
     viewer = g.viewer
+    categories = hub_db.categories(viewer)
+    to_read = hub_db.to_read(viewer)
+    pages = _published(viewer, categories)
+    sections = sorted(Counter(p["section"] for p in pages if p["section"]).items(),
+                      key=lambda kv: kv[0].casefold())
+    picked = request.args.get("section") or ""
+    picked = picked if any(name == picked for name, _ in sections) else ""
+    view = "updated" if request.args.get("view") == "updated" else ""
     return render_template(
-        "hub/home.html", categories=hub_db.categories(viewer),
-        counts=hub_db.category_counts(viewer), to_read=hub_db.to_read(viewer),
-        recent=hub_db.recent_updates(viewer),
+        "hub/library.html", view=view, total_pages=len(pages),
+        tiles=_tiles(viewer, categories, pages, to_read), to_read=to_read,
+        unread={p["id"]: p["last_ack"] for p in to_read},
+        member_list=_and([c["name"] for c in categories if not c["leaders_only"]]),
+        leader_list=_and([c["name"] for c in categories if c["leaders_only"]]),
+        sections=sections, picked=picked,
+        section_pages=sorted((p for p in pages if p["section"] == picked),
+                             key=lambda p: (p["category_name"].casefold(),
+                                            p["title"].casefold())) if picked else [],
+        recent=hub_db.recent_updates(viewer, 40 if view else 4),
         queues=hub_db.editor_queues() if viewer.is_editor else None)
 
 
@@ -337,7 +438,8 @@ def search():
 
 @hub_bp.route("/to-read")
 def to_read():
-    return render_template("hub/to_read.html", pages=hub_db.to_read(g.viewer))
+    return render_template("hub/to_read.html", pages=hub_db.to_read(g.viewer),
+                           progress=hub_db.required_progress(g.viewer))
 
 
 @hub_bp.route("/me")

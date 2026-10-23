@@ -596,6 +596,22 @@ def to_read(viewer: Viewer) -> list[dict]:
             if not acks.get(p["id"]) or acks[p["id"]]["version"] < p["ack_version"]]
 
 
+def required_progress(viewer: Viewer) -> tuple[int, int]:
+    """(done, total): the required pages this person can see, and how many
+    of them they've confirmed at the version that counts. total - done is
+    always len(to_read(viewer)); the Operator reads nothing (0, 0)."""
+    if viewer.is_operator:
+        return 0, 0
+    with closing(connect()) as conn:
+        rows = [dict(r) for r in conn.execute(
+            _PAGE_SELECT + "WHERE p.status='published' AND p.required=1")]
+    rows = [p for p in rows if can_view(viewer, p)]
+    acks = my_acks(viewer, [p["id"] for p in rows])
+    done = sum(1 for p in rows
+               if acks.get(p["id"]) and acks[p["id"]]["version"] >= p["ack_version"])
+    return done, len(rows)
+
+
 def changes_since(page_id: int, version: int) -> list[dict]:
     with closing(connect()) as conn:
         return [dict(r) for r in conn.execute(

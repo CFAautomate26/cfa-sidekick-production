@@ -1,74 +1,76 @@
 {% extends "hub/base.html" %}
+{% from "hub/_ui.html" import crumbs, leaders_badge, read_badge with context %}
 {% block title %}{{ category.name }}{% endblock %}
+{% block head %}{% include "hub/_style.html" %}{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="{{ url_for('hub.home') }}">Home</a></div>
-<h1 class="page">{{ category.icon }} {{ category.name }}
-  {% if category.leaders_only %}<span class="badge">Leaders</span>{% endif %}
-  {% if not category.active %}<span class="badge warn">Hidden</span>{% endif %}</h1>
-<div class="sub">{{ category.blurb }}</div>
+{{ crumbs([('Procedures', url_for('hub.library')), (category.name, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Systems &amp; Procedures{% if category.policy %} · policy{% endif %}</p>
+  <h1 class="headline">{{ category.name }}</h1>
+  {% if category.blurb %}<p class="triage">{{ category.blurb }}</p>{% endif %}
+  {% if category.leaders_only or not category.active %}
+  <div class="tags">
+    {% if category.leaders_only %}{{ leaders_badge() }}{% endif %}
+    {% if not category.active %}<span class="badge b-tan">Hidden</span>{% endif %}
+  </div>
+  {% endif %}
+</section>
 
 {% if viewer.is_editor %}
-<div class="pillrow">
-  <a class="pill primary small" href="{{ url_for('hub.new_page', category=category.id) }}">+ New page</a>
-  <details class="more" style="flex-basis:100%;">
-    <summary>📄 Import a Word document as a draft</summary>
-    <form method="post" action="{{ url_for('hub.import_word') }}" enctype="multipart/form-data" class="card">
+<div class="btnrow">
+  <a class="btn btn-primary sm" href="{{ url_for('hub.new_page', category=category.id) }}">{{ icon('plus') }}New page</a>
+</div>
+<details class="card list tool" style="margin-top:14px;">
+  <summary class="row"><span class="lead-ico">{{ icon('upload') }}</span><span class="row-main"><span class="row-title">Import a Word doc</span><span class="row-meta">Turns a .docx into a draft page here</span></span>{{ icon('chev', 'chev') }}</summary>
+  <div class="tool-body">
+    <form method="post" action="{{ url_for('hub.import_word') }}" enctype="multipart/form-data">
       <input type="hidden" name="category_id" value="{{ category.id }}">
       <label class="field" for="imp-file">Word file (.docx)</label>
       <input type="file" id="imp-file" name="file" accept=".docx" required>
-      <label class="field" for="imp-section">Section (optional)</label>
+      <label class="field" for="imp-section">Section <small>(optional)</small></label>
       <input type="text" id="imp-section" name="section" maxlength="60" placeholder="e.g. Training">
-      <div style="margin-top:10px;"><button class="pill primary small" type="submit">Import</button></div>
-      <div class="muted" style="margin-top:6px;">Headings, lists and tables come across; check the draft before publishing.
-        The file itself isn't kept — attach it to the page if people should download it.</div>
+      <p class="fine-line">Headings, lists and tables come across; check the draft before publishing.
+        The file itself isn't kept — attach it to the page if people should download it.</p>
+      <div class="btnrow"><button class="btn btn-primary sm" type="submit">Import</button></div>
     </form>
-  </details>
-</div>
+  </div>
+</details>
 {% endif %}
 
 {% if not groups %}
-<div class="empty">Nothing here yet{{ ' — add the first page above' if viewer.is_editor else '' }}.</div>
+<div class="empty" style="margin-top:22px;">Nothing here yet{{ ' — add the first page above' if viewer.is_editor else '' }}.</div>
 {% endif %}
 {% for section, pages in groups|dictsort %}
-<div class="section-label">{{ section }}</div>
-<div class="pagelist">
-{% for p in pages %}
-  {% set a = acks.get(p.id) %}
-  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
-    <div class="title">{{ p.title }}
-      {% if p.leaders_only %}<span class="badge">Leaders</span>{% endif %}
-      {% if p.required %}
-        {% if a and a.version >= p.ack_version %}<span class="badge ok">✓ Read</span>
-        {% elif not viewer.is_operator %}<span class="badge req">{{ 'Updated — re-read' if a else 'Required' }}</span>
-        {% else %}<span class="badge req">Required</span>{% endif %}
-      {% endif %}
-    </div>
-    {% if p.summary %}<div class="summary">{{ p.summary }}</div>{% endif %}
-  </a>
-{% endfor %}
-</div>
+<section class="sec">
+  <div class="sec-head"><h2>{{ section }}</h2></div>
+  <div class="card list">
+  {% for p in pages %}
+    <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span>
+      {%- if p.summary %}<span class="row-meta">{{ p.summary }}</span>{% endif %}
+      {%- if p.required or p.leaders_only %}<span class="row-meta tags">{{ read_badge(p, acks.get(p.id), viewer.is_operator) }}{% if p.leaders_only %}{{ leaders_badge() }}{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
+  {% endfor %}
+  </div>
+</section>
 {% endfor %}
 
 {% if drafts %}
-<div class="section-label">Drafts (editors only)</div>
-<div class="pagelist">
-{% for p in drafts %}
-  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
-    <div class="title">{{ p.title }} <span class="badge warn">Draft</span>
-      {% if p.needs_counsel %}<span class="badge req">Counsel</span>{% endif %}</div>
-    <div class="summary">{{ p.section or 'General' }} · last saved {{ p.updated_at }} by {{ p.updated_by }}</div>
-  </a>
-{% endfor %}
-</div>
-{% endif %}
-{% if retired %}
-<details class="more" style="margin-top:12px;">
-  <summary>Retired pages ({{ retired|length }})</summary>
-  <div class="pagelist">
-  {% for p in retired %}
-    <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}"><div class="title">{{ p.title }} <span class="badge">Retired</span></div></a>
+<section class="sec">
+  <div class="sec-head"><h2>Drafts <span class="badge b-tan">Editors only</span></h2></div>
+  <div class="card list">
+  {% for p in drafts %}
+    <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span>
+      <span class="row-meta">{{ p.section or 'General' }} · last saved {{ day(p.updated_at) }} by {{ p.updated_by }}</span>
+      <span class="row-meta tags"><span class="badge b-tan">Draft</span>{% if p.needs_counsel %}<span class="badge b-red">Lawyer review</span>{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
   {% endfor %}
   </div>
+</section>
+{% endif %}
+{% if retired %}
+<details class="card list tool" style="margin-top:20px;">
+  <summary class="row"><span class="row-main"><span class="row-title">Retired pages</span><span class="row-meta">{{ retired|length }} · editors only</span></span>{{ icon('chev', 'chev') }}</summary>
+  {% for p in retired %}
+  <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span><span class="row-meta tags"><span class="badge">Retired</span></span></span>{{ icon('chev', 'chev') }}</a>
+  {% endfor %}
 </details>
 {% endif %}
 {% endblock %}

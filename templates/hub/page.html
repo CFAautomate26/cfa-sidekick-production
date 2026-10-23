@@ -1,31 +1,51 @@
 {% extends "hub/base.html" %}
+{% from "hub/_ui.html" import page_crumbs, leaders_badge, paid_time with context %}
 {% block title %}{{ page.title }}{% endblock %}
+{% block head %}{% include "hub/_style.html" %}
+<style>
+.ack { margin-top: 18px; }
+.ack .btn { margin-top: 14px; }
+.ack .fine-line { margin-top: 10px; }
+.ack .callout { margin-top: 12px; background: #fff; }
+.read-ok { display: flex; gap: 12px; align-items: center; }
+.read-ok .tick { width: 32px; height: 32px; }
+.version-line { font-size: var(--fs-small); color: var(--text-muted); margin: 2px 0 0; }
+.changes { display: block; margin-top: 6px; }
+.changes span { display: block; }
+.tools-head { margin-top: 32px; }
+.files-on .row { min-height: 52px; }
+.files-on .row-title { font-size: 0.9375rem; font-weight: 400; color: var(--text); }
+</style>
+{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="{{ url_for('hub.home') }}">Home</a> ›
-  <a href="{{ url_for('hub.category', category_id=page.category_id) }}">{{ page.category_icon }} {{ page.category_name }}</a>
-  {% if page.section %}› {{ page.section }}{% endif %}</div>
-<h1 class="page">{{ page.title }}</h1>
-<div class="pillrow" style="margin-bottom:6px;">
-  {% if page.status == 'draft' %}<span class="badge warn">Draft — editors only</span>{% endif %}
-  {% if page.status == 'retired' %}<span class="badge">Retired — editors only</span>{% endif %}
-  {% if page.leaders_only or page.category_leaders_only %}<span class="badge">Leaders</span>{% endif %}
-  {% if page.required %}<span class="badge req">Required reading</span>{% endif %}
-  {% if page.needs_counsel %}<span class="badge req">Flagged for counsel</span>{% endif %}
-</div>
-{% if page.summary %}<div class="sub" style="font-size:15px; color:var(--ink);">{{ page.summary }}</div>{% endif %}
+{{ page_crumbs(page) }}
+<section class="hero compact">
+  <p class="eyebrow">{{ page.category_name }}{% if page.section %} · {{ page.section }}{% endif %}</p>
+  <h1 class="headline">{{ page.title }}</h1>
+  {% if page.summary %}<p class="triage">{{ page.summary }}</p>{% endif %}
+  {% set read_now = mine and mine.version >= page.ack_version %}
+  {% if page.status != 'published' or page.leaders_only or page.category_leaders_only or page.required or page.needs_counsel %}
+  <div class="tags">
+    {% if page.status == 'draft' %}<span class="badge b-tan">Draft · editors only</span>{% endif %}
+    {% if page.status == 'retired' %}<span class="badge">Retired · editors only</span>{% endif %}
+    {% if page.leaders_only or page.category_leaders_only %}{{ leaders_badge() }}{% endif %}
+    {% if page.required %}{% if read_now and not needs_ack %}<span class="badge b-green">{{ icon('check', 'xs') }}Read</span>{% else %}<span class="badge b-red">Required reading</span>{% endif %}{% endif %}
+    {% if page.needs_counsel %}<span class="badge b-red">Flagged for a lawyer</span>{% endif %}
+  </div>
+  {% endif %}
+</section>
 
 {% if needs_ack %}
-<div class="callout {{ 'red' if mine else '' }}">
-  {% if mine %}
-    <strong>This page changed since you read it</strong> (you confirmed v{{ mine.version }}).
-    {% for c in changes if c.change_note %}<div>v{{ c.version }}: {{ c.change_note }}</div>{% endfor %}
-  {% else %}
-    <strong>Required reading.</strong> Read it through, then confirm at the bottom.
-  {% endif %}
-</div>
+{% if mine %}
+<div class="callout warm">{{ icon('alert') }}<span><strong>This page changed since you read it</strong> (you confirmed v{{ mine.version }}). Read it again, then confirm at the bottom.
+  {%- set notes = changes|selectattr('change_note')|list %}
+  {%- if notes %}<span class="changes">{% for c in notes %}<span>v{{ c.version }}: {{ c.change_note }}</span>{% endfor %}</span>{% endif %}</span></div>
+{% else %}
+<div class="callout">{{ icon('bookmark') }}<span><strong>Required reading.</strong> Read it through, then confirm at the bottom.</span></div>
+{% endif %}
 {% endif %}
 
-<div class="card doc">
+<article class="card doc"{% if needs_ack %} style="margin-top:12px;"{% endif %}>
   {% if body %}{{ body }}{% else %}<p class="muted">No text yet.</p>{% endif %}
   {% if gallery %}
   <div class="gallery" style="margin-top:12px;">
@@ -37,151 +57,158 @@
   </div>
   {% endif %}
   {% if files %}
-  <div class="section-label" style="margin-top:14px;">Files</div>
-  {% for f in files %}
-  <div class="row-between" style="padding:6px 0; border-bottom:1px solid var(--line);">
-    <a href="{{ url_for('hub.file', file_id=f.id) }}" style="color:var(--cfa-red); font-weight:700;">
-      {{ '📄' if f.kind == 'pdf' else '📎' }} {{ f.filename }}</a>
-    <span class="muted">{{ (f.size / 1024)|round|int }} KB</span>
+  <div class="files">
+    {% for f in files %}
+    <a class="row" href="{{ url_for('hub.file', file_id=f.id) }}">{{ icon('file', 'file-ico') }}<span class="row-main"><span class="row-title">{{ f.filename }}</span><span class="row-meta">{{ 'PDF' if f.kind == 'pdf' else f.kind|upper }} · {{ (f.size / 1024)|round|int }} KB</span></span>{{ icon('download', 'chev') }}</a>
+    {% endfor %}
   </div>
-  {% endfor %}
   {% endif %}
   {% if page.category_policy %}
   <div class="hrfoot">This page explains how we do things at Chick-fil-A Wharncliffe &amp; Wonderland.
     It doesn't replace your rights under Ontario law, or the posters and policies on the board in the
     store. Questions, or need this in another format? Ask a leader.</div>
   {% endif %}
-</div>
-
+</article>
 {% if page.version %}
-<div class="muted" style="margin-bottom:12px;">Version {{ page.version }} · updated {{ (page.published_at or page.updated_at)[:10] }}</div>
+<p class="version-line">Version {{ page.version }} · updated {{ day(page.published_at or page.updated_at) }}</p>
 {% endif %}
 
 {% if needs_ack %}
-<form method="post" action="{{ url_for('hub.ack', page_id=page.id) }}" class="card">
+<form method="post" action="{{ url_for('hub.ack', page_id=page.id) }}" class="feature cream ack">
   <input type="hidden" name="version" value="{{ page.version }}">
-  <button class="pill primary" type="submit" style="width:100%; padding:13px;">✓ {{ ACK_WORDING }}</button>
-  <div class="muted" style="margin-top:8px;">This records your name, the time, and exactly which version you read.
-    Reading required pages is paid work time.</div>
+  <p class="f-eyebrow">Required reading</p>
+  <p class="f-title">Read it all? Confirm it here.</p>
+  <button class="btn btn-primary block" type="submit">{{ icon('check') }}{{ ACK_WORDING }}</button>
+  <p class="fine-line">This records your name, the time, and exactly which version you read.</p>
+  {{ paid_time() }}
 </form>
 {% elif mine and page.required %}
-<div class="card"><span class="badge ok">✓ Read</span> You confirmed version {{ mine.version }} on {{ mine.acked_at }}.</div>
+<div class="card read-ok" style="margin-top:18px;"><span class="tick on">{{ icon('check', 'xs') }}</span><span class="row-main"><span class="card-title">You've read this</span><span class="card-meta">You confirmed version {{ mine.version }} on {{ day(mine.acked_at) }} at {{ mine.acked_at[11:16] }}.</span></span></div>
 {% endif %}
 
 {% if viewer.is_editor %}
-<div class="section-label">Editor tools</div>
-{% if page.status == 'draft' %}
-<div class="card">
-  <h2>Publish</h2>
-  {% if publish_block %}
-  <div class="muted">{{ publish_block }}</div>
-  {% else %}
-  <form method="post" action="{{ url_for('hub.publish', page_id=page.id) }}">
-    <input type="hidden" name="rev" value="{{ page.rev }}">
-    <label class="field" for="pub-note">Note (optional)</label>
-    <input type="text" id="pub-note" name="change_note" maxlength="300" placeholder="First version">
-    {% if page.category_policy %}
-    <div class="muted" style="margin-top:8px;">Policy page — confirm each before it goes live:</div>
-    {% for key, label in POLICY_CHECKS %}
-    <label class="checkline"><input type="checkbox" name="{{ key }}" value="1" required> {{ label }}</label>
-    {% endfor %}
-    {% endif %}
-    <div style="margin-top:10px;"><button class="pill primary" type="submit">Publish{{ ' — everyone must read it' if page.required }}</button></div>
-  </form>
-  {% endif %}
-</div>
-{% endif %}
+<section class="sec tools-head" id="editor">
+  <div class="sec-head"><h2>Editor tools</h2></div>
 
-<div class="tools" style="margin-bottom:12px;">
-  {% if can_edit %}<a class="pill small" href="{{ url_for('hub.edit_page', page_id=page.id) }}">✏️ Edit</a>{% endif %}
-  {% if page.version %}<a class="pill small" href="{{ url_for('hub.history', page_id=page.id) }}">🕘 History</a>{% endif %}
-  {% if page.required and page.version %}<a class="pill small" href="{{ url_for('hub.readers', page_id=page.id) }}">👥 Who's read it</a>{% endif %}
-</div>
-{% if not can_edit %}<div class="muted" style="margin-bottom:12px;">Only the Operator changes a published {{ page.category_name }} page.</div>{% endif %}
-
-{% if can_edit %}
-{% if upload_error %}<div class="callout warm" id="upload">{{ upload_error }}</div>{% endif %}
-<details class="more card" {{ 'open' if upload_error }}>
-  <summary>📎 Add a photo or file</summary>
-  <form method="post" action="{{ url_for('hub.upload', page_id=page.id) }}" enctype="multipart/form-data">
-    <input type="file" name="file" required
-           accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.docx,.xlsx,.pptx,image/*">
-    <label class="field" for="alt">For photos: what it shows</label>
-    <input type="text" id="alt" name="alt" maxlength="200" placeholder="e.g. Fryer basket hung to drain">
-    <div class="muted" style="margin-top:6px;">PDF, photos, Word/Excel/PowerPoint (no macros), up to 15 MB.
-      No photos of people or paperwork with personal info.</div>
-    {% if page.version %}
-    <div class="muted" style="margin-top:8px;">The page is published, so adding a file makes a new version.</div>
-    {% set field_id = 'up' %}
+  {% if page.status == 'draft' %}
+  <div class="card">
+    <span class="card-title">Publish</span>
+    {% if publish_block %}
+    <p class="note">{{ icon('lock') }}<span>{{ publish_block }}</span></p>
+    {% else %}
+    <form method="post" action="{{ url_for('hub.publish', page_id=page.id) }}">
+      <input type="hidden" name="rev" value="{{ page.rev }}">
+      <label class="field" for="pub-note">Note <small>(optional)</small></label>
+      <input type="text" id="pub-note" name="change_note" maxlength="300" placeholder="First version">
+      {% if page.category_policy %}
+      <p class="fine-line">Policy page — confirm each before it goes live:</p>
+      {% for key, label in POLICY_CHECKS %}
+      <label class="checkline"><input type="checkbox" name="{{ key }}" value="1" required> {{ label }}</label>
+      {% endfor %}
+      {% endif %}
+      <div class="btnrow"><button class="btn btn-primary block" type="submit">{{ icon('rocket') }}Publish{{ ' — everyone must read it' if page.required }}</button></div>
+    </form>
     {% endif %}
-    {% include "hub/_change_fields.html" %}
-    <div style="margin-top:10px;"><button class="pill primary small" type="submit">Upload</button></div>
-  </form>
-  {% if all_files %}
-  <div class="section-label">On this page</div>
-  {% for f in all_files %}
-  <div class="row-between" style="padding:6px 0; border-bottom:1px solid var(--line);">
-    <span style="min-width:0;">{{ ('Photo %d · ' % f.photo_no) if f.photo_no }}{{ f.filename }}</span>
-    <a class="pill small" href="{{ url_for('hub.remove_file', file_id=f.id) }}">Remove…</a>
   </div>
-  {% endfor %}
   {% endif %}
-</details>
-{% endif %}
 
-{% if page.version and page.annual_review %}
-<div class="card">
-  <h2>Yearly review</h2>
-  <div class="muted">Next review due {{ page.review_by or '—' }}.</div>
-  {% if can_edit and page.status == 'published' %}
-  <form method="post" action="{{ url_for('hub.review', page_id=page.id) }}" class="inline-form" style="margin-top:8px;">
-    <input type="text" name="note" maxlength="300" placeholder="Note — e.g. no changes needed">
-    <button class="pill small" type="submit">Mark reviewed</button>
-  </form>
-  {% endif %}
-</div>
-{% endif %}
+  <div class="card list">
+    {% if can_edit %}<a class="row" href="{{ url_for('hub.edit_page', page_id=page.id) }}"><span class="lead-ico">{{ icon('edit') }}</span><span class="row-main"><span class="row-title">Edit</span><span class="row-meta">{{ 'Saving new words publishes the next version' if page.version else 'Change the draft' }}</span></span>{{ icon('chev', 'chev') }}</a>{% endif %}
+    {% if page.version %}<a class="row" href="{{ url_for('hub.history', page_id=page.id) }}"><span class="lead-ico">{{ icon('history') }}</span><span class="row-main"><span class="row-title">History</span><span class="row-meta">Every published version, kept as it was</span></span>{{ icon('chev', 'chev') }}</a>{% endif %}
+    {% if page.required and page.version %}<a class="row" href="{{ url_for('hub.readers', page_id=page.id) }}"><span class="lead-ico">{{ icon('users') }}</span><span class="row-main"><span class="row-title">Who's read it</span><span class="row-meta">Confirmations by name and version</span></span>{{ icon('chev', 'chev') }}</a>{% endif %}
+    {% if can_edit %}
+    {% if upload_error %}<p class="callout warm" id="upload" style="margin:12px 16px 0;">{{ icon('alert') }}<span>{{ upload_error }}</span></p>{% endif %}
+    <details class="tool"{{ ' open' if upload_error }}>
+      <summary class="row"><span class="lead-ico">{{ icon('camera') }}</span><span class="row-main"><span class="row-title">Add a photo or file</span><span class="row-meta">{% if all_files %}{{ all_files|length }} on this page now{% else %}PDF, photos, Word, Excel or PowerPoint{% endif %}</span></span>{{ icon('chev', 'chev') }}</summary>
+      <div class="tool-body">
+        <form method="post" action="{{ url_for('hub.upload', page_id=page.id) }}" enctype="multipart/form-data">
+          <label class="field" for="up-file">File</label>
+          <input type="file" id="up-file" name="file" required
+                 accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.docx,.xlsx,.pptx,image/*">
+          <label class="field" for="alt">For photos: what it shows</label>
+          <input type="text" id="alt" name="alt" maxlength="200" placeholder="e.g. Fryer basket hung to drain">
+          <p class="fine-line">PDF, photos, Word/Excel/PowerPoint (no macros), up to 15 MB.
+            No photos of people or paperwork with personal info.</p>
+          {% if page.version %}
+          <p class="fine-line">The page is published, so adding a file makes a new version.</p>
+          {% set field_id = 'up' %}
+          {% endif %}
+          {% include "hub/_change_fields.html" %}
+          <div class="btnrow"><button class="btn btn-primary sm" type="submit">{{ icon('upload') }}Upload</button></div>
+        </form>
+        {% if all_files %}
+        <p class="subhead">On this page</p>
+        <div class="card list files-on">
+          {% for f in all_files %}
+          <div class="row"><span class="row-main"><span class="row-title">{{ ('Photo %d · ' % f.photo_no) if f.photo_no }}{{ f.filename }}</span></span><a class="btn btn-secondary sm" href="{{ url_for('hub.remove_file', file_id=f.id) }}">Remove…</a></div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% if not can_edit %}<p class="note">{{ icon('lock') }}<span>Only the Operator changes a published {{ page.category_name }} page.</span></p>{% endif %}
 
-<div class="card">
-  <h2>Lawyer review</h2>
-  {% if page.needs_counsel %}
-  <div class="muted">Flagged — it can't be published until a lawyer has looked at it and the Operator clears the flag.</div>
-  {% if viewer.is_operator %}
-  <form method="post" action="{{ url_for('hub.counsel', page_id=page.id) }}" class="inline-form" style="margin-top:8px;">
-    <input type="hidden" name="flag" value="0">
-    <input type="text" name="note" maxlength="300" placeholder="Who reviewed it, and when" required>
-    <button class="pill small" type="submit">Clear</button>
-  </form>
+  {% if page.version and page.annual_review %}
+  <div class="card" style="margin-top:12px;">
+    <span class="card-title">Yearly review</span>
+    <span class="card-meta">Next review due {{ day(page.review_by) if page.review_by else '—' }}.</span>
+    {% if can_edit and page.status == 'published' %}
+    <form method="post" action="{{ url_for('hub.review', page_id=page.id) }}" class="inline-form">
+      <input type="text" name="note" maxlength="300" placeholder="e.g. No changes needed" aria-label="Review note">
+      <button class="btn btn-secondary sm" type="submit">Mark reviewed</button>
+    </form>
+    {% endif %}
+  </div>
   {% endif %}
+
+  <div class="card" style="margin-top:12px;">
+    <span class="card-title">Lawyer review</span>
+    {% if page.needs_counsel %}
+    <span class="card-meta">Flagged — it can't be published until a lawyer has looked at it and the Operator clears the flag.</span>
+    {% if viewer.is_operator %}
+    <form method="post" action="{{ url_for('hub.counsel', page_id=page.id) }}" class="inline-form">
+      <input type="hidden" name="flag" value="0">
+      <input type="text" name="note" maxlength="300" placeholder="Who reviewed it, and when" aria-label="Who reviewed it, and when" required>
+      <button class="btn btn-secondary sm" type="submit">Clear</button>
+    </form>
+    {% endif %}
+    {% else %}
+    <span class="card-meta">Hold this page until a lawyer has looked at it.</span>
+    <form method="post" action="{{ url_for('hub.counsel', page_id=page.id) }}" class="inline-form">
+      <input type="hidden" name="flag" value="1">
+      <input type="text" name="note" maxlength="300" placeholder="Why? (optional)" aria-label="Why it needs a lawyer">
+      <button class="btn btn-secondary sm" type="submit">Flag</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if can_edit %}
+  {% if page.version %}
+  <details class="card list tool" style="margin-top:12px;">
+    <summary class="row"><span class="lead-ico">{{ icon('history' if page.status == 'retired' else 'folder') }}</span><span class="row-main"><span class="row-title">{{ 'Bring this page back' if page.status == 'retired' else 'Retire this page' }}</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      <form method="post" action="{{ url_for('hub.set_status', page_id=page.id) }}">
+        <input type="hidden" name="status" value="{{ 'published' if page.status == 'retired' else 'retired' }}">
+        <p class="fine-line" style="margin:0 0 12px;">{{ 'Everyone who could see it will see it again.' if page.status == 'retired'
+          else 'Hides it from everyone but editors. Its history and read records are kept.' }}</p>
+        <button class="btn btn-secondary sm" type="submit">{{ 'Yes, bring it back' if page.status == 'retired' else 'Yes, retire it' }}</button>
+      </form>
+    </div>
+  </details>
   {% else %}
-  <form method="post" action="{{ url_for('hub.counsel', page_id=page.id) }}" class="inline-form">
-    <input type="hidden" name="flag" value="1">
-    <input type="text" name="note" maxlength="300" placeholder="Why it needs a lawyer (optional)">
-    <button class="pill small" type="submit">Flag</button>
-  </form>
+  <details class="card list tool" style="margin-top:12px;">
+    <summary class="row"><span class="lead-ico red">{{ icon('close') }}</span><span class="row-main"><span class="row-title">Delete this draft</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      <form method="post" action="{{ url_for('hub.delete_page', page_id=page.id) }}">
+        <label class="checkline"><input type="checkbox" name="confirm" value="1" required> Delete it and its files for good</label>
+        <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Delete draft</button></div>
+      </form>
+    </div>
+  </details>
   {% endif %}
-</div>
-
-{% if can_edit %}
-{% if page.version %}
-<details class="more card">
-  <summary>{{ '♻️ Bring this page back' if page.status == 'retired' else '🗄 Retire this page' }}</summary>
-  <form method="post" action="{{ url_for('hub.set_status', page_id=page.id) }}">
-    <input type="hidden" name="status" value="{{ 'published' if page.status == 'retired' else 'retired' }}">
-    <div class="muted" style="margin-bottom:8px;">{{ 'Everyone who could see it will see it again.' if page.status == 'retired'
-      else 'Hides it from everyone but editors. Its history and read records are kept.' }}</div>
-    <button class="pill small" type="submit">{{ 'Yes, bring it back' if page.status == 'retired' else 'Yes, retire it' }}</button>
-  </form>
-</details>
-{% else %}
-<details class="more card">
-  <summary>🗑 Delete this draft</summary>
-  <form method="post" action="{{ url_for('hub.delete_page', page_id=page.id) }}">
-    <label class="checkline"><input type="checkbox" name="confirm" value="1" required> Delete it and its files for good</label>
-    <button class="pill small" type="submit">Delete draft</button>
-  </form>
-</details>
-{% endif %}
-{% endif %}
+  {% endif %}
+</section>
 {% endif %}
 {% endblock %}

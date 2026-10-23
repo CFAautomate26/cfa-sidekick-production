@@ -1,57 +1,77 @@
 {% extends "hub/base.html" %}
-{% block title %}Who can sign in{% endblock %}
+{% from "hub/_ui.html" import crumbs with context %}
+{% block title %}Team Hub access{% endblock %}
+{% block head %}{% include "hub/_style.html" %}
+<style>
+.person { padding: 14px 16px; }
+.person .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.person .top form { margin: 0; flex: 0 0 auto; }
+.person .name { font-weight: 700; font-size: var(--fs-h3); color: var(--text-strong); letter-spacing: -0.015em; }
+.person .row-meta.tags { margin-top: 6px; }
+.find { margin-top: 18px; }
+.find button { white-space: nowrap; }
+</style>
+{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="{{ url_for('hub.manage') }}">← Manage</a></div>
-<h1 class="page">Who can sign in</h1>
-<div class="sub">{{ with_access }} of {{ total }} people on the roster can sign in with first name +
-  clock-in number. Leaders always sign in with their Shift Lead PIN.</div>
+{{ crumbs([('Manage pages', url_for('hub.manage')), ('Team Hub access', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Admin · Team Hub access</p>
+  <h1 class="headline">Who can sign in</h1>
+  <p class="triage"><b>{{ with_access }} of {{ total }}</b> on the roster can sign in with first name + clock-in number. Leaders sign in with their PIN.</p>
+</section>
 
-<div class="callout">🔒 Clock-in numbers act as passwords: type them here only — never in a chat or email.
-  They're stored scrambled and never shown again, and they're left out of backups.</div>
+<p class="callout">{{ icon('lock') }}<span>Clock-in numbers act as passwords: type them here only — never in a chat or email. They're stored scrambled and never shown again, and they're left out of backups.</span></p>
 
-<details class="more card">
-  <summary>📋 Add many at once</summary>
-  <form method="post" action="{{ url_for('hub.bulk_grant') }}" autocomplete="off">
-    <label class="field" for="lines">One person per line: name, clock-in number</label>
-    <textarea id="lines" name="lines" rows="8" placeholder="Sam Patel, 1042&#10;Jordan, 1077" spellcheck="false"></textarea>
-    <label class="checkline"><input type="checkbox" name="add_missing" value="1"> Add names that aren't on the roster yet</label>
-    <div class="muted">A first name alone works when only one person on the roster has it.</div>
-    <div style="margin-top:10px;"><button class="pill primary small" type="submit">Give access</button></div>
-  </form>
+<details class="card list tool" style="margin-top:12px;">
+  <summary class="row"><span class="lead-ico">{{ icon('list') }}</span><span class="row-main"><span class="row-title">Add many at once</span><span class="row-meta">One person per line: name, clock-in number</span></span>{{ icon('chev', 'chev') }}</summary>
+  <div class="tool-body">
+    <form method="post" action="{{ url_for('hub.bulk_grant') }}" autocomplete="off">
+      <label class="field" for="lines">One person per line: name, clock-in number</label>
+      <textarea id="lines" name="lines" rows="8" placeholder="Sam Patel, 1042&#10;Jordan, 1077" spellcheck="false"></textarea>
+      <label class="checkline"><input type="checkbox" name="add_missing" value="1"> <span>Add names that aren't on the roster yet</span></label>
+      <p class="fine-line">A first name alone works when only one person on the roster has it.</p>
+      <div class="btnrow"><button class="btn btn-primary sm" type="submit">Give access</button></div>
+    </form>
+  </div>
 </details>
 
-<form method="get" action="{{ url_for('hub.people') }}" class="inline-form" style="margin-bottom:8px;">
-  <input type="text" name="q" value="{{ q }}" placeholder="Find a name" aria-label="Find a name" maxlength="60">
+<form method="get" action="{{ url_for('hub.people') }}" class="search find" role="search">
+  {{ icon('search') }}
+  <label class="sr" for="find-q">Find a name</label>
+  <input id="find-q" type="search" name="q" value="{{ q }}" placeholder="Find a name" maxlength="60">
   {% if show %}<input type="hidden" name="show" value="{{ show }}">{% endif %}
-  <button class="pill small" type="submit">Find</button>
+  <button type="submit">Find</button>
 </form>
-<div class="chiprow">
+<nav class="seg" aria-label="Show">
   {% for key, label in [('', 'Everyone'), ('no', 'No access yet'), ('yes', 'Can sign in')] %}
-  <a class="pill small {{ 'on' if show == key }}" href="{{ url_for('hub.people', q=q or None, show=key or None) }}">{{ label }}</a>
+  <a {% if show == key %}class="on" aria-current="page" {% endif %}href="{{ url_for('hub.people', q=q or None, show=key or None) }}">{{ label }}</a>
   {% endfor %}
-</div>
+</nav>
 
+<div style="margin-top:16px;">
 {% for p in people %}
-<div class="card" id="m{{ p.id }}">
-  <div class="row-between">
-    <div><strong>{{ p.name }}</strong>
-      {% if p.has_access %}<span class="badge ok">Can sign in</span>{% endif %}
-      {% if not p.active %}<span class="badge">Off the roster</span>{% endif %}
-      {% if p.has_access %}<div class="muted">Since {{ p.granted_at }} · by {{ p.granted_by }}</div>{% endif %}</div>
+<div class="card person" id="m{{ p.id }}">
+  <div class="top">
+    <div style="min-width:0;"><span class="name">{{ p.name }}</span>
+      {% if p.has_access or not p.active %}<span class="row-meta tags">
+        {%- if p.has_access %}<span class="badge b-green">{{ icon('check', 'xs') }}Can sign in</span>{% endif %}
+        {%- if not p.active %}<span class="badge">Off the roster</span>{% endif %}</span>{% endif %}
+      {% if p.has_access %}<span class="row-meta">Since {{ day(p.granted_at) }} · by {{ p.granted_by }}</span>{% endif %}</div>
     {% if p.has_access %}
     <form method="post" action="{{ url_for('hub.revoke', member_id=p.id) }}">
-      <button class="pill small" type="submit">Remove</button></form>
+      <button class="btn btn-secondary sm" type="submit">Remove</button></form>
     {% endif %}
   </div>
   {% if p.active %}
-  <form method="post" action="{{ url_for('hub.grant', member_id=p.id) }}" class="inline-form" style="margin-top:8px;" autocomplete="off">
+  <form method="post" action="{{ url_for('hub.grant', member_id=p.id) }}" class="inline-form" autocomplete="off">
     <input type="password" name="code" inputmode="numeric" autocomplete="off" maxlength="20"
            placeholder="{{ 'New clock-in number' if p.has_access else 'Clock-in number' }}" aria-label="Clock-in number for {{ p.name }}" required>
-    <button class="pill small {{ '' if p.has_access else 'primary' }}" type="submit">{{ 'Change' if p.has_access else 'Give access' }}</button>
+    <button class="btn {{ 'btn-secondary' if p.has_access else 'btn-primary' }} sm" type="submit">{{ 'Change' if p.has_access else 'Give access' }}</button>
   </form>
   {% endif %}
 </div>
 {% else %}
-<div class="empty">{{ 'No one matches.' if q or show else "The roster is empty — add people in the Shift Lead app's Team roster." }}</div>
+<div class="empty">{{ 'No one matches.' if q or show else "The roster is empty — add people under Team roster." }}</div>
 {% endfor %}
+</div>
 {% endblock %}

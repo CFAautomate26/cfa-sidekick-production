@@ -2,19 +2,19 @@
    and POLICY_CHECKS; `policy` (optional) forces the policy checks. #}
 {% if not rev_in_form %}<input type="hidden" name="rev" value="{{ request.form.get('rev', page.rev) if request.method == 'POST' else page.rev }}">{% endif %}
 {% if page.version %}
-<label class="field" for="change_note-{{ field_id|default('x') }}">What changed <span class="muted">(optional)</span></label>
+<label class="field" for="change_note-{{ field_id|default('x') }}">What changed <small>(optional)</small></label>
 <input type="text" id="change_note-{{ field_id|default('x') }}" name="change_note" maxlength="300"
        value="{{ request.form.get('change_note', '') }}" placeholder="e.g. New sanitizer strength">
 {% if page.required or show_reread %}
 <label class="checkline"><input type="radio" name="reread" value="0" {{ 'checked' if request.form.get('reread') != '1' }}>
-  Small fix (typo, wording) — no one needs to re-read</label>
+  <span>Small fix (typo, wording) — no one needs to re-read</span></label>
 <label class="checkline"><input type="radio" name="reread" value="1" {{ 'checked' if request.form.get('reread') == '1' }}>
-  We changed how we do it — required-reading pages go back on everyone's To read</label>
+  <span>We changed how we do it — required-reading pages go back on everyone's To read</span></label>
 {% endif %}
 {% if page.category_policy or policy %}
-<div class="muted" style="margin-top:8px;">{{ policy_label|default('Policy page — confirm each before the change goes live:') }}</div>
+<p class="fine-line">{{ policy_label|default('Policy page — confirm each before the change goes live:') }}</p>
 {% for key, label in POLICY_CHECKS %}
-<label class="checkline"><input type="checkbox" name="{{ key }}" value="1" {{ 'checked' if request.form.get(key) }}{{ ' required' if page.category_policy and checks_required|default(true) }}> {{ label }}</label>
+<label class="checkline"><input type="checkbox" name="{{ key }}" value="1" {{ 'checked' if request.form.get(key) }}{{ ' required' if page.category_policy and checks_required|default(true) }}> <span>{{ label }}</span></label>
 {% endfor %}
 {% endif %}
 {% endif %}
