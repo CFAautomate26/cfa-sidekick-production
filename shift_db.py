@@ -12,6 +12,7 @@ should attach a persistent disk and point SHIFT_DB_PATH at it, e.g.
 """
 
 import json
+import math
 import os
 import re
 import secrets
@@ -841,6 +842,30 @@ def _migrate(conn) -> None:
                      "ON DELETE SET NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_oneonone_member_holder "
                  "ON oneonone_member_topics(holder_leader_id, member_id, discussed_at)")
+    # Team Hub columns added after the first Hub builds (a database made by
+    # an early build keeps the old shape until these run).
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(hub_pages)")}
+    if "rev" not in cols:
+        conn.execute("ALTER TABLE hub_pages ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(hub_page_versions)")}
+    if "files" not in cols:
+        conn.execute("ALTER TABLE hub_page_versions ADD COLUMN files TEXT NOT NULL "
+                     "DEFAULT '[]'")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(hub_attachments)")}
+    for col_def in ("photo_no INTEGER", "removed_at TEXT", "removed_by TEXT",
+                    "purged_at TEXT"):
+        if col_def.split()[0] not in cols:
+            conn.execute(f"ALTER TABLE hub_attachments ADD COLUMN {col_def}")
+    if "photo_no" not in cols:
+        # Number the photos already there in upload order, per page.
+        conn.execute("UPDATE hub_attachments SET photo_no = (SELECT COUNT(*) FROM "
+                     "hub_attachments b WHERE b.page_id = hub_attachments.page_id "
+                     "AND b.kind IN ('png','jpg','gif','webp') AND b.id <= hub_attachments.id) "
+                     "WHERE kind IN ('png','jpg','gif','webp')")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(hub_access)")}
+    if "nonce" not in cols:
+        conn.execute("ALTER TABLE hub_access ADD COLUMN nonce TEXT NOT NULL DEFAULT ''")
+        conn.execute("UPDATE hub_access SET nonce = lower(hex(randomblob(16)))")
 
 
 def _seed_base(conn) -> None:
@@ -1618,6 +1643,8 @@ def goal_progress_pct(g: dict) -> int | None:
         pct = target / value * 100
     else:
         pct = value / target * 100
+    if not math.isfinite(pct):
+        return None
     return max(0, min(100, round(pct)))
 
 
@@ -2448,11 +2475,16 @@ def oneonone_summary() -> list[dict]:
 
 
 def open_topic_total() -> int:
-    """Every leader's open agenda topics — the Operator's Meetings badge."""
+    """Every leader's open agenda topics plus the Operator's own team-member
+    threads — the Operator's Meetings badge (matches that page's tabs)."""
     with closing(connect()) as conn:
-        return conn.execute(
+        agendas = conn.execute(
             "SELECT COUNT(*) FROM oneonone_topics t JOIN leaders l ON l.id = t.leader_id "
             "WHERE l.active=1 AND t.discussed_at IS NULL").fetchone()[0]
+        own_threads = conn.execute(
+            "SELECT COUNT(*) FROM oneonone_member_topics "
+            "WHERE holder_leader_id IS NULL AND discussed_at IS NULL").fetchone()[0]
+    return agendas + own_threads
 
 
 def open_topic_count(leader_id: int | None) -> int:

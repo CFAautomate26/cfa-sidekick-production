@@ -2141,3 +2141,51 @@ def test_scheduled_backup_endpoint(client):
     assert resp.status_code == 200
     payload = json.loads(resp.data)
     assert payload["format"] == 1
+
+
+def test_goal_numbers_must_be_finite(client):
+    login_operator(client)
+    client.post("/shift/goals", data={"title": "DT time", "period": "weekly",
+                                      "target_value": "270", "direction": "down"})
+    goal = shift_db.goals_by_status("active")[0]
+    for bad in ("inf", "-inf", "Infinity", "1e400", "nan"):
+        client.post(f"/shift/goals/{goal['id']}/update", data={"value": bad})
+    assert shift_db.goal_with_updates(goal["id"])[1] == []
+    client.post("/shift/goals", data={"title": "Huge", "period": "weekly",
+                                      "target_value": "1e400", "direction": "down"})
+    assert client.get("/shift/").status_code == 200            # never a redirect loop
+    assert client.get("/shift/goals").status_code == 200
+    with shift_db.connect() as conn:                            # even if one slipped in
+        conn.execute("INSERT INTO goal_updates (goal_id, value, note, recorded_by, "
+                     "recorded_at) VALUES (?, 1e400, '', 'x', '2026-01-01 09:00')",
+                     (goal["id"],))
+    assert client.get("/shift/").status_code == 200
+    assert client.get(f"/shift/goals/{goal['id']}").status_code == 200
+
+
+def test_operator_meetings_badge_counts_own_team_threads(client):
+    make_leader(client)
+    maya = shift_db.leaders()[0]
+    shift_db.add_member("Avery")
+    av = _roster_id("Avery")
+    login_operator(client)
+    client.post(f"/shift/oneonone/member/{av}/topics", data={"topic": "Check in"})
+    client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "Course"})
+    assert b'Meetings <span class="count">2</span>' in client.get("/shift/more").data
+
+
+def test_checklists_page_stops_nagging_for_a_retired_list(client, monkeypatch):
+    login_operator(client)
+    day = shift_db.today_local()
+    shift_db.ensure_runs_for_date(day)
+    daypart = shift_db.current_daypart()
+    tid = shift_db.create_template("Lunch retired", daypart, "All",
+                                   [("Pull product", True), ("Wipe", False)])
+    shift_db.ensure_runs_for_date(day)
+    run = next(r for r in shift_db.runs_for_date(day) if r["template_id"] == tid)
+    _, items = shift_db.run_with_items(run["id"])
+    shift_db.set_item_done(items[1]["id"], True, "Operator")      # ticked, then retired
+    shift_db.set_template_active(tid, False)
+    page = client.get(f"/shift/checklists?daypart={daypart}").data.decode()
+    assert "Lunch retired" not in page                          # no nag for a retired list
+    assert "Lunch retired" in client.get(f"/shift/checklists/run/{run['id']}").data.decode()

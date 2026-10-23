@@ -327,7 +327,9 @@ def test_versions_and_rereads(client):
     login_operator(client)
     resp = client.get(f"/hub/page/{pid}/readers")
     assert b"Sam Patel" in resp.data and b"v3" in resp.data
-    csv_text = client.get(f"/hub/page/{pid}/readers.csv").data.decode()
+    raw = client.get(f"/hub/page/{pid}/readers.csv").data
+    assert raw.startswith(b"\xef\xbb\xbf")               # BOM: Excel reads "José" right
+    csv_text = raw.decode("utf-8-sig")
     assert csv_text.count("Sam Patel") == 2 and hub_db.ACK_WORDING in csv_text
 
 
@@ -1025,3 +1027,59 @@ def test_menu_links_only_where_each_role_may_go(client):
     login_operator(client)
     menu = client.get("/hub/menu").data.decode()
     assert "Backups" in menu and "/hub/people" in menu
+
+
+def test_database_from_an_early_hub_build_migrates(tmp_path, monkeypatch):
+    """A database whose Hub tables predate rev/files/photo_no/nonce gets
+    those columns on boot (the live disk never ran an early build, but a
+    dev copy might have)."""
+    import sqlite3
+    path = tmp_path / "early.db"
+    monkeypatch.setattr(shift_db, "DB_PATH", str(path))
+    monkeypatch.setenv("SHIFT_HUB_FILES_DIR", str(tmp_path / "f"))
+    early = sqlite3.connect(path)
+    early.executescript("""
+        CREATE TABLE hub_categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+            icon TEXT NOT NULL DEFAULT 'x', blurb TEXT NOT NULL DEFAULT '',
+            leaders_only INTEGER NOT NULL DEFAULT 0, policy INTEGER NOT NULL DEFAULT 0,
+            sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE hub_pages (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL,
+            section TEXT NOT NULL DEFAULT '', title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+            keywords TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'draft', leaders_only INTEGER NOT NULL DEFAULT 0,
+            required INTEGER NOT NULL DEFAULT 0, needs_counsel INTEGER NOT NULL DEFAULT 0,
+            annual_review INTEGER NOT NULL DEFAULT 0, review_by TEXT,
+            version INTEGER NOT NULL DEFAULT 0, ack_version INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL, created_by TEXT NOT NULL, updated_at TEXT NOT NULL,
+            updated_by TEXT NOT NULL, published_at TEXT);
+        CREATE TABLE hub_page_versions (id INTEGER PRIMARY KEY, page_id INTEGER NOT NULL,
+            version INTEGER NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+            body TEXT NOT NULL DEFAULT '', change_note TEXT NOT NULL DEFAULT '',
+            content_hash TEXT NOT NULL, saved_at TEXT NOT NULL, saved_by TEXT NOT NULL,
+            reviewed_by TEXT, reviewed_at TEXT, UNIQUE (page_id, version));
+        CREATE TABLE hub_attachments (id INTEGER PRIMARY KEY, page_id INTEGER NOT NULL,
+            filename TEXT NOT NULL, stored_name TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+            size INTEGER NOT NULL, sha256 TEXT NOT NULL, alt TEXT NOT NULL DEFAULT '',
+            text TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, uploaded_by TEXT NOT NULL);
+        CREATE TABLE hub_access (member_id INTEGER PRIMARY KEY, code_hash TEXT NOT NULL,
+            granted_at TEXT NOT NULL, granted_by TEXT NOT NULL);
+        INSERT INTO hub_categories (name) VALUES ('FOH Operations');
+        INSERT INTO hub_pages (category_id, title, created_at, created_by, updated_at, updated_by)
+            VALUES (1, 'Old page', 't', 'x', 't', 'x');
+        INSERT INTO hub_attachments (page_id, filename, stored_name, kind, size, sha256,
+            uploaded_at, uploaded_by) VALUES (1, 'a.png', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'png', 1, 'h', 't', 'x'),
+            (1, 'b.pdf', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'pdf', 1, 'h', 't', 'x'), (1, 'c.png', 'cccccccccccccccccccccccccccccccc', 'png', 1, 'h', 't', 'x');
+    """)
+    early.close()
+    shift_db.init_db()
+    cols = {r["name"] for r in shift_db.connect().execute("PRAGMA table_info(hub_pages)")}
+    assert "rev" in cols
+    assert [f["photo_no"] for f in hub_db.attachments(1)] == [1, None, 2]
+    shift_db.add_member("Sam Patel")
+    sam = next(m for m in shift_db.roster() if m["name"] == "Sam Patel")
+    assert hub_db.grant(sam["id"], "1042", "Operator") is None
+    assert hub_db.member_for_login("Sam", "1042")["id"] == sam["id"]
+    viewer = hub_db.Viewer("operator", None, "Operator", "admin")
+    page = hub_db.get_page(1)
+    assert hub_db.publish(viewer, 1, page["rev"], "", True) is None
+    assert hub_db.search(viewer, "old")[0]["id"] == 1

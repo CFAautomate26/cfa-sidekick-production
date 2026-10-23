@@ -660,6 +660,7 @@ def acks_csv(page: dict) -> str:
         rows = conn.execute("SELECT * FROM hub_acks WHERE page_id=? ORDER BY acked_at, id",
                             (page["id"],)).fetchall()
     buf = io.StringIO()
+    buf.write("\ufeff")            # BOM: Excel then reads accented names correctly
     w = csv.writer(buf)
     w.writerow(["page", "version", "name", "confirmed at", "wording", "content sha256"])
     for r in rows:

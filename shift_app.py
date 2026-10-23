@@ -14,6 +14,7 @@ Setup guide: docs/shift-leading-app.md
 """
 
 import hmac
+import math
 import os
 import re
 import threading
@@ -824,7 +825,10 @@ def checklists():
             r["due_badge"] = ("Due today" if left <= 0
                               else f"{left} day{'s' if left != 1 else ''} left")
 
-    daily = [r for r in runs if r["frequency"] == "daily"]
+    # A list retired (or rescheduled) after someone ticked it keeps its
+    # ticks for the day's record but no longer counts as due — same rule
+    # as Today's _due_now.
+    daily = [r for r in runs if r["frequency"] == "daily" and r.get("scheduled", True)]
     allday = [r for r in daily if r["daypart"] == "allday"]
     mine = [r for r in daily if r["daypart"] == daypart]
     open_now, also_due, done_now, coming = None, [], [], []
@@ -1064,6 +1068,8 @@ def goal_create():
         target = float(target_raw) if target_raw else None
     except ValueError:
         target = None
+    if target is not None and not math.isfinite(target):
+        target = None
     period = (request.form.get("period") or "weekly").strip()
     if period not in shift_db.GOAL_PERIODS:
         period = "weekly"
@@ -1117,6 +1123,8 @@ def goal_update(goal_id):
     try:
         value = float(value_raw) if value_raw else None
     except ValueError:
+        value = math.nan
+    if value is not None and not math.isfinite(value):
         flash("The progress number wasn't a number.")
         return redirect(url_for("shift.goal_detail", goal_id=goal_id))
     if value is None and not note:
