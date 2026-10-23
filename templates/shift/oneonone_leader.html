@@ -1,82 +1,102 @@
 {% extends "shift/base.html" %}
-{% from "shift/_oneonone_macros.html" import agenda_list, history_list with context %}
-{% block title %}{{ leader.name }} — 1:1{% endblock %}
+{% from "shift/_oneonone_macros.html" import styles, topic_rows, add_topic, stats, history_list, task_source, rule_note with context %}
+{% block title %}{{ 'Your 1:1' if own else leader.name ~ ' — 1:1' }}{% endblock %}
+{% block head %}{{ styles() }}{% endblock %}
 {% block content %}
-<h1 class="page">{{ leader.name }} — 1:1</h1>
-<div class="sub">{{ agenda | length }} on the agenda · last 1:1
-  {{ history[0].date if history else 'never' }}</div>
-<div class="sub">Growth &amp; operational topics only — conduct, discipline,
-wage, and health conversations never go in this app.</div>
+<p class="crumbs"><a href="{{ url_for('shift.oneonone') }}">← All 1:1s</a></p>
+<section class="hero compact">
+  <p class="eyebrow">Meetings · 1:1</p>
+  <h1 class="headline">{% if own %}Your 1:1 with the Operator{% else %}1:1 with {{ leader.name }}{% endif %}</h1>
+  <p class="triage">{% if agenda %}<b>{{ agenda | length }} to talk about</b>{% else %}Nothing on the agenda{% endif %}
+    · {% if history %}last 1:1 {{ day(history[0].date) }}{% else %}no 1:1 logged yet{% endif %}</p>
+</section>
 
-{% if goals %}
-<div class="section-label">🎯 Their goals</div>
-{% for g in goals %}
-<a class="card tap" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}">
-  <h2>{{ g.title }}</h2>
-  {% if g.progress_pct is not none %}
-  <div class="bar {{ 'full' if g.progress_pct >= 100 }}"><span style="width: {{ g.progress_pct }}%"></span></div>
-  <div class="progress-note">{{ g.latest_value | num }} {{ g.unit }} · target {{ g.target_value | num }} {{ g.unit }} · {{ g.progress_pct }}%</div>
-  {% else %}
-  <div class="progress-note">{{ g.period }}{% if g.due_date %} · due {{ g.due_date }}{% endif %} · tap to log progress</div>
-  {% endif %}
-</a>
-{% endfor %}
-{% endif %}
-<a class="pill small ghost" style="margin-bottom:6px; display:inline-block;"
-   href="{{ url_for('shift.goals', leader_id=leader.id) }}">+ Set a goal for {{ leader.name }}</a>
-
-<div class="section-label">🎓 Course</div>
-<a class="card tap" href="{{ url_for('shift.development_leader', leader_id=leader.id) }}">
-  <div class="bar {{ 'full' if course_total and course_done == course_total }}">
-    <span style="width: {{ (course_done / course_total * 100) | round if course_total else 0 }}%"></span></div>
-  <div class="progress-note">{{ course_done }} of {{ course_total }} lessons · tap for lessons and session notes</div>
-</a>
-
-{% if open_tasks %}
-<div class="section-label">✅ Open to-dos</div>
-<a class="card tap" href="{{ url_for('shift.todo_leader', leader_id=leader.id) }}">
-  {% for t in open_tasks[:5] %}
-  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px; align-items:baseline;">
-    <span style="color:var(--soft);">▢</span>
-    <span style="flex:1; font-weight:700;">{{ t.title }}</span>
-    {% if t.due_date %}<span class="progress-note" style="margin:0;{% if t.overdue %} color:var(--cfa-red); font-weight:700;{% endif %}">due {{ t.due_date }}</span>{% endif %}
+<div class="meet-grid agenda-page">
+<article class="feature cream agenda" id="agenda">
+  <div class="top">
+    <p class="lockline">{{ icon('lock') }}{% if own %}Only you and the Operator see this agenda{% else %}Only {{ leader.name }} and you see this agenda{% endif %}</p>
+    <h2 class="f-title">To talk about</h2>
+    <p class="meta">Tick a topic once you've talked about it. Tap it to note what you decided.</p>
+    {{ stats(leader.id, course_done, course_total, open_tasks | length, goals | length, '#actions', '#goals', own) }}
   </div>
-  {% endfor %}
-  <div class="progress-note">Tap to check off or see all</div>
-</a>
-{% endif %}
+  {{ topic_rows(agenda, 'shift.oneonone_topic_toggle', 'shift.oneonone_topic_delete',
+                action_url=url_for('shift.oneonone_action', leader_id=leader.id)) }}
+  {{ add_topic(url_for('shift.oneonone_topic_add', leader_id=leader.id),
+               'Add a topic for your next 1:1' if own else 'Add a topic for ' ~ leader.name) }}
+</article>
 
-<details class="compose">
-  <summary>+ Add a talking point</summary>
-  <form method="post" action="{{ url_for('shift.oneonone_topic_add', leader_id=leader.id) }}" class="card">
-    <label class="field" for="t-topic">Topic</label>
-    <input type="text" id="t-topic" name="topic" required
-           placeholder="e.g. Saturday close staffing — what would help?">
-    <div style="margin-top:12px;">
-      <button class="pill primary" type="submit">Add</button>
-    </div>
-  </form>
-</details>
+<div class="meet-col side">
+<section class="sec" id="goals">
+  <div class="sec-head"><h2>{{ 'Your goals' if own else leader.name ~ "'s goals" }}</h2>
+    <a class="more" href="{{ url_for('shift.goals', leader_id=leader.id) }}">Set a goal</a></div>
+  {% if goals %}
+  <div class="card list">
+    {% for g in goals %}
+    <a class="row" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}"><span class="lead-ico">{{ icon('target') }}</span>
+      <span class="row-main"><span class="row-title">{{ g.title }}</span>
+        {% if g.progress_pct is not none %}
+        <span class="bar navy{{ ' done' if g.progress_pct >= 100 }}"><span style="width: {{ g.progress_pct }}%"></span></span>
+        <span class="row-meta">{{ g.latest_value | num }} {{ g.unit }} · target {{ g.target_value | num }} {{ g.unit }} · {{ g.progress_pct }}%</span>
+        {% else %}
+        <span class="row-meta">{{ g.period | capitalize }}{% if g.due_date %} · due {{ day(g.due_date) }}{% endif %} · tap to log progress</span>
+        {% endif %}</span>
+      {{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="sec-note">No goals yet. Goals tagged to {{ 'you' if own else leader.name }} show here and on Goals.</p>
+  {% endif %}
+</section>
 
-{{ agenda_list(agenda, 'shift.oneonone_topic_toggle', 'shift.oneonone_topic_delete') }}
+<section class="sec" id="course">
+  <div class="sec-head"><h2>Leadership course</h2></div>
+  <div class="card list">
+    <a class="row" href="{{ url_for('shift.development_leader', leader_id=leader.id) }}"><span class="lead-ico">{{ icon('cap') }}</span>
+      <span class="row-main"><span class="row-title">{{ course_done }} of {{ course_total }} lessons</span>
+        <span class="bar navy{{ ' done' if course_total and course_done == course_total }}"><span style="width: {{ (course_done / course_total * 100) | round if course_total else 0 }}%"></span></span>
+        <span class="row-meta">Lessons and session notes</span></span>
+      {{ icon('chev', 'chev') }}</a>
+  </div>
+</section>
 
-<details class="compose" id="actions">
-  <summary>+ Action item → their to-dos</summary>
-  <form method="post" action="{{ url_for('shift.oneonone_action', leader_id=leader.id) }}" class="card">
-    <label class="field" for="a-title">Task</label>
-    <input type="text" id="a-title" name="title" required
-           placeholder="e.g. Shadow a breakfast open before our next 1:1">
-    <label class="field" for="a-due">Due date</label>
-    <input type="date" id="a-due" name="due_date">
-    <div style="margin-top:12px;">
-      <button class="pill primary" type="submit">Assign</button>
-    </div>
-    <div class="progress-note">Lands on their ✅ to-do list like any assigned task.</div>
-  </form>
-</details>
+<section class="sec" id="actions">
+  <div class="sec-head"><h2>{{ 'Your to-dos' if own else leader.name ~ "'s to-dos" }}</h2>
+    <a class="more" href="{{ url_for('shift.todo_leader', leader_id=leader.id) }}">All to-dos</a></div>
+  {% if open_tasks %}
+  <div class="card list">
+    {% for t in open_tasks[:5] %}
+    {% set d = due(t.due_date) %}
+    <a class="row" href="{{ url_for('shift.todo_leader', leader_id=leader.id) }}#task-{{ t.id }}">
+      <span class="row-main"><span class="row-title">{{ t.title }}</span>
+        <span class="row-meta"><span{% if d[1] %} class="due-red"{% endif %}>{{ d[0] }}</span> · {{ task_source(t, leader.name) }}</span></span>
+      {{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+    {% if open_tasks | length > 5 %}
+    <a class="row compact" href="{{ url_for('shift.todo_leader', leader_id=leader.id) }}"><span class="row-main"><span class="row-title" style="color:var(--nav);">{{ open_tasks | length - 5 }} more open</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="sec-note">No open to-dos.</p>
+  {% endif %}
+  <details class="compose">
+    <summary>{{ icon('plus', 'sm') }} Add a to-do</summary>
+    <form method="post" action="{{ url_for('shift.oneonone_action', leader_id=leader.id) }}" class="card compose-form">
+      <label class="field" for="a-title">To-do</label>
+      <input type="text" id="a-title" name="title" required
+             placeholder="e.g. Shadow a breakfast open before our next 1:1">
+      <label class="field" for="a-due">Due date</label>
+      <input type="date" id="a-due" name="due_date">
+      <button class="btn btn-primary" type="submit">Assign</button>
+      <p class="fine">Lands on {{ 'your' if own else leader.name ~ "'s" }} to-do list. Every leader can see to-dos.</p>
+    </form>
+  </details>
+</section>
+</div>
 
+<div class="meet-col past-col">
 {{ history_list(history, 'shift.oneonone_topic_toggle') }}
+</div>
+</div>
 
-<a class="pill small ghost" style="margin-top:12px; display:inline-block;" href="{{ url_for('shift.oneonone') }}">← All 1:1s</a>
-<div class="sub">This page is visible to {{ leader.name }} and the Operator only.</div>
+{{ rule_note() }}
 {% endblock %}

@@ -1129,14 +1129,14 @@ def test_leader_picks_any_team_member(client):
     assert f'value="member:{_roster_id("Blake")}"' in picker
     assert ">Maya</option>" not in picker                 # herself / leaders: no
     assert "leader:" not in picker
-    assert "Your 1:1 with the Operator" in page
+    assert "Your agenda with the Operator" in page
     resp = client.get(f"/shift/oneonone?who=member:{_roster_id('Blake')}")
     assert resp.headers["Location"].endswith(f"/shift/oneonone/member/{_roster_id('Blake')}")
     client.post(f"/shift/oneonone/member/{_roster_id('Blake')}/topics",
                 data={"topic": "Wants more drive-thru shifts"})
     page = client.get("/shift/oneonone").data.decode()
     mine = page[page.index('id="team"'):]
-    assert "Blake" in mine and "● 1 waiting" in mine
+    assert "Blake" in mine and "1 to talk about" in mine
     # A roster row with a leader's name isn't a team 1:1
     resp = client.post(f"/shift/oneonone/member/{_roster_id('Maya')}/topics",
                        data={"topic": "x"}, follow_redirects=True)
@@ -1215,7 +1215,7 @@ def test_oneonone_index_picker(client):
     shift_db.set_member_active(_roster_id("Old Timer"), False)
     login_operator(client)
     page = client.get("/shift/oneonone").data.decode()
-    assert "Leaders · shared agendas" in page and "Team members" in page
+    assert "Your 1:1s with leaders" in page and "Team members" in page
     picker = page[page.index('<select name="who"'):page.index("</select>")]
     leaders_group = picker[picker.index('<optgroup label="Leaders">'):
                            picker.index('<optgroup label="Team members">')]
@@ -1249,7 +1249,7 @@ def test_oneonone_index_picker(client):
                 data={"topic": "Check in"})
     page = client.get("/shift/oneonone").data.decode()
     team = page[page.index('id="team"'):]
-    assert "Blake" in team and "● 1 waiting" in team
+    assert "Blake" in team and "1 to talk about" in team
 
 
 def test_oneonone_picker_empty_roster_hint(client):
@@ -1468,8 +1468,8 @@ def test_former_member_threads_show_what_is_waiting(client):
     page = client.get("/shift/oneonone").data.decode()
     assert "No 1:1s with team members yet" not in page    # badge and page agree
     former = page[page.index("Former team members with 1:1 history"):]
-    assert "● 1 waiting" in former
-    assert "<details style=\"margin-bottom:12px;\" open>" in page
+    assert "1 to talk about" in former
+    assert "<details class=\"list-more former\" open>" in page
     # Leaders can get back to their 1:1 page from their agenda
     agenda = client.get(f"/shift/oneonone/{maya['id']}").data.decode()
     assert 'href="/shift/oneonone">← All 1:1s' in agenda

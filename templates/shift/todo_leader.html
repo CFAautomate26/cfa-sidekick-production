@@ -1,75 +1,84 @@
 {% extends "shift/base.html" %}
+{% from "shift/_oneonone_macros.html" import styles, by, task_source with context %}
 {% block title %}{{ leader.name }} — To-dos{% endblock %}
+{% block head %}{{ styles() }}{% endblock %}
 {% block content %}
-<h1 class="page">{{ leader.name }}'s to-dos</h1>
-<div class="sub">{{ open_tasks | length }} open{% if done_tasks %} · {{ done_tasks | length }} completed{% endif %}</div>
+<p class="crumbs"><a href="{{ url_for('shift.todo') }}">← All leaders</a></p>
+<section class="hero compact">
+  <p class="eyebrow">Meetings · To-dos</p>
+  <h1 class="headline">{{ 'Your to-dos' if own else leader.name ~ "'s to-dos" }}</h1>
+  <p class="triage"><b>{{ open_tasks | length }} open</b>{% if done_tasks %} · {{ done_tasks | length }} done{% endif %}</p>
+</section>
 
-<details class="compose">
-  <summary>+ Assign a to-do</summary>
-  <form method="post" action="{{ url_for('shift.todo_assign', leader_id=leader.id) }}" class="card">
-    <label class="field" for="t-title">Task</label>
+<div class="meet-narrow">
+<details class="compose" style="margin-top:20px;">
+  <summary>{{ icon('plus', 'sm') }} {{ 'Add a to-do' if own else 'Assign a to-do' }}</summary>
+  <form method="post" action="{{ url_for('shift.todo_assign', leader_id=leader.id) }}" class="card compose-form">
+    <label class="field" for="t-title">To-do</label>
     <input type="text" id="t-title" name="title" required
            placeholder="e.g. Complete the fryer maintenance training">
     <label class="field" for="t-details">Details</label>
     <textarea id="t-details" name="details" style="min-height:70px;"
-              placeholder="Optional — anything they need to know"></textarea>
+              placeholder="Optional: anything they need to know"></textarea>
     <label class="field" for="t-due">Due date</label>
     <input type="date" id="t-due" name="due_date">
-    <div style="margin-top:12px;">
-      <button class="pill primary" type="submit">Assign</button>
-    </div>
+    <button class="btn btn-primary" type="submit">{{ 'Add' if own else 'Assign' }}</button>
+    <p class="fine">Every leader can see to-do lists. Keep pay, discipline and medical matters out.</p>
   </form>
 </details>
 
-<div class="section-label">Open</div>
-{% for t in open_tasks %}
-<div class="card" id="task-{{ t.id }}" {% if t.overdue %}style="border-color: var(--cfa-red);"{% endif %}>
-  <div style="display:flex; gap:12px; align-items:flex-start;">
-    <form method="post" action="{{ url_for('shift.todo_toggle', task_id=t.id) }}">
-      <input type="hidden" name="done" value="1">
-      <button type="submit" class="checkmark" title="Mark complete"
-              style="background:none; cursor:pointer; width:30px; height:30px; flex:none;">✓</button>
-    </form>
-    <div style="flex:1;">
-      <div style="font-size:15px; font-weight:700;">{{ t.title }}</div>
-      {% if t.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:2px;">{{ t.details }}</div>{% endif %}
-      <div class="progress-note">
-        {% if t.due_date %}<span {% if t.overdue %}class="critical-flag"{% endif %}>due {{ t.due_date }}{{ ' — overdue' if t.overdue }}</span> · {% endif %}
-        assigned by {{ t.assigned_by }} · {{ t.created_at[:10] }}
+<section class="sec" style="margin-top:22px;">
+  <div class="sec-head"><h2>Open</h2></div>
+  <div class="card list">
+    {% for t in open_tasks %}
+    {% set d = due(t.due_date) %}
+    <div class="row task{{ ' overdue' if t.overdue }}" id="task-{{ t.id }}">
+      {% if can_check %}
+      <form method="post" action="{{ url_for('shift.todo_toggle', task_id=t.id) }}">
+        <input type="hidden" name="done" value="1">
+        <button class="tick" type="submit" title="Mark done" aria-label="Mark done: {{ t.title }}"></button>
+      </form>
+      {% endif %}
+      <div class="row-main">
+        <span class="row-title">{{ t.title }}</span>
+        {% if t.details %}<span class="details">{{ t.details }}</span>{% endif %}
+        <span class="row-meta"><span{% if d[1] %} class="due-red"{% endif %}>{{ d[0] }}</span>
+          · {{ task_source(t, leader.name) }} · {{ day(t.created_at) }}</span>
+        {% if shift_is_admin %}
+        <form method="post" action="{{ url_for('shift.todo_delete', task_id=t.id) }}"
+              onsubmit="return confirm('Delete this to-do?');">
+          <button class="linkbtn" type="submit">Delete</button>
+        </form>
+        {% endif %}
       </div>
     </div>
-    {% if shift_is_admin %}
-    <form method="post" action="{{ url_for('shift.todo_delete', task_id=t.id) }}"
-          onsubmit="return confirm('Delete this to-do?');">
-      <button class="pill small ghost" type="submit">Delete</button>
-    </form>
-    {% endif %}
+    {% else %}
+    <p class="muted-line">Nothing open. All caught up.</p>
+    {% endfor %}
   </div>
-</div>
-{% else %}
-<div class="empty">Nothing open — all caught up ✓</div>
-{% endfor %}
+</section>
 
 {% if done_tasks %}
-<details style="margin-top:14px;">
-  <summary style="cursor:pointer;" class="section-label">Completed ({{ done_tasks | length }})</summary>
-  {% for t in done_tasks %}
-  <div class="card" id="task-{{ t.id }}" style="opacity:0.75;">
-    <div style="display:flex; gap:12px; align-items:flex-start;">
-      <span class="checkmark" style="background:var(--good); border-color:var(--good); color:#fff; flex:none;">✓</span>
-      <div style="flex:1;">
-        <div style="font-size:15px; text-decoration:line-through; color:var(--soft);">{{ t.title }}</div>
-        <div class="progress-note">completed {{ t.completed_at }} by {{ t.completed_by }}</div>
+<details class="list-more" style="margin-top:18px;">
+  <summary>Done ({{ done_tasks | length }}){{ icon('chev') }}</summary>
+  <div class="card list">
+    {% for t in done_tasks %}
+    <div class="row task" id="task-{{ t.id }}">
+      <span class="av done" aria-label="Done">{{ icon('check', 'sm') }}</span>
+      <div class="row-main">
+        <span class="row-title done-title">{{ t.title }}</span>
+        <span class="row-meta">done {{ when(t.completed_at) }} by {{ by(t.completed_by) }}</span>
       </div>
+      {% if can_check %}
       <form method="post" action="{{ url_for('shift.todo_toggle', task_id=t.id) }}">
         <input type="hidden" name="done" value="0">
-        <button class="pill small ghost" type="submit">Reopen</button>
+        <button class="btn btn-secondary sm" type="submit">Reopen</button>
       </form>
+      {% endif %}
     </div>
+    {% endfor %}
   </div>
-  {% endfor %}
 </details>
 {% endif %}
-
-<a class="pill small ghost" style="margin-top:12px; display:inline-block;" href="{{ url_for('shift.todo') }}">← All leaders</a>
+</div>
 {% endblock %}

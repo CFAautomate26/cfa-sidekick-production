@@ -1,20 +1,30 @@
 {% extends "shift/base.html" %}
+{% from "shift/_oneonone_macros.html" import styles with context %}
 {% block title %}To-dos{% endblock %}
+{% block head %}{{ styles() }}{% endblock %}
 {% block content %}
-<h1 class="page">Leader to-dos</h1>
-<div class="sub">Assign a task to a leader, see it get done. Open a leader to
-assign or review.</div>
+<p class="crumbs"><a href="{{ url_for('shift.oneonone') }}#todos">← Meetings</a></p>
+<section class="hero compact">
+  <p class="eyebrow">Meetings · To-dos</p>
+  <h1 class="headline">Leader to-dos</h1>
+  <p class="triage">Pick a leader to give them a to-do or see their list.</p>
+</section>
 
-{% for l in leaders %}
-<a class="card tap" href="{{ url_for('shift.todo_leader', leader_id=l.id) }}">
-  <h2>{{ l.name }}{{ ' (you)' if l.id == my_leader_id }} <span style="font-weight:400; color:var(--soft);">· {{ l.role }}</span>
-    {% if l.overdue %}<span class="critical-flag">● {{ l.overdue }} overdue</span>{% endif %}</h2>
-  <div class="progress-note">
-    {% if l.open %}{{ l.open }} open{% else %}All caught up ✓{% endif %}
-    {% if l.last_completed %} · last completed {{ l.last_completed }}{% endif %}
+<div class="meet-narrow">
+<section class="sec" style="margin-top:22px;">
+  {% if leaders %}
+  <div class="card list">
+    {% for l in leaders %}
+    <a class="row" href="{{ url_for('shift.todo_leader', leader_id=l.id) }}"><span class="av">{{ l.name[:1] | upper }}</span>
+      <span class="row-main"><span class="row-title">{{ l.name }}{{ ' (you)' if l.id == my_leader_id }}</span>
+        <span class="row-meta tags"><span>{% if l.open %}{{ l.open }} open{% else %}All caught up{% endif %}{% if l.last_completed %} · last done {{ day(l.last_completed) }}{% endif %}</span>{% if l.overdue %}<span class="badge b-red">{{ l.overdue }} overdue</span>{% endif %}</span></span>
+      {{ icon('chev', 'chev') }}</a>
+    {% endfor %}
   </div>
-</a>
-{% else %}
-<div class="empty">No leader logins yet — add your leaders under Admin first.</div>
-{% endfor %}
+  {% else %}
+  <div class="empty">No leader logins yet. Add your leaders under Admin first.</div>
+  {% endif %}
+  <p class="sec-note" style="margin-top:4px;">Every leader can see these lists. Only the leader (or an admin) checks one off.</p>
+</section>
+</div>
 {% endblock %}
