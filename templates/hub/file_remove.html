@@ -1,0 +1,27 @@
+{% extends "hub/base.html" %}
+{% block title %}Remove {{ att.filename }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ url_for('hub.page', page_id=page.id) }}">← {{ page.title }}</a></div>
+<h1 class="page">Remove {{ 'photo %d' % att.photo_no if att.photo_no else 'a file' }}?</h1>
+<div class="sub">{{ att.filename }}</div>
+{% if att.photo_no %}
+<div class="card"><img src="{{ url_for('hub.file', file_id=att.id) }}" alt="{{ att.alt or att.filename }}"
+  style="max-width:100%; height:auto; border-radius:10px;"></div>
+{% endif %}
+<form method="post" action="{{ url_for('hub.remove_file', file_id=att.id) }}" class="card">
+  {% if page.version %}
+  <div class="muted" style="margin-bottom:6px;">This page is published, so removing the file makes a new version.
+    The file stays in the page's History (the Operator can delete it for good from there).
+    {% if att.photo_no %}Any “[photo: {{ att.photo_no }}]” left in the text simply shows nothing.{% endif %}</div>
+  {% set field_id = 'rm' %}
+  {% include "hub/_change_fields.html" %}
+  {% else %}
+  <input type="hidden" name="rev" value="{{ page.rev }}">
+  <div class="muted">It's a draft, so the file is deleted.</div>
+  {% endif %}
+  <div class="pillrow" style="margin-top:12px;">
+    <button class="pill primary" type="submit">Remove it</button>
+    <a class="pill" href="{{ url_for('hub.page', page_id=page.id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

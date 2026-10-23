@@ -13,13 +13,18 @@ from xml.etree import ElementTree
 
 from markupsafe import Markup, escape
 
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‏‪-‮⁦-⁩]")
+# Control characters, zero-width space and bidi overrides. The zero-width
+# (non-)joiners U+200C/U+200D stay: emoji like 🧑‍🍳 are built with them.
+_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b\u200e\u200f"
+                      "\u202a-\u202e\u2066-\u2069]")
 _SAFE_URL = re.compile(r"^(https?://[^/\\]|mailto:|tel:|/hub/)", re.I)
 _LINK = re.compile(r"\[([^\]\n]{1,200})\]\(([^)\s]{1,500})\)")
 _BARE_URL = re.compile(r"(?<![\w\"'=/])https?://[^\s<]{1,500}")
 _URL_TAIL = ".,;:!?)'\""
-_BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
-_ITALIC = re.compile(r"(?<![*\w])_(?=\S)(.+?)(?<=\S)_(?![*\w])")
+# Spans can't contain their own marker and stop at 300 characters, so a
+# long line full of stray ** or _ stays linear to render.
+_BOLD = re.compile(r"\*\*(?=[^\s*])([^*\n]{1,300}?)(?<=[^\s*])\*\*")
+_ITALIC = re.compile(r"(?<![*\w])_(?=[^\s_])([^_\n]{1,300}?)(?<=[^\s_])_(?![*\w])")
 _HEADING = re.compile(r"^(#{1,3})\s+(.*)$")
 _BULLET = re.compile(r"^\s*[-*•]\s+(.*)$")
 _NUMBERED = re.compile(r"^\s*\d{1,3}[.)]\s+(.*)$")
@@ -142,7 +147,8 @@ def plain(text: str) -> str:
 
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
-_MAX_XML = 20 * 1024 * 1024        # a zip bomb's document.xml never gets read
+_MAX_XML = 10 * 1024 * 1024        # a zip bomb's document.xml never gets read
+_MAX_TAGS = 400_000                # nor does one built from millions of tiny elements
 
 
 def _read_document(source) -> tuple[ElementTree.Element | None, list[str]]:
@@ -154,11 +160,12 @@ def _read_document(source) -> tuple[ElementTree.Element | None, list[str]]:
                 return None, []
             with z.open(info) as f:
                 data = f.read(_MAX_XML + 1)
-            if len(data) > _MAX_XML:
-                return None, []
-            root = ElementTree.fromstring(data)
-    except (zipfile.BadZipFile, KeyError, ElementTree.ParseError, OSError,
-            RuntimeError, ValueError, NotImplementedError, EOFError):
+        # Word never writes a DTD; one here can only be an entity bomb.
+        if (len(data) > _MAX_XML or b"<!DOCTYPE" in data or b"<!ENTITY" in data
+                or data.count(b"<") > _MAX_TAGS):
+            return None, []
+        root = ElementTree.fromstring(data)
+    except Exception:          # damaged, hostile or simply not a Word file
         return None, []
     notes = []
     if "word/comments.xml" in names:
@@ -176,10 +183,8 @@ def _run_text(el) -> str:
         tag = child.tag
         if tag in (f"{_W}p", f"{_W}txbxContent", f"{_W}del", f"{_MC}Fallback"):
             continue
-        if tag == f"{_W}r":
-            props = child.find(f"{_W}rPr")
-            if props is not None and props.find(f"{_W}vanish") is not None:
-                continue
+        if tag == f"{_W}r" and _hidden(child):
+            continue
         if tag == f"{_W}t":
             parts.append(child.text or "")
         elif tag == f"{_W}tab":
@@ -189,6 +194,25 @@ def _run_text(el) -> str:
         else:
             parts.append(_run_text(child))
     return "".join(parts)
+
+
+def _hidden(run) -> bool:
+    """A run Word hides (<w:vanish/>, but not <w:vanish w:val="0"/>, which
+    shows a run whose style is hidden)."""
+    props = run.find(f"{_W}rPr")
+    vanish = props.find(f"{_W}vanish") if props is not None else None
+    return vanish is not None and (vanish.get(f"{_W}val") or "true").lower() not in (
+        "0", "false", "off")
+
+
+def _paragraphs(el):
+    """Paragraphs under el in order — not the ones inside text boxes (read
+    separately) or Word's fallback copies of them."""
+    for child in el:
+        if child.tag == f"{_W}p":
+            yield child
+        elif child.tag not in (f"{_W}txbxContent", f"{_MC}Fallback", f"{_W}del"):
+            yield from _paragraphs(child)
 
 
 def _text_boxes(el):
@@ -241,10 +265,14 @@ def docx_import(source) -> tuple[str, list[str]]:
         for row in tbl.findall(f"{_W}tr"):
             cells = []
             for cell in row.findall(f"{_W}tc"):
-                words = " ".join(" ".join(clean(_run_text(p)).split())
-                                 for p in cell.iter(f"{_W}p"))
+                parts = []
+                for p in _paragraphs(cell):
+                    parts.append(_run_text(p))
+                    for box in _text_boxes(p):
+                        parts += [_run_text(q) for q in _paragraphs(box)]
+                words = " ".join(" ".join(clean(part).split()) for part in parts)
                 if words.strip():
-                    cells.append(words.strip())
+                    cells.append(" ".join(words.split()))
             if cells:
                 lines.append("- " + " · ".join(cells))
         new_block()
@@ -259,7 +287,10 @@ def docx_import(source) -> tuple[str, list[str]]:
                 walk(child)
 
     body = root.find(f"{_W}body")
-    walk(body if body is not None else root)
+    try:
+        walk(body if body is not None else root)
+    except RecursionError:                     # absurdly deep nesting
+        return "", []
     text = "\n".join(lines).strip()
     return re.sub(r"\n{3,}", "\n\n", text), notes
 

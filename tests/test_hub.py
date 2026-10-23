@@ -11,6 +11,7 @@ import pytest
 import app as cfa_app
 import hub
 import hub_db
+import hub_text
 import shift_app
 import shift_db
 
@@ -68,9 +69,16 @@ def new_page(client, category="FOH Operations", title="Drive-thru basics",
     assert resp.status_code == 302, resp.data
     page_id = int(resp.headers["Location"].rsplit("/", 1)[1])
     if publish:
-        checks = {"check_people": "1", "check_law": "1", "check_counsel": "1"}
-        client.post(f"/hub/page/{page_id}/publish", data=checks)
+        client.post(f"/hub/page/{page_id}/publish", data=dict(CHECKS, rev=rev(page_id)))
     return page_id
+
+
+CHECKS = {"check_people": "1", "check_law": "1", "check_counsel": "1"}
+
+
+def rev(page_id):
+    """The page revision a freshly loaded form would carry."""
+    return str(hub_db.get_page(page_id)["rev"])
 
 
 # --- boot / sign-in ----------------------------------------------------------
@@ -214,16 +222,14 @@ def test_hr_publish_is_operator_only_with_checks(client):
     make_leader(client, "Ava", "5555", role="admin")
     login_leader(client, "Ava", "5555")
     pid = new_page(client, category="HR", title="Dress code", publish=False)
-    resp = client.post(f"/hub/page/{pid}/publish", data={
-        "check_people": "1", "check_law": "1", "check_counsel": "1"})
+    client.post(f"/hub/page/{pid}/publish", data=dict(CHECKS, rev=rev(pid)))
     assert hub_db.get_page(pid)["status"] == "draft"
     client.post("/shift/logout")
 
     login_operator(client)
-    client.post(f"/hub/page/{pid}/publish", data={"check_people": "1"})   # checks missing
-    assert hub_db.get_page(pid)["status"] == "draft"
-    client.post(f"/hub/page/{pid}/publish", data={
-        "check_people": "1", "check_law": "1", "check_counsel": "1"})
+    client.post(f"/hub/page/{pid}/publish", data={"check_people": "1", "rev": rev(pid)})
+    assert hub_db.get_page(pid)["status"] == "draft"                     # checks missing
+    client.post(f"/hub/page/{pid}/publish", data=dict(CHECKS, rev=rev(pid)))
     page = hub_db.get_page(pid)
     assert page["status"] == "published" and page["version"] == 1
     assert hub_db.versions(pid)[0]["reviewed_by"] == "Operator"
@@ -232,7 +238,7 @@ def test_hr_publish_is_operator_only_with_checks(client):
     login_leader(client, "Ava", "5555")                 # admin can't edit it now
     resp = client.post(f"/hub/page/{pid}/edit", data={
         "category_id": page["category_id"], "title": "Dress code", "body": "changed",
-        "base_version": "1"})
+        "rev": rev(pid)})
     assert resp.status_code == 302
     assert hub_db.get_page(pid)["body"] != "changed"
     assert b"Only the Operator" in client.get(f"/hub/page/{pid}").data
@@ -244,7 +250,7 @@ def test_admin_cannot_move_published_page_into_hr(client):
     pid = new_page(client, title="Breaks")
     resp = client.post(f"/hub/page/{pid}/edit", data={
         "category_id": category_id("HR"), "title": "Breaks", "body": "# Steps\n- Greet the guest",
-        "base_version": "1"})
+        "rev": rev(pid)})
     assert resp.status_code == 400
     assert hub_db.get_page(pid)["category_id"] == category_id("FOH Operations")
 
@@ -253,7 +259,7 @@ def test_counsel_flag_blocks_publishing_until_operator_clears(client):
     make_leader(client, "Ava", "5555", role="admin")
     login_leader(client, "Ava", "5555")
     pid = new_page(client, title="Scheduling rules", publish=False, needs_counsel="1")
-    client.post(f"/hub/page/{pid}/publish", data={})
+    client.post(f"/hub/page/{pid}/publish", data={"rev": rev(pid)})
     assert hub_db.get_page(pid)["status"] == "draft"
     client.post(f"/hub/page/{pid}/counsel", data={"flag": "0", "note": "looked fine"})
     assert hub_db.get_page(pid)["needs_counsel"] == 1   # only the Operator clears
@@ -262,7 +268,7 @@ def test_counsel_flag_blocks_publishing_until_operator_clears(client):
     client.post(f"/hub/page/{pid}/counsel", data={"flag": "0", "note": ""})
     assert hub_db.get_page(pid)["needs_counsel"] == 1   # a note is required
     client.post(f"/hub/page/{pid}/counsel", data={"flag": "0", "note": "Counsel OK 10/20"})
-    client.post(f"/hub/page/{pid}/publish", data={})
+    client.post(f"/hub/page/{pid}/publish", data={"rev": rev(pid)})
     assert hub_db.get_page(pid)["status"] == "published"
 
 
@@ -281,17 +287,19 @@ def test_versions_and_rereads(client):
     base = {"category_id": category_id("FOH Operations"), "title": "Sanitizer",
             "section": "Training", "required": "1"}
     client.post(f"/hub/page/{pid}/edit", data=dict(
-        base, body="Use 200 ppm quat.", base_version="1", reread="0", change_note="typo"))
+        base, body="Use 200 ppm quat.", rev=rev(pid), reread="0", change_note="typo"))
     page = hub_db.get_page(pid)
     assert (page["version"], page["ack_version"]) == (2, 1)       # small fix
+    stale_rev = rev(pid)
     client.post(f"/hub/page/{pid}/edit", data=dict(
-        base, body="Use 400 ppm quat.", base_version="2", reread="1",
+        base, body="Use 400 ppm quat.", rev=rev(pid), reread="1",
         change_note="New strength"))
     page = hub_db.get_page(pid)
     assert (page["version"], page["ack_version"]) == (3, 3)
     stale = client.post(f"/hub/page/{pid}/edit", data=dict(
-        base, body="Something else", base_version="2", reread="0"))
-    assert stale.status_code == 400 and hub_db.get_page(pid)["version"] == 3
+        base, body="Something else", rev=stale_rev, reread="0"))
+    assert stale.status_code == 409 and hub_db.get_page(pid)["version"] == 3
+    assert b"Something else" in stale.data                       # their text survives
     assert [v["version"] for v in hub_db.versions(pid)] == [3, 2, 1]
     assert hub_db.get_version(pid, 1)["body"] == "Use 200 ppm."
     client.post("/shift/logout")
@@ -317,7 +325,7 @@ def test_settings_only_change_makes_no_version(client):
     pid = new_page(client, title="Uniform", body="Hat on.")
     client.post(f"/hub/page/{pid}/edit", data={
         "category_id": category_id("FOH Operations"), "title": "Uniform", "body": "Hat on.",
-        "section": "Training", "keywords": "hat cap", "base_version": "1"})
+        "section": "Training", "keywords": "hat cap", "rev": rev(pid)})
     page = hub_db.get_page(pid)
     assert page["version"] == 1 and page["keywords"] == "hat cap"
 
@@ -375,17 +383,18 @@ def _docx_bytes(body_xml):
     return buf.getvalue()
 
 
-def test_upload_serve_and_remove_files(client, tmp_path):
+def upload(client, pid, data, name, **form):
+    return client.post(f"/hub/page/{pid}/files", data=dict(
+        form, file=(io.BytesIO(data), name), rev=rev(pid)), content_type="multipart/form-data")
+
+
+def test_upload_serve_and_remove_files_on_a_draft(client):
     login_operator(client)
-    pid = new_page(client, title="Fryer", body="Hang it like this:\n[photo: 1]")
-    resp = client.post(f"/hub/page/{pid}/files", data={
-        "file": (io.BytesIO(PNG), "basket.png"), "alt": "Basket hung"},
-        content_type="multipart/form-data")
-    assert resp.status_code == 302
-    client.post(f"/hub/page/{pid}/files", data={"file": (io.BytesIO(PDF), "guide.pdf")},
-                content_type="multipart/form-data")
+    pid = new_page(client, title="Fryer", body="Hang it like this:\n[photo: 1]", publish=False)
+    assert upload(client, pid, PNG, "basket.png", alt="Basket hung").status_code == 302
+    upload(client, pid, PDF, "guide.pdf")
     bad = client.post(f"/hub/page/{pid}/files", data={
-        "file": (io.BytesIO(b"<svg onload=alert(1)>"), "x.png")},
+        "file": (io.BytesIO(b"<svg onload=alert(1)>"), "x.png"), "rev": rev(pid)},
         content_type="multipart/form-data", follow_redirects=True)
     assert b"Only PDFs" in bad.data
     files = hub_db.attachments(pid)
@@ -397,16 +406,82 @@ def test_upload_serve_and_remove_files(client, tmp_path):
     assert png.headers["X-Content-Type-Options"] == "nosniff"
     assert png.headers["Cache-Control"] == "private, no-store"
     path = hub_db.file_path(files[1])
-    client.post(f"/hub/file/{files[1]['id']}/delete", data={"confirm": "1"})
+    assert client.get(f"/hub/file/{files[1]['id']}/remove").status_code == 200
+    client.post(f"/hub/file/{files[1]['id']}/remove", data={"rev": rev(pid)})
     assert len(hub_db.attachments(pid)) == 1
-    assert not os.path.exists(path)
+    assert not os.path.exists(path)                      # a draft's file just goes
+
+
+def test_file_changes_on_a_live_page_make_versions(client):
+    login_operator(client)
+    pid = new_page(client, title="Harassment policy", category="HR", body="Policy text.",
+                   required="1")
+    upload(client, pid, PDF, "policy-2026.pdf")                 # policy page: checks needed
+    assert hub_db.attachments(pid) == []
+    upload(client, pid, PDF, "policy-2026.pdf", **CHECKS)
+    page = hub_db.get_page(pid)
+    assert (page["version"], page["ack_version"]) == (2, 1)      # a small fix: no re-read
+    old = hub_db.attachments(pid)[0]
+    client.post("/shift/logout")
+
+    add_member()
+    login_member(client)
+    client.post(f"/hub/page/{pid}/ack", data={"version": "2"})
+    client.post("/hub/logout")
+
+    login_operator(client)
+    stale_rev = rev(pid)
+    client.post(f"/hub/file/{old['id']}/remove", data=dict(CHECKS, rev=stale_rev, reread="1",
+                                                         change_note="New policy file"))
+    upload(client, pid, PDF + b"%v2", "policy-2027.pdf", reread="1", **CHECKS)
+    page = hub_db.get_page(pid)
+    assert page["version"] == 4 and page["ack_version"] == 4
+    assert hub_db.get_attachment(old["id"])["removed_at"]          # kept for History
+    assert os.path.exists(hub_db.file_path(old))
+    v2 = hub_db.get_version(pid, 2)
+    assert [f["name"] for f in v2["files"]] == ["policy-2026.pdf"]
+    assert v2["reviewed_by"] == "Operator"
+    # the stale remove form is refused once the page has moved on
+    resp = client.post(f"/hub/file/{hub_db.attachments(pid)[0]['id']}/remove",
+                       data=dict(CHECKS, rev=stale_rev))
+    assert len(hub_db.attachments(pid)) == 1
+    client.post("/shift/logout")
+
+    login_member(client)
+    assert b"Harassment policy" in client.get("/hub/to-read").data     # re-read needed
+    assert client.get(f"/hub/file/{old['id']}").status_code == 404     # History only
+    client.post("/hub/logout")
+
+    login_operator(client)
+    assert client.get(f"/hub/file/{old['id']}").status_code == 200
+    client.post(f"/hub/file/{old['id']}/purge", data={"confirm": "1"})
+    assert not os.path.exists(hub_db.file_path(old))
+    assert client.get(f"/hub/file/{old['id']}").status_code == 404
+    assert b"deleted for good" in client.get(f"/hub/page/{pid}/v/2").data
+
+
+def test_photo_numbers_never_shift(client):
+    login_operator(client)
+    pid = new_page(client, title="Basket", body="Step 1\n[photo: 1]\nStep 2\n[photo: 2]")
+    upload(client, pid, PNG, "one.png", alt="first")
+    upload(client, pid, PNG + b"2", "two.png", alt="second")
+    first, second = hub_db.attachments(pid)
+    assert (first["photo_no"], second["photo_no"]) == (1, 2)
+    client.post(f"/hub/file/{first['id']}/remove", data={"rev": rev(pid)})
+    html = client.get(f"/hub/page/{pid}").data.decode()
+    assert 'alt="first"' not in html and 'alt="second"' in html
+    assert html.index("Step 2") < html.index('alt="second"')        # still under step 2
+    upload(client, pid, PNG + b"3", "three.png")
+    assert hub_db.attachments(pid)[-1]["photo_no"] == 3              # never reused
+    assert hub_db.get_page(pid)["version"] == 5          # each file change on a live page
+    old_view = client.get(f"/hub/page/{pid}/v/3").data.decode()      # v3 had both photos
+    assert 'alt="first"' in old_view and 'alt="second"' in old_view
 
 
 def test_files_follow_page_visibility(client):
     login_operator(client)
     pid = new_page(client, title="Leaders file", leaders_only="1")
-    client.post(f"/hub/page/{pid}/files", data={"file": (io.BytesIO(PDF), "x.pdf")},
-                content_type="multipart/form-data")
+    upload(client, pid, PDF, "x.pdf")
     fid = hub_db.attachments(pid)[0]["id"]
     client.post("/shift/logout")
     add_member()
@@ -524,3 +599,262 @@ def test_restore_signs_members_out(client):
     assert client.get("/hub/").status_code == 200
     assert shift_db.import_json(shift_db.export_json()) is None
     assert client.get("/hub/").status_code == 302
+
+
+# --- review findings (each reproduced first, then fixed) ---------------------------
+
+def test_publish_uses_exactly_what_the_operator_reviewed(client):
+    make_leader(client, "Ava", "5555", role="admin")
+    login_leader(client, "Ava", "5555")
+    pid = new_page(client, category="HR", title="Breaks", body="Reviewed text.", publish=False)
+    client.post("/shift/logout")
+    login_operator(client)
+    seen = rev(pid)                                    # the Operator reads the draft
+    client.post("/shift/logout")
+    login_leader(client, "Ava", "5555")                # ...an admin changes it meanwhile
+    client.post(f"/hub/page/{pid}/edit", data={
+        "category_id": category_id("HR"), "title": "Breaks", "body": "UNREVIEWED.",
+        "rev": rev(pid)})
+    client.post("/shift/logout")
+    login_operator(client)
+    resp = client.post(f"/hub/page/{pid}/publish", data=dict(CHECKS, rev=seen),
+                       follow_redirects=True)
+    assert hub_db.get_page(pid)["status"] == "draft"
+    assert b"changed since you opened it" in resp.data
+
+
+def test_stale_form_cannot_undo_leaders_only(client):
+    add_member()
+    login_operator(client)
+    pid = new_page(client, title="Cash handling", body="Steps.")
+    stale = rev(pid)                                   # an editor opens the form
+    form = {"category_id": category_id("FOH Operations"), "title": "Cash handling",
+            "body": "Steps.", "section": "Training"}
+    client.post(f"/hub/page/{pid}/edit", data=dict(form, leaders_only="1", rev=rev(pid)))
+    resp = client.post(f"/hub/page/{pid}/edit", data=dict(form, keywords="till", rev=stale))
+    assert resp.status_code == 409
+    assert hub_db.get_page(pid)["leaders_only"] == 1
+
+
+def test_regrant_or_reactivation_does_not_revive_old_phones(client):
+    member = add_member()
+    old_phone = cfa_app.app.test_client()
+    login_member(old_phone)
+    assert old_phone.get("/hub/").status_code == 200
+    hub_db.revoke(member["id"], "Operator")
+    hub_db.grant(member["id"], "1042", "Operator")     # same number back
+    assert old_phone.get("/hub/").status_code == 302
+    login_member(old_phone)
+    shift_db.set_member_active(member["id"], False)
+    shift_db.set_member_active(member["id"], True)
+    assert old_phone.get("/hub/").status_code == 302
+
+
+def test_moving_a_live_page_into_hr_needs_the_checks(client):
+    login_operator(client)
+    pid = new_page(client, title="Breaks", body="Take your break.")
+    form = {"category_id": category_id("HR"), "title": "Breaks", "body": "Take your break."}
+    resp = client.post(f"/hub/page/{pid}/edit", data=dict(form, rev=rev(pid)))
+    assert resp.status_code == 400 and hub_db.get_page(pid)["category_policy"] == 0
+    preview = client.post(f"/hub/page/{pid}/edit", data=dict(form, rev=rev(pid),
+                                                            action="preview"))
+    assert preview.status_code == 200                  # previewing never needs them
+    client.post(f"/hub/page/{pid}/edit", data=dict(form, rev=rev(pid), **CHECKS))
+    page = hub_db.get_page(pid)
+    assert page["category_policy"] == 1 and page["version"] == 2
+    assert hub_db.get_version(pid, 2)["reviewed_by"] == "Operator"
+
+
+def test_one_alex_cannot_reset_the_lock_on_another(client):
+    add_member("Alex Smith", "1111")
+    add_member("Alex Jones", "2222")
+    for _ in range(4):
+        login_member(client, "Alex", "9999")
+    assert login_member(client, "Alex", "1111").status_code == 302
+    client.post("/hub/logout")
+    login_member(client, "Alex", "9999")
+    assert b"Too many tries" in login_member(client, "Alex", "2222").data
+
+
+def test_unicode_digit_ids_are_not_a_crash(client):
+    login_operator(client)
+    assert client.post("/hub/categories", data={"category_id": "²", "name": "X"}
+                       ).status_code == 302
+    resp = client.post("/hub/import", data={"category_id": "²"},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 302
+
+
+def test_promoted_member_counts_once_and_consistently(client):
+    member = add_member("Sam Patel", "1042")
+    login_operator(client)
+    pid = new_page(client, title="Allergens", required="1")
+    client.post("/shift/logout")
+    login_member(client)
+    client.post(f"/hub/page/{pid}/ack", data={"version": "1"})
+    client.post("/hub/logout")
+    make_leader(client, "Sam Patel", "7777")           # promoted...
+    hub_db.revoke(member["id"], "Operator")            # ...and clock-in access removed
+    page = hub_db.get_page(pid)
+    sam = next(p for p in hub_db.readers(page) if p["name"] == "Sam Patel")
+    assert sam["state"] == "current"
+    login_leader(client, "Sam Patel", "7777")
+    assert b"all caught up" in client.get("/hub/to-read").data
+
+
+def test_restoring_an_older_backup_never_hands_confirmations_to_someone_else(client):
+    login_operator(client)
+    pid = new_page(client, title="Food safety", required="1")
+    payload = json.loads(shift_db.export_json())       # before Kai was hired
+    for table in shift_db.HUB_TABLES:
+        payload.pop(table)
+    kai = add_member("Kai Lee", "3333")
+    client.post("/shift/logout")
+    login_member(client, "Kai", "3333")
+    client.post(f"/hub/page/{pid}/ack", data={"version": "1"})
+    assert shift_db.import_json(json.dumps(payload)) is None
+    shift_db.add_member("Lee Park")                    # may get Kai's old id
+    lee = next(m for m in shift_db.roster() if m["name"] == "Lee Park")
+    assert hub_db.grant(lee["id"], "4444", "Operator") is None
+    assert lee["id"] == kai["id"]                      # the id Kai's confirmation used
+    lee_viewer = hub_db.Viewer("member", lee["id"], "Lee Park")
+    assert [p["id"] for p in hub_db.to_read(lee_viewer)] == [pid]
+
+
+def test_deleted_draft_ids_are_never_reused(client):
+    login_operator(client)
+    first = new_page(client, title="Scratch", publish=False)
+    client.post(f"/hub/page/{first}/delete", data={"confirm": "1"})
+    assert new_page(client, title="Real page", publish=False) != first
+
+
+def test_bulk_grant_rejects_extra_columns_and_numbers_in_names(client):
+    shift_db.add_member("Sam Patel")
+    out = hub_db.bulk_grant("Sam Patel\t1042\tFOH\nPatel, Sam, 5555\nSam 1042, 7", "Operator",
+                            add_missing=True)
+    assert out["granted"] == [] and out["added"] == [] and len(out["errors"]) == 3
+    assert not any(m["name"][0].isdigit() or "," in m["name"] for m in shift_db.roster())
+
+
+def test_turning_required_back_on_asks_everyone_again(client):
+    add_member()
+    login_operator(client)
+    pid = new_page(client, title="Allergens", body="Old way.", required="1")
+    client.post("/shift/logout")
+    login_member(client)
+    client.post(f"/hub/page/{pid}/ack", data={"version": "1"})
+    client.post("/hub/logout")
+    login_operator(client)
+    form = {"category_id": category_id("FOH Operations"), "title": "Allergens",
+            "section": "Training"}
+    client.post(f"/hub/page/{pid}/edit", data=dict(form, body="New way.", rev=rev(pid)))
+    client.post(f"/hub/page/{pid}/edit", data=dict(form, body="New way.", required="1",
+                                                   rev=rev(pid)))
+    client.post("/shift/logout")
+    login_member(client)
+    assert b"Allergens" in client.get("/hub/to-read").data
+
+
+def _docx_raw(document_xml: bytes) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml",
+                   '<Types><Override ContentType="application/vnd.openxmlformats-'
+                   'officedocument.wordprocessingml.document.main+xml"/></Types>')
+        z.writestr("word/document.xml", document_xml)
+    return buf.getvalue()
+
+
+def test_hostile_word_files_are_refused_quickly(client):
+    import time
+    bomb = _docx_raw(b'<?xml version="1.0"?><!DOCTYPE d [<!ENTITY e "' + b"A" * 290
+                     + b'">]><w:document xmlns:w="http://schemas.openxmlformats.org/'
+                     b'wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>'
+                     + b"&e;" * 200_000 + b"</w:t></w:r></w:p></w:body></w:document>")
+    tiny = _docx_raw(b"<w:p/>" * 1_000_000)
+    started = time.time()
+    assert hub_text.docx_import(io.BytesIO(bomb)) == ("", [])
+    assert hub_text.docx_import(io.BytesIO(tiny)) == ("", [])
+    assert time.time() - started < 5
+    login_operator(client)
+    pid = new_page(client, title="Files", publish=False)
+    corrupt = bytearray(_docx_bytes("<w:p><w:r><w:t>" + "x" * 5000 + "</w:t></w:r></w:p>"))
+    corrupt[-400:-300] = b"\x00" * 100
+    resp = upload(client, pid, bytes(corrupt), "broken.docx")
+    assert resp.status_code == 302
+    before = set(os.listdir(hub_db.files_dir())) if os.path.isdir(hub_db.files_dir()) else set()
+    deep = _docx_raw(b'<w:document xmlns:w="http://schemas.openxmlformats.org/'
+                     b'wordprocessingml/2006/main"><w:body>' + b"<w:sdt>" * 5000
+                     + b"<w:p><w:r><w:t>x</w:t></w:r></w:p>" + b"</w:sdt>" * 5000
+                     + b"</w:body></w:document>")
+    assert upload(client, pid, deep, "deep.docx").status_code == 302
+    after = set(os.listdir(hub_db.files_dir()))
+    assert len(after - before) <= 1 and all(not n.endswith(".part") for n in after)
+
+
+def test_manifest_allowed_by_csp(client):
+    assert "manifest-src 'self'" in client.get("/hub/login").headers["Content-Security-Policy"]
+
+
+def test_long_lines_render_fast():
+    import time
+    started = time.time()
+    hub_text.render("**a _a " * 14_000)
+    assert time.time() - started < 2
+
+
+def test_word_import_table_text_boxes_and_visible_runs():
+    ns = ('xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+          'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"')
+    box = ('<w:r><mc:AlternateContent><mc:Choice><w:txbxContent><w:p><w:r><w:t>200 ppm</w:t>'
+           '</w:r></w:p></w:txbxContent></mc:Choice><mc:Fallback><w:txbxContent><w:p><w:r>'
+           '<w:t>200 ppm</w:t></w:r></w:p></w:txbxContent></mc:Fallback></mc:AlternateContent>'
+           '</w:r>')
+    xml = (f'<w:document {ns}><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Sanitizer</w:t></w:r>'
+           f'{box}</w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:rPr><w:vanish w:val="0"/></w:rPr>'
+           '<w:t>Wash hands.</w:t></w:r></w:p></w:body></w:document>')
+    text, _ = hub_text.docx_import(io.BytesIO(_docx_raw(xml.encode())))
+    assert text.count("200 ppm") == 1 and "Wash hands." in text
+
+
+def test_word_import_cleans_titles_and_refuses_empty_files(client):
+    login_operator(client)
+    hidden = _docx_raw(b'<w:document xmlns:w="http://schemas.openxmlformats.org/'
+                       b'wordprocessingml/2006/main"><w:body><w:p/></w:body></w:document>')
+    before = len(hub_db.editor_queues()["drafts"])
+    resp = client.post("/hub/import", data={
+        "category_id": str(category_id("HR")), "file": (io.BytesIO(hidden), "x.docx")},
+        content_type="multipart/form-data", follow_redirects=True)
+    assert b"No text could be read" in resp.data
+    assert len(hub_db.editor_queues()["drafts"]) == before
+    plain = _docx_raw(b'<w:document xmlns:w="http://schemas.openxmlformats.org/'
+                      b'wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hi</w:t></w:r>'
+                      b'</w:p></w:body></w:document>')
+    resp = client.post("/hub/import", data={
+        "category_id": str(category_id("HR")),
+        "file": (io.BytesIO(plain), "Harassment ‮ycilop‬ policy​.docx")},
+        content_type="multipart/form-data")
+    page = hub_db.get_page(int(resp.headers["Location"].split("/")[-2]))
+    assert page["title"] == "Harassment ycilop policy"
+
+
+def test_sign_in_returns_to_the_page_not_a_post_url(client):
+    resp = client.get("/hub/search?q=fryer")
+    assert "/hub/search?q%3Dfryer" in resp.headers["Location"]
+    resp = client.post("/hub/page/5/ack", headers={"Referer": "http://localhost/hub/page/5"})
+    assert "next=/hub/page/5" in resp.headers["Location"]
+    assert "ack" not in resp.headers["Location"]
+
+
+def test_too_big_goes_back_to_the_page(client):
+    login_operator(client)
+    pid = new_page(client, title="Big", publish=False)
+    resp = client.post(f"/hub/page/{pid}/files",
+                       data={"file": (io.BytesIO(b"x" * (17 * 1024 * 1024)), "big.pdf")},
+                       content_type="multipart/form-data",
+                       headers={"Referer": f"https://localhost/hub/page/{pid}"})
+    assert resp.headers["Location"].endswith(f"/hub/page/{pid}")
+
+
+def test_emoji_joiners_survive():
+    assert hub_text.clean("🧑‍🍳 cook") == "🧑‍🍳 cook"

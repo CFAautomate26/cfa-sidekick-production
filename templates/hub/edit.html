@@ -19,7 +19,7 @@
 {% endif %}
 
 <form method="post" action="{{ url_for('hub.edit_page', page_id=page.id) if page else url_for('hub.new_page') }}" class="card">
-  {% if page %}<input type="hidden" name="base_version" value="{{ page.version }}">{% endif %}
+  {% if page %}<input type="hidden" name="rev" value="{{ page.rev }}">{% endif %}
   <label class="field" for="category_id">Category</label>
   <select id="category_id" name="category_id" required>
     {% for c in categories %}
@@ -68,19 +68,11 @@ Leave a blank line between paragraphs.</pre>
 
   {% if page and page.version %}
   <div class="section-label">If you changed the words</div>
-  <label class="field" for="change_note">What changed</label>
-  <input type="text" id="change_note" name="change_note" maxlength="300" value="{{ request.form.get('change_note', '') }}"
-         placeholder="e.g. New sanitizer strength">
-  <label class="checkline"><input type="radio" name="reread" value="0" {{ 'checked' if request.form.get('reread') != '1' }}>
-    Small fix (typo, wording) — no one needs to re-read</label>
-  <label class="checkline"><input type="radio" name="reread" value="1" {{ 'checked' if request.form.get('reread') == '1' }}>
-    We changed how we do it — required-reading pages go back on everyone's To read</label>
-  {% if page.category_policy %}
-  <div class="muted" style="margin-top:8px;">Policy page — confirm each before a change goes live:</div>
-  {% for key, label in POLICY_CHECKS %}
-  <label class="checkline"><input type="checkbox" name="{{ key }}" value="1" {{ 'checked' if request.form.get(key) }}> {{ label }}</label>
-  {% endfor %}
-  {% endif %}
+  {% set show_reread = true %}
+  {% set policy = viewer.is_operator %}
+  {% set policy_label = 'Policy (HR) page, or moving it into one? Confirm each before it goes live:' %}
+  {% set field_id = 'edit' %}
+  {% include "hub/_change_fields.html" %}
   {% endif %}
 
   <div class="pillrow" style="margin-top:14px;">

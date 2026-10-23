@@ -77,6 +77,7 @@
   <div class="muted">{{ publish_block }}</div>
   {% else %}
   <form method="post" action="{{ url_for('hub.publish', page_id=page.id) }}">
+    <input type="hidden" name="rev" value="{{ page.rev }}">
     <label class="field" for="pub-note">Note (optional)</label>
     <input type="text" id="pub-note" name="change_note" maxlength="300" placeholder="First version">
     {% if page.category_policy %}
@@ -108,17 +109,20 @@
     <input type="text" id="alt" name="alt" maxlength="200" placeholder="e.g. Fryer basket hung to drain">
     <div class="muted" style="margin-top:6px;">PDF, photos, Word/Excel/PowerPoint (no macros), up to 15 MB.
       No photos of people or paperwork with personal info.</div>
+    {% if page.version %}
+    <div class="muted" style="margin-top:8px;">The page is published, so adding a file makes a new version.</div>
+    {% set field_id = 'up' %}
+    {% endif %}
+    {% include "hub/_change_fields.html" %}
     <div style="margin-top:10px;"><button class="pill primary small" type="submit">Upload</button></div>
   </form>
   {% if all_files %}
-  <div class="section-label">Remove a file</div>
+  <div class="section-label">On this page</div>
   {% for f in all_files %}
-  <form method="post" action="{{ url_for('hub.delete_file', file_id=f.id) }}" class="row-between"
-        style="padding:6px 0; border-bottom:1px solid var(--line);">
-    <span style="min-width:0;">{{ ('Photo %d · ' % f.photo) if f.photo }}{{ f.filename }}</span>
-    <label class="checkline" style="margin:0; white-space:nowrap;"><input type="checkbox" name="confirm" value="1" required> sure
-      <button class="pill small" type="submit">Remove</button></label>
-  </form>
+  <div class="row-between" style="padding:6px 0; border-bottom:1px solid var(--line);">
+    <span style="min-width:0;">{{ ('Photo %d · ' % f.photo_no) if f.photo_no }}{{ f.filename }}</span>
+    <a class="pill small" href="{{ url_for('hub.remove_file', file_id=f.id) }}">Remove…</a>
+  </div>
   {% endfor %}
   {% endif %}
 </details>

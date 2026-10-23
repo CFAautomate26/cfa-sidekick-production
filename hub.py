@@ -17,6 +17,7 @@ import io
 import os
 import time
 from functools import wraps
+from urllib.parse import urlparse
 
 from flask import (Blueprint, Response, abort, flash, g, redirect, render_template,
                    request, send_file, session, url_for)
@@ -101,9 +102,25 @@ def require_viewer():
         return None
     viewer = _load_viewer()
     if viewer is None:
-        return redirect(url_for("hub.login", next=request.path))
+        return redirect(url_for("hub.login", next=_resume_target()))
     g.viewer = viewer
     return None
+
+
+def _same_site_referrer() -> str | None:
+    """The Hub page the request came from (path + query), if any."""
+    ref = urlparse(request.referrer or "")
+    if ref.netloc == request.host and ref.path.startswith("/hub/"):
+        return ref.path + (f"?{ref.query}" if ref.query else "")
+    return None
+
+
+def _resume_target() -> str:
+    """Where to land after signing in: the page asked for (with its query),
+    or — for a form post that can't be replayed — the page it came from."""
+    if request.method == "GET":
+        return request.full_path.rstrip("?")
+    return _same_site_referrer() or "/hub/"
 
 
 @hub_bp.after_request
@@ -117,7 +134,8 @@ def _headers(resp):
         # The Hub runs no scripts at all.
         resp.headers["Content-Security-Policy"] = (
             "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
-            "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+            "manifest-src 'self'; form-action 'self'; frame-ancestors 'none'; "
+            "base-uri 'none'")
     return resp
 
 
@@ -129,9 +147,9 @@ def _id_out_of_range(e):
 
 @hub_bp.errorhandler(RequestEntityTooLarge)
 def _too_big(e):
-    flash("That file is too big — 15 MB at most.")
-    return redirect(request.referrer if (request.referrer or "").startswith(
-        request.host_url + "hub") else url_for("hub.home"))
+    flash("That file is too big — 15 MB at most." if request.mimetype == "multipart/form-data"
+          else "That's too much text to save at once — split it into two pages.")
+    return redirect(_same_site_referrer() or url_for("hub.home"))
 
 
 @hub_bp.context_processor
@@ -197,7 +215,8 @@ def login():
         if not error:
             member = hub_db.member_for_login(picked, code)
             if member:
-                _fails.pop(key, None)
+                # Misses age out on their own: clearing the shared first-name
+                # bucket here would let one Alex reset the lock on another.
                 session.clear()
                 session.permanent = True
                 session["hub_member_id"] = member["id"]
@@ -259,16 +278,15 @@ def page(page_id):
     photos = hub_db.photo_map(files, _file_url)
     shown = {int(m.group(1)) for line in pg["body"].splitlines()
              if (m := hub_text.PHOTO.match(line))}
-    gallery = [(n, url, alt) for n, (url, alt) in photos.items() if n not in shown]
+    gallery = [(n, url, alt) for n, (url, alt) in sorted(photos.items()) if n not in shown]
     mine = hub_db.my_acks(g.viewer, [page_id]).get(page_id)
     needs_ack = (pg["status"] == "published" and pg["required"]
                  and not g.viewer.is_operator
                  and (not mine or mine["version"] < pg["ack_version"]))
-    numbers = {url: n for n, (url, _) in photos.items()}
     return render_template(
         "hub/page.html", page=pg, body=hub_text.render(pg["body"], photos),
         files=[f for f in files if f["kind"] not in hub_db.IMAGE_KINDS],
-        all_files=[dict(f, photo=numbers.get(_file_url(f))) for f in files],
+        all_files=files,
         gallery=gallery, mine=mine, needs_ack=needs_ack, POLICY_CHECKS=_POLICY_CHECKS,
         changes=(hub_db.changes_since(page_id, mine["version"])
                  if needs_ack and mine else []),
@@ -316,9 +334,11 @@ def me():
 @hub_bp.route("/file/<int:file_id>")
 def file(file_id):
     att = hub_db.get_attachment(file_id)
-    if not att:
+    if not att or att["purged_at"]:
         abort(404)
     _viewable_page(att["page_id"])
+    if att["removed_at"] and not g.viewer.is_editor:      # History only
+        abort(404)
     path = hub_db.file_path(att)
     if not os.path.exists(path):
         abort(404)
@@ -345,6 +365,22 @@ _POLICY_CHECKS = [
 
 def _policy_checked() -> bool:
     return all(request.form.get(key) for key, _ in _POLICY_CHECKS)
+
+
+def _change_to_live_page(pg: dict) -> tuple[dict | None, str | None]:
+    """The "what changed" part of a file change on a published page (drafts
+    need none): (kwargs for hub_db, None) or (None, why not)."""
+    if pg["version"] == 0:
+        return {}, None
+    if pg["needs_counsel"]:
+        return None, ("This page is flagged for a lawyer's review — the Operator "
+                      "clears it first.")
+    if pg["category_policy"] and not _policy_checked():
+        return None, "Tick each review check before changing a policy page."
+    return {"rev": hub_db.as_id(request.form.get("rev")),
+            "change_note": _line("change_note"),
+            "reread": bool(pg["required"] and request.form.get("reread") == "1"),
+            "reviewed": bool(pg["category_policy"])}, None
 
 
 def _edit_context(page: dict | None, fields: dict, **extra) -> dict:
@@ -376,11 +412,7 @@ def _check_category(fields: dict, page: dict | None) -> str | None:
 @editor_required
 def new_page():
     if request.method == "GET":
-        try:
-            category_id = int(request.args.get("category") or 0)
-        except ValueError:
-            category_id = 0
-        fields = {"category_id": category_id, "section": request.args.get("section", "")[:60],
+        fields = {"category_id": hub_db.as_id(request.args.get("category")) or 0, "section": request.args.get("section", "")[:60],
                   "title": "", "summary": "", "keywords": "", "body": "",
                   "leaders_only": 0, "required": 0, "annual_review": 0}
         return _render_edit(None, fields)
@@ -406,28 +438,33 @@ def edit_page(page_id):
     if request.method == "GET":
         return _render_edit(pg, pg)
     fields = hub_db.clean_fields(request.form)
+    target = hub_db.get_category(fields["category_id"])
     content_changed = any(fields[k] != pg[k] for k in ("title", "summary", "body"))
+    # Moving a published page into a policy category publishes it there:
+    # it goes through the same checks, as a new version.
+    into_policy = bool(pg["version"] > 0 and target and target["policy"]
+                       and not pg["category_policy"])
+    policy = bool(pg["category_policy"] or (target and target["policy"]))
+    publishing = pg["version"] > 0 and (content_changed or into_policy)
+    preview = request.form.get("action") == "preview"
     error = _check_category(fields, pg)
-    if not error and request.form.get("base_version") != str(pg["version"]):
-        error = ("Someone published a newer version while you were editing. Your text "
-                 "is below — copy what you need, then reload the page.")
-    publishing = pg["version"] > 0 and content_changed
-    if not error and publishing and pg["needs_counsel"]:
-        error = "This page is flagged for a lawyer's review — the Operator clears it first."
-    if not error and publishing and pg["category_policy"] and not _policy_checked():
-        error = "Tick each review check before publishing a policy change."
-    if error or request.form.get("action") == "preview":
+    if not error and not preview and publishing:
+        if pg["needs_counsel"]:
+            error = ("This page is flagged for a lawyer's review — the Operator clears "
+                     "it first.")
+        elif policy and not _policy_checked():
+            error = "Tick each review check before publishing a policy change."
+    if error or preview:
         photos = hub_db.photo_map(hub_db.attachments(page_id), _file_url)
         return _render_edit(pg, fields, 400 if error else 200, error=error,
                             preview=None if error else hub_text.render(fields["body"], photos))
     summary = hub_db.update_page(
-        g.viewer, pg, fields, change_note=_line("change_note"),
+        g.viewer, pg, fields, hub_db.as_id(request.form.get("rev")),
+        change_note=_line("change_note"),
         reread=bool(fields["required"] and request.form.get("reread") == "1"),
-        reviewed=bool(pg["category_policy"] and publishing))
+        reviewed=policy and publishing, new_version=into_policy)
     if summary is None:
-        return _render_edit(pg, fields, 409, error=(
-            "Someone published a newer version while you were editing. Your text is "
-            "below — copy what you need, then reload the page."))
+        return _render_edit(pg, fields, 409, error=hub_db.STALE)
     flash(summary + ".")
     return redirect(url_for("hub.page", page_id=page_id))
 
@@ -436,17 +473,10 @@ def edit_page(page_id):
 @editor_required
 def publish(page_id):
     pg = _viewable_page(page_id)
-    block = hub_db.publish_block(g.viewer, pg)
-    if pg["status"] != "draft":
-        flash("That page is already published.")
-    elif block:
-        flash(block)
-    elif pg["category_policy"] and not _policy_checked():
-        flash("Tick each review check before publishing a policy page.")
-    elif hub_db.publish(g.viewer, pg, _line("change_note"),
-                        reviewed=bool(pg["category_policy"])):
-        flash("Published." + (" Everyone will see it under To read." if pg["required"]
-                              else ""))
+    error = hub_db.publish(g.viewer, page_id, hub_db.as_id(request.form.get("rev")),
+                           _line("change_note"), _policy_checked())
+    flash(error or "Published." + (" Everyone will see it under To read."
+                                   if pg["required"] else ""))
     return redirect(url_for("hub.page", page_id=page_id))
 
 
@@ -510,6 +540,7 @@ def history(page_id):
     pg = _viewable_page(page_id)
     return render_template("hub/history.html", page=pg,
                            versions=hub_db.versions(page_id),
+                           removed=hub_db.removed_attachments(page_id),
                            reviews=hub_db.reviews(page_id),
                            log=hub_db.audit_log(100, page_id))
 
@@ -521,8 +552,10 @@ def old_version(page_id, version):
     v = hub_db.get_version(page_id, version)
     if not v:
         abort(404)
-    return render_template("hub/version.html", page=pg, v=v,
-                           body=hub_text.render(v["body"]))
+    files = [dict(f, att=hub_db.get_attachment(f["id"])) for f in v["files"]]
+    return render_template("hub/version.html", page=pg, v=v, files=files,
+                           body=hub_text.render(v["body"],
+                                                hub_db.version_photo_map(v, _file_url)))
 
 
 @hub_bp.route("/page/<int:page_id>/readers")
@@ -555,33 +588,62 @@ def upload(page_id):
     if not upload or not upload.filename:
         flash("Choose a file first.")
         return redirect(url_for("hub.page", page_id=page_id))
-    row, error = hub_db.add_attachment(g.viewer, pg, upload.filename,
-                                       upload.read(hub_db.MAX_FILE_BYTES + 1),
-                                       alt=request.form.get("alt") or "")
+    change, error = _change_to_live_page(pg)
     if error:
         flash(error)
-    elif row["kind"] in hub_db.IMAGE_KINDS:
-        n = len([f for f in hub_db.attachments(page_id) if f["kind"] in hub_db.IMAGE_KINDS])
-        flash(f"Photo added. Type [photo: {n}] on its own line in the page text to "
-              "show it there — otherwise it shows at the bottom.")
+        return redirect(url_for("hub.page", page_id=page_id))
+    row, error = hub_db.add_attachment(g.viewer, pg, upload.filename,
+                                       upload.read(hub_db.MAX_FILE_BYTES + 1),
+                                       alt=request.form.get("alt") or "", **change)
+    if error:
+        flash(error)
+    elif row["photo_no"]:
+        flash(f"Photo {row['photo_no']} added. Type [photo: {row['photo_no']}] on its own "
+              "line in the page text to show it there — otherwise it shows at the bottom.")
     else:
         flash(f"Added {row['filename']}.")
     return redirect(url_for("hub.page", page_id=page_id))
 
 
-@hub_bp.route("/file/<int:file_id>/delete", methods=["POST"])
+def _live_attachment(file_id: int) -> tuple[dict, dict | None]:
+    att = hub_db.get_attachment(file_id)
+    if not att or att["removed_at"]:
+        abort(404)
+    return att, _editable_page(att["page_id"])
+
+
+@hub_bp.route("/file/<int:file_id>/remove", methods=["GET", "POST"])
 @editor_required
-def delete_file(file_id):
+def remove_file(file_id):
+    att, pg = _live_attachment(file_id)
+    if not pg:
+        flash("Only the Operator changes a published policy page.")
+        return redirect(url_for("hub.page", page_id=att["page_id"]))
+    if request.method == "GET":
+        return render_template("hub/file_remove.html", att=att, page=pg,
+                               POLICY_CHECKS=_POLICY_CHECKS)
+    change, error = _change_to_live_page(pg)
+    if not error:
+        error = hub_db.remove_attachment(g.viewer, att, pg, **(change or {"rev": None}))
+    if error:
+        flash(error)
+        return redirect(url_for("hub.remove_file", file_id=file_id))
+    flash(f"Removed {att['filename']}." + (" It stays in the page's History."
+                                           if pg["version"] else ""))
+    return redirect(url_for("hub.page", page_id=att["page_id"]))
+
+
+@hub_bp.route("/file/<int:file_id>/purge", methods=["POST"])
+@operator_required
+def purge_file(file_id):
     att = hub_db.get_attachment(file_id)
     if not att:
         abort(404)
-    pg = _editable_page(att["page_id"])
-    if not pg:
-        flash("Only the Operator changes a published policy page.")
-    elif request.form.get("confirm") == "1":
-        hub_db.delete_attachment(g.viewer, att)
-        flash(f"Removed {att['filename']}.")
-    return redirect(url_for("hub.page", page_id=att["page_id"]))
+    if request.form.get("confirm") == "1" and hub_db.purge_attachment(g.viewer, att):
+        flash(f"{att['filename']} is deleted for good.")
+    else:
+        flash("Tick the box to delete it for good (only files already taken off a page).")
+    return redirect(url_for("hub.history", page_id=att["page_id"]))
 
 
 @hub_bp.route("/import", methods=["POST"])
@@ -590,8 +652,8 @@ def import_word():
     """A Word document becomes a new draft (the file itself isn't kept)."""
     request.max_content_length = _UPLOAD_LIMIT
     upload = request.files.get("file")
-    raw_id = request.form.get("category_id") or ""
-    cat = hub_db.get_category(int(raw_id)) if raw_id.isdigit() else None
+    category_id = hub_db.as_id(request.form.get("category_id"))
+    cat = hub_db.get_category(category_id) if category_id else None
     if not cat:
         flash("Pick a category for the new page.")
         return redirect(url_for("hub.manage"))
@@ -601,6 +663,11 @@ def import_word():
               "them in Word and Save As .docx first.")
         return redirect(url_for("hub.category", category_id=cat["id"]))
     text, notes = hub_text.docx_import(io.BytesIO(data))
+    if not text.strip():
+        flash("No text could be read from that Word file — it may be all pictures, or "
+              "saved as “Strict Open XML”. Save it as a regular Word Document (.docx) "
+              "and try again, or attach it to a page instead.")
+        return redirect(url_for("hub.category", category_id=cat["id"]))
     title, body = _split_title(text, upload.filename)
     fields = {"category_id": cat["id"], "section": _line("section", 60), "title": title,
               "summary": "", "keywords": "", "body": body[:100_000], "leaders_only": 0,
@@ -617,7 +684,8 @@ def _split_title(text: str, filename: str) -> tuple[str, str]:
     if lines and lines[0].startswith("# "):
         return lines[0][2:].strip()[:140], "\n".join(lines[1:]).strip()
     stem = os.path.splitext(os.path.basename(filename or "Imported page"))[0]
-    return (" ".join(stem.replace("_", " ").split())[:140] or "Imported page"), text
+    stem = hub_text.clean(stem.replace("_", " "))
+    return (" ".join(stem.split())[:140] or "Imported page"), text
 
 
 # ---------------------------------------------------------------------------
@@ -635,13 +703,9 @@ def manage():
 @hub_bp.route("/categories", methods=["POST"])
 @operator_required
 def save_category():
-    raw_id = request.form.get("category_id") or ""
-    try:
-        sort = int(request.form.get("sort") or 0)
-    except ValueError:
-        sort = 0
+    sort = hub_db.as_id(request.form.get("sort")) or 0
     saved = hub_db.save_category(
-        int(raw_id) if raw_id.isdigit() else None, _line("name", 60), _line("icon", 8),
+        hub_db.as_id(request.form.get("category_id")), _line("name", 60), _line("icon", 8),
         _line("blurb", 200), bool(request.form.get("leaders_only")),
         bool(request.form.get("policy")), bool(request.form.get("active")), sort,
         g.viewer.name)

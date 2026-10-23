@@ -20,6 +20,7 @@ import csv
 import hashlib
 import hmac
 import io
+import json
 import os
 import re
 import secrets
@@ -268,18 +269,22 @@ def editor_queues() -> dict:
 
 # ---------------------------------------------------------------------------
 # Pages: writing
+#
+# Every write bumps hub_pages.rev. Forms carry the rev they were drawn from,
+# and a save from a stale copy is refused rather than quietly undoing
+# someone else's change (or publishing text a reviewer never saw).
 # ---------------------------------------------------------------------------
+
+STALE = ("This page changed since you opened it — someone else saved it. "
+         "Your text is below: copy what you need, then reload the page.")
+
 
 def clean_fields(form) -> dict:
     """Page form fields, trimmed and bounded."""
     def line(key, cap):
         return " ".join(hub_text.clean(form.get(key) or "").split())[:cap]
-    try:
-        category_id = int(form.get("category_id") or 0)
-    except (TypeError, ValueError):
-        category_id = 0
     return {
-        "category_id": category_id,
+        "category_id": as_id(form.get("category_id")) or 0,
         "section": line("section", 60),
         "title": line("title", 140),
         "summary": line("summary", 300),
@@ -291,9 +296,21 @@ def clean_fields(form) -> dict:
     }
 
 
+def as_id(raw) -> int | None:
+    """A form/URL id: plain ASCII digits only (str.isdigit accepts '²')."""
+    raw = (raw or "").strip() if isinstance(raw, str) else ""
+    return int(raw) if re.fullmatch(r"[0-9]{1,15}", raw) else None
+
+
+def _live_files(conn, page_id: int) -> list:
+    return conn.execute(
+        "SELECT * FROM hub_attachments WHERE page_id=? AND removed_at IS NULL ORDER BY id",
+        (page_id,)).fetchall()
+
+
 def _content_hash(conn, page_id: int, title: str, summary: str, body: str) -> str:
-    files = sorted(r["sha256"] for r in conn.execute(
-        "SELECT sha256 FROM hub_attachments WHERE page_id=?", (page_id,)))
+    """Fingerprint of exactly what a reader sees: the words and every file."""
+    files = sorted(r["sha256"] for r in _live_files(conn, page_id))
     blob = "\x1e".join([title, summary, body, *files])
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -316,15 +333,20 @@ def create_page(viewer: Viewer, fields: dict, needs_counsel: bool = False) -> in
 
 def _snapshot(conn, page_id: int, version: int, fields: dict, change_note: str,
               who: str, reviewed: bool) -> None:
+    """Keep this version exactly as published — its words and its files."""
     stamp = now_stamp()
+    files = [{"id": r["id"], "name": r["filename"], "kind": r["kind"],
+              "sha256": r["sha256"], "photo": r["photo_no"], "alt": r["alt"]}
+             for r in _live_files(conn, page_id)]
     conn.execute(
         "INSERT INTO hub_page_versions (page_id, version, title, summary, body, "
-        "change_note, content_hash, saved_at, saved_by, reviewed_by, reviewed_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "change_note, content_hash, saved_at, saved_by, reviewed_by, reviewed_at, files) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (page_id, version, fields["title"], fields["summary"], fields["body"],
          change_note, _content_hash(conn, page_id, fields["title"], fields["summary"],
                                     fields["body"]),
-         stamp, who, who if reviewed else None, stamp if reviewed else None))
+         stamp, who, who if reviewed else None, stamp if reviewed else None,
+         json.dumps(files, ensure_ascii=False)))
 
 
 def _next_review(annual_review: int, current: str | None) -> str | None:
@@ -334,70 +356,100 @@ def _next_review(annual_review: int, current: str | None) -> str | None:
                        + timedelta(days=REVIEW_EVERY_DAYS)).isoformat()
 
 
-def update_page(viewer: Viewer, page: dict, fields: dict, change_note: str = "",
-                reread: bool = False, reviewed: bool = False) -> str | None:
-    """Save an edit made from `page` as it was loaded. A draft just changes;
-    on a published page a change to the words is published as a new version
-    (re-read if asked), while a settings-only change (section, keywords, who
-    sees it) makes no version. Returns a short summary for the flash
-    message, or None if someone else published a version meanwhile."""
+def _ack_from(page: dict, version: int, made_version: bool, reread: bool,
+              required: int) -> int:
+    """The version read confirmations count from after a save. A page that
+    isn't required always counts from its latest words, and making a page
+    required asks everyone to confirm what it says now."""
+    if made_version and (reread or not required):
+        return version
+    if required and not page["required"]:
+        return version
+    return page["ack_version"]
+
+
+def update_page(viewer: Viewer, page: dict, fields: dict, rev: int | None,
+                change_note: str = "", reread: bool = False, reviewed: bool = False,
+                new_version: bool = False) -> str | None:
+    """Save an edit made from `page` as it was at `rev`. A draft just
+    changes; on a published page a change to the words (or `new_version`,
+    e.g. a move into a policy category) is published as a new version,
+    while a settings-only change makes none. Returns a short summary, or
+    None if the page changed since the form was drawn."""
     content_changed = any(fields[k] != page[k] for k in ("title", "summary", "body"))
+    made_version = page["version"] > 0 and (content_changed or new_version)
+    version = page["version"] + 1 if made_version else page["version"]
+    ack_version = _ack_from(page, version, made_version, reread, fields["required"])
     stamp = now_stamp()
     with closing(connect()) as conn, conn:
-        version, ack_version = page["version"], page["ack_version"]
-        if page["version"] > 0 and content_changed:
-            version += 1
-            if reread:
-                ack_version = version
-        updated = conn.execute(
-            "UPDATE hub_pages SET category_id=?, section=?, title=?, summary=?, keywords=?, "
-            "body=?, leaders_only=?, required=?, annual_review=?, review_by=?, version=?, "
-            "ack_version=?, updated_at=?, updated_by=?, "
-            "published_at=CASE WHEN ? THEN ? ELSE published_at END WHERE id=? AND version=?",
-            (fields["category_id"], fields["section"], fields["title"], fields["summary"],
-             fields["keywords"], fields["body"], fields["leaders_only"], fields["required"],
-             fields["annual_review"], _next_review(fields["annual_review"], page["review_by"]),
-             version, ack_version, stamp, viewer.name,
-             int(version != page["version"]), stamp, page["id"], page["version"])).rowcount
-        if not updated:
+        if rev is None or not conn.execute(
+                "UPDATE hub_pages SET category_id=?, section=?, title=?, summary=?, "
+                "keywords=?, body=?, leaders_only=?, required=?, annual_review=?, "
+                "review_by=?, version=?, ack_version=?, updated_at=?, updated_by=?, "
+                "published_at=CASE WHEN ? THEN ? ELSE published_at END, rev=rev+1 "
+                "WHERE id=? AND rev=?",
+                (fields["category_id"], fields["section"], fields["title"],
+                 fields["summary"], fields["keywords"], fields["body"],
+                 fields["leaders_only"], fields["required"], fields["annual_review"],
+                 _next_review(fields["annual_review"], page["review_by"]), version,
+                 ack_version, stamp, viewer.name, int(made_version), stamp, page["id"],
+                 rev)).rowcount:
             return None
-        if version != page["version"]:
+        if made_version:
             _snapshot(conn, page["id"], version, fields, change_note, viewer.name, reviewed)
-            summary = (f"v{version} published" + (" — everyone re-reads" if
-                                                   ack_version == version else ""))
+            rereads = ack_version == version and fields["required"]
             _audit(conn, viewer.name, "new version", page["id"],
-                   f"v{version}" + (" (re-read)" if ack_version == version else "")
+                   f"v{version}" + (" (re-read)" if rereads else "")
+                   + (" (policy review checklist done)" if reviewed else "")
                    + (f": {change_note}" if change_note else ""))
-        else:
-            summary = "Saved"
-            _audit(conn, viewer.name, "edited" if page["version"] == 0 or content_changed
-                   else "settings changed", page["id"], fields["title"])
-    return summary
+            return f"v{version} published" + (" — everyone re-reads" if rereads else "")
+        _audit(conn, viewer.name, "edited" if page["version"] == 0 or content_changed
+               else "settings changed", page["id"], fields["title"])
+    return "Saved"
 
 
-def publish(viewer: Viewer, page: dict, change_note: str, reviewed: bool) -> bool:
-    """First publish of a draft: version 1, which everyone reads."""
+def publish(viewer: Viewer, page_id: int, rev: int | None, change_note: str,
+            policy_checked: bool) -> str | None:
+    """First publish of a draft, exactly as the publisher saw it (`rev`):
+    version 1, which everyone reads. Returns why not, or None."""
     stamp = now_stamp()
     with closing(connect()) as conn, conn:
+        row = conn.execute(_PAGE_SELECT + "WHERE p.id=?", (page_id,)).fetchone()
+        if not row or row["version"] != 0:
+            return "That page is already published."
+        page = dict(row)
+        if rev is None or page["rev"] != rev:
+            return ("This draft changed since you opened it — read it over again, "
+                    "then publish.")
+        block = publish_block(viewer, page)
+        if block:
+            return block
+        if page["category_policy"] and not policy_checked:
+            return "Tick each review check before publishing a policy page."
         if not conn.execute(
                 "UPDATE hub_pages SET status='published', version=1, ack_version=1, "
-                "published_at=?, updated_at=?, updated_by=?, review_by=? WHERE id=? "
-                "AND version=0", (stamp, stamp, viewer.name,
-                                  _next_review(page["annual_review"], None), page["id"])
-                ).rowcount:
-            return False
-        _snapshot(conn, page["id"], 1, page, change_note or "First version",
-                  viewer.name, reviewed)
-        _audit(conn, viewer.name, "published", page["id"],
-               "v1" + (" (policy review checklist done)" if reviewed else ""))
-    return True
+                "published_at=?, updated_at=?, updated_by=?, review_by=?, rev=rev+1 "
+                "WHERE id=? AND rev=? AND version=0 AND category_id=?",
+                (stamp, stamp, viewer.name, _next_review(page["annual_review"], None),
+                 page_id, rev, page["category_id"])).rowcount:
+            return "This draft changed since you opened it — read it over again, then publish."
+        _snapshot(conn, page_id, 1, page, change_note or "First version", viewer.name,
+                  bool(page["category_policy"]))
+        _audit(conn, viewer.name, "published", page_id,
+               "v1" + (" (policy review checklist done)" if page["category_policy"] else ""))
+    return None
+
+
+def _touch(conn, page_id: int, who: str) -> None:
+    conn.execute("UPDATE hub_pages SET rev=rev+1, updated_at=?, updated_by=? WHERE id=?",
+                 (now_stamp(), who, page_id))
 
 
 def set_status(viewer: Viewer, page: dict, status: str) -> None:
     assert status in ("published", "retired") and page["version"] > 0
     with closing(connect()) as conn, conn:
-        conn.execute("UPDATE hub_pages SET status=?, updated_at=?, updated_by=? WHERE id=?",
-                     (status, now_stamp(), viewer.name, page["id"]))
+        conn.execute("UPDATE hub_pages SET status=? WHERE id=?", (status, page["id"]))
+        _touch(conn, page["id"], viewer.name)
         _audit(conn, viewer.name, "retired" if status == "retired" else "brought back",
                page["id"], page["title"])
 
@@ -424,6 +476,7 @@ def set_counsel(viewer: Viewer, page: dict, flagged: bool, note: str) -> bool:
     with closing(connect()) as conn, conn:
         conn.execute("UPDATE hub_pages SET needs_counsel=? WHERE id=?",
                      (int(flagged), page["id"]))
+        _touch(conn, page["id"], viewer.name)
         _audit(conn, viewer.name, "flagged for counsel" if flagged else "counsel cleared",
                page["id"], note)
     return True
@@ -436,6 +489,7 @@ def mark_reviewed(viewer: Viewer, page: dict, note: str) -> None:
         conn.execute("INSERT INTO hub_reviews (page_id, reviewed_at, reviewed_by, note) "
                      "VALUES (?,?,?,?)", (page["id"], now_stamp(), viewer.name, note))
         conn.execute("UPDATE hub_pages SET review_by=? WHERE id=?", (next_due, page["id"]))
+        _touch(conn, page["id"], viewer.name)
         _audit(conn, viewer.name, "reviewed", page["id"], note)
 
 
@@ -450,7 +504,14 @@ def get_version(page_id: int, version: int) -> dict | None:
     with closing(connect()) as conn:
         row = conn.execute("SELECT * FROM hub_page_versions WHERE page_id=? AND version=?",
                            (page_id, version)).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    v = dict(row)
+    try:
+        v["files"] = json.loads(v["files"] or "[]")
+    except ValueError:
+        v["files"] = []
+    return v
 
 
 def reviews(page_id: int) -> list[dict]:
@@ -463,17 +524,19 @@ def reviews(page_id: int) -> list[dict]:
 # "I've read this"
 # ---------------------------------------------------------------------------
 
-def _identity_keys(conn, viewer: Viewer) -> list[str]:
-    """A person can sign in two ways (a leader with a clock-in grant): their
-    confirmations count whichever way they signed in."""
-    keys = [viewer.key]
-    if viewer.kind == "member":
-        keys += [f"leader:{r['id']}" for r in conn.execute(
-            "SELECT id FROM leaders WHERE name=? COLLATE NOCASE", (viewer.name,))]
-    elif viewer.kind == "leader":
-        keys += [f"member:{r['id']}" for r in conn.execute(
-            "SELECT id FROM team_members WHERE name=? COLLATE NOCASE", (viewer.name,))]
+def _keys_by_name(conn) -> dict[str, set[str]]:
+    """One person, however they sign in: every leader login and roster row
+    with the same name (active or not) shares read confirmations. Both the
+    reader's own To read list and the editors' Who's read it use this."""
+    keys: dict[str, set[str]] = {}
+    for kind, table in (("leader", "leaders"), ("member", "team_members")):
+        for r in conn.execute(f"SELECT id, name FROM {table}"):
+            keys.setdefault(r["name"].casefold(), set()).add(f"{kind}:{r['id']}")
     return keys
+
+
+def _identity_keys(conn, viewer: Viewer) -> list[str]:
+    return sorted({viewer.key} | _keys_by_name(conn).get(viewer.name.casefold(), set()))
 
 
 def my_acks(viewer: Viewer, page_ids: list[int] | None = None) -> dict[int, dict]:
@@ -528,16 +591,16 @@ def readers(page: dict) -> list[dict]:
     """Everyone the page is for, with where they are on it: current, an
     older version, or not yet. People who can sign in both ways count once."""
     with closing(connect()) as conn:
+        all_keys = _keys_by_name(conn)
         people: dict[str, dict] = {}
         for r in conn.execute("SELECT id, name FROM leaders WHERE active=1"):
-            people[r["name"].casefold()] = {"name": r["name"], "leader": True,
-                                            "keys": {f"leader:{r['id']}"}}
+            people[r["name"].casefold()] = {"name": r["name"], "leader": True}
         for r in conn.execute(
                 "SELECT m.id, m.name FROM team_members m JOIN hub_access a "
                 "ON a.member_id = m.id WHERE m.active=1"):
-            entry = people.setdefault(r["name"].casefold(), {
-                "name": r["name"], "leader": False, "keys": set()})
-            entry["keys"].add(f"member:{r['id']}")
+            people.setdefault(r["name"].casefold(), {"name": r["name"], "leader": False})
+        for name, person in people.items():
+            person["keys"] = all_keys.get(name, set())
         acks: dict[str, dict] = {}
         for r in conn.execute("SELECT * FROM hub_acks WHERE page_id=? ORDER BY version",
                               (page["id"],)):
@@ -587,7 +650,8 @@ def search(viewer: Viewer, query: str, limit: int = 40) -> list[dict]:
         rows = [dict(r) for r in conn.execute(
             _PAGE_SELECT + "WHERE p.status='published'")]
         files: dict[int, list[str]] = {}
-        for r in conn.execute("SELECT page_id, filename, text FROM hub_attachments"):
+        for r in conn.execute("SELECT page_id, filename, text FROM hub_attachments "
+                              "WHERE removed_at IS NULL"):
             files.setdefault(r["page_id"], []).append(f"{r['filename']} {r['text']}")
     pattern = re.compile("|".join(re.escape(w) for w in words), re.I)
     results = []
@@ -630,6 +694,11 @@ def _snippet(text: str, pattern: re.Pattern, width: int = 160) -> list[tuple[str
 
 # ---------------------------------------------------------------------------
 # Files
+#
+# On a draft, files come and go freely. On a published page, adding or
+# removing one is a change to what people read: it makes a new version
+# (with the re-read choice, and the policy checks on policy pages), and a
+# removed file stays on disk for History until the Operator purges it.
 # ---------------------------------------------------------------------------
 
 def sniff_kind(data: bytes) -> str | None:
@@ -660,8 +729,7 @@ def _office_kind(data: bytes) -> str | None:
             if info.file_size > 1_000_000:
                 return None
             types = z.read(info).decode("utf-8", "replace")
-    except (zipfile.BadZipFile, KeyError, OSError, RuntimeError, ValueError,
-            NotImplementedError, EOFError):
+    except Exception:          # any damaged or hostile zip is simply not allowed
         return None
     if "macroenabled" in types.lower():
         return None
@@ -691,14 +759,31 @@ def _remove_file(stored_name: str) -> None:
 
 
 def safe_filename(name: str, kind: str) -> str:
-    base = os.path.basename((name or "").replace("\\", "/"))
+    base = os.path.basename(hub_text.clean(name or "").replace("\\", "/"))
     base = re.sub(r"[^\w .()-]", "", base).strip(" .")[:80] or "file"
     stem = base.rsplit(".", 1)[0] if "." in base else base
     return f"{stem or 'file'}.{kind}"
 
 
+def _file_version(conn, viewer: Viewer, page: dict, rev: int | None, note: str,
+                  reread: bool, reviewed: bool) -> int | None:
+    """A file change on a published page: the next version, claimed against
+    `rev` before the change is made. None if the page moved on."""
+    version = page["version"] + 1
+    ack_version = _ack_from(page, version, True, reread, page["required"])
+    stamp = now_stamp()
+    if rev is None or not conn.execute(
+            "UPDATE hub_pages SET version=?, ack_version=?, published_at=?, updated_at=?, "
+            "updated_by=?, rev=rev+1 WHERE id=? AND rev=? AND version=?",
+            (version, ack_version, stamp, stamp, viewer.name, page["id"], rev,
+             page["version"])).rowcount:
+        return None
+    return version
+
+
 def add_attachment(viewer: Viewer, page: dict, filename: str, data: bytes,
-                   alt: str = "") -> tuple[dict | None, str]:
+                   alt: str = "", rev: int | None = None, change_note: str = "",
+                   reread: bool = False, reviewed: bool = False) -> tuple[dict | None, str]:
     """Store an upload. Returns (row, "") or (None, why not)."""
     if not data:
         return None, "That file is empty."
@@ -708,43 +793,115 @@ def add_attachment(viewer: Viewer, page: dict, filename: str, data: bytes,
     if not kind:
         return None, ("Only PDFs, photos (JPG/PNG/GIF/WebP) and Word, Excel or "
                       "PowerPoint files (no macros) can be added.")
+    text = hub_text.plain(hub_text.docx_text(io.BytesIO(data)))[:50_000] if kind == "docx" else ""
     folder = files_dir()
     os.makedirs(folder, exist_ok=True)
     if shutil.disk_usage(folder).free < len(data) + _MIN_FREE_BYTES:
         return None, "The server's disk is nearly full — ask the Operator."
-    text = ""
     stored = secrets.token_hex(16)
     path = _file_path(stored)
-    tmp = path + ".part"
-    with open(tmp, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
-    if kind == "docx":
-        text = hub_text.plain(hub_text.docx_text(path))[:50_000]
     name = safe_filename(filename, kind)
     alt = " ".join(hub_text.clean(alt).split())[:200]
+    with open(path + ".part", "wb") as f:
+        f.write(data)
+    os.replace(path + ".part", path)
     try:
         with closing(connect()) as conn, conn:
+            version = None
+            if page["version"] > 0:
+                version = _file_version(conn, viewer, page, rev, change_note, reread, reviewed)
+                if version is None:
+                    raise _Stale()
+            photo_no = None
+            if kind in IMAGE_KINDS:
+                photo_no = conn.execute(
+                    "SELECT COALESCE(MAX(photo_no), 0) + 1 FROM hub_attachments "
+                    "WHERE page_id=?", (page["id"],)).fetchone()[0]
             cur = conn.execute(
                 "INSERT INTO hub_attachments (page_id, filename, stored_name, kind, size, "
-                "sha256, alt, text, uploaded_at, uploaded_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "sha256, alt, text, uploaded_at, uploaded_by, photo_no) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (page["id"], name, stored, kind, len(data),
-                 hashlib.sha256(data).hexdigest(), alt, text, now_stamp(), viewer.name))
-            conn.execute("UPDATE hub_pages SET updated_at=?, updated_by=? WHERE id=?",
-                         (now_stamp(), viewer.name, page["id"]))
-            _audit(conn, viewer.name, "file added", page["id"], f"{name} ({kind})")
+                 hashlib.sha256(data).hexdigest(), alt, text, now_stamp(), viewer.name,
+                 photo_no))
+            if version is None:
+                _touch(conn, page["id"], viewer.name)
+            else:
+                _snapshot(conn, page["id"], version, page,
+                          change_note or f"Added {name}", viewer.name, reviewed)
+            _audit(conn, viewer.name, "file added", page["id"],
+                   f"{name} ({kind})" + (f" — v{version}" if version else ""))
             row = dict(conn.execute("SELECT * FROM hub_attachments WHERE id=?",
                                     (cur.lastrowid,)).fetchone())
+    except _Stale:
+        _remove_file(stored)
+        return None, STALE.split(" Your text")[0] + " Reload it and try again."
     except Exception:
         _remove_file(stored)
         raise
     return row, ""
 
 
+class _Stale(Exception):
+    """The page moved on under a file change: roll it back."""
+
+
+def remove_attachment(viewer: Viewer, attachment: dict, page: dict, rev: int | None,
+                      change_note: str = "", reread: bool = False,
+                      reviewed: bool = False) -> str | None:
+    """Take a file off its page. A draft's file is deleted outright; a
+    published page's is kept for History (new version). Error or None."""
+    if page["version"] == 0:
+        with closing(connect()) as conn, conn:
+            conn.execute("DELETE FROM hub_attachments WHERE id=?", (attachment["id"],))
+            _touch(conn, page["id"], viewer.name)
+            _audit(conn, viewer.name, "file removed", page["id"], attachment["filename"])
+        _remove_file(attachment["stored_name"])
+        return None
+    try:
+        with closing(connect()) as conn, conn:
+            version = _file_version(conn, viewer, page, rev, change_note, reread, reviewed)
+            if version is None:
+                raise _Stale()
+            conn.execute("UPDATE hub_attachments SET removed_at=?, removed_by=? WHERE id=?",
+                         (now_stamp(), viewer.name, attachment["id"]))
+            _snapshot(conn, page["id"], version, page,
+                      change_note or f"Removed {attachment['filename']}", viewer.name,
+                      reviewed)
+            _audit(conn, viewer.name, "file removed", page["id"],
+                   f"{attachment['filename']} — v{version} (kept for History)")
+    except _Stale:
+        return STALE.split(" Your text")[0] + " Reload it and try again."
+    return None
+
+
+def purge_attachment(viewer: Viewer, attachment: dict) -> bool:
+    """Operator only: delete a removed file's bytes for good (e.g. it showed
+    something it never should have). The row stays as a tombstone so photo
+    numbers are never reused and History says what was there."""
+    if not viewer.is_operator or not attachment["removed_at"] or attachment["purged_at"]:
+        return False
+    with closing(connect()) as conn, conn:
+        conn.execute("UPDATE hub_attachments SET purged_at=?, text='' WHERE id=?",
+                     (now_stamp(), attachment["id"]))
+        _audit(conn, viewer.name, "file deleted for good", attachment["page_id"],
+               attachment["filename"])
+    _remove_file(attachment["stored_name"])
+    return True
+
+
 def attachments(page_id: int) -> list[dict]:
+    """The files on the page now."""
+    with closing(connect()) as conn:
+        return [dict(r) for r in _live_files(conn, page_id)]
+
+
+def removed_attachments(page_id: int) -> list[dict]:
+    """Files taken off the page (kept for History unless purged)."""
     with closing(connect()) as conn:
         return [dict(r) for r in conn.execute(
-            "SELECT * FROM hub_attachments WHERE page_id=? ORDER BY id", (page_id,))]
+            "SELECT * FROM hub_attachments WHERE page_id=? AND removed_at IS NOT NULL "
+            "ORDER BY removed_at DESC, id DESC", (page_id,))]
 
 
 def get_attachment(attachment_id: int) -> dict | None:
@@ -755,20 +912,21 @@ def get_attachment(attachment_id: int) -> dict | None:
 
 
 def photo_map(files: list[dict], url_for_file) -> dict[int, tuple[str, str]]:
-    """[photo: N] numbers: the page's photos in upload order, from 1."""
-    photos = [f for f in files if f["kind"] in IMAGE_KINDS]
-    return {n: (url_for_file(f), f["alt"] or f["filename"])
-            for n, f in enumerate(photos, start=1)}
+    """[photo: N] -> the page's photo number N (fixed at upload, never
+    reused, so removing one photo can't shift the others)."""
+    return {f["photo_no"]: (url_for_file(f), f["alt"] or f["filename"])
+            for f in files if f["kind"] in IMAGE_KINDS and f["photo_no"]}
 
 
-def delete_attachment(viewer: Viewer, attachment: dict) -> None:
-    with closing(connect()) as conn, conn:
-        conn.execute("DELETE FROM hub_attachments WHERE id=?", (attachment["id"],))
-        conn.execute("UPDATE hub_pages SET updated_at=?, updated_by=? WHERE id=?",
-                     (now_stamp(), viewer.name, attachment["page_id"]))
-        _audit(conn, viewer.name, "file removed", attachment["page_id"],
-               attachment["filename"])
-    _remove_file(attachment["stored_name"])
+def version_photo_map(version: dict, url_for_file) -> dict[int, tuple[str, str]]:
+    """The photos a past version showed (purged ones are gone)."""
+    out = {}
+    for f in version["files"]:
+        if f.get("photo"):
+            att = get_attachment(f["id"])
+            if att and not att["purged_at"]:
+                out[f["photo"]] = (url_for_file(att), f.get("alt") or f["name"])
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -821,8 +979,11 @@ def grant(member_id: int, raw_code: str, who: str) -> str | None:
             "WHERE a.code_hash=? AND a.member_id != ?", (digest, member_id)).fetchone()
         if other:
             return f"That clock-in number is already set for {other['name']}."
-        conn.execute("INSERT OR REPLACE INTO hub_access (member_id, code_hash, granted_at, "
-                     "granted_by) VALUES (?,?,?,?)", (member_id, digest, now_stamp(), who))
+        # A new nonce every time: phones signed in under an earlier grant
+        # stay signed out, even when the same number is given back.
+        conn.execute("INSERT OR REPLACE INTO hub_access (member_id, code_hash, nonce, "
+                     "granted_at, granted_by) VALUES (?,?,?,?,?)",
+                     (member_id, digest, secrets.token_hex(16), now_stamp(), who))
         _audit(conn, who, "access granted", None, member["name"])
     return None
 
@@ -843,10 +1004,16 @@ def bulk_grant(text: str, who: str, add_missing: bool) -> dict:
     for n, raw in enumerate((text or "").splitlines()[:500], start=1):
         if not raw.strip():
             continue
-        name, sep, code = raw.replace("\t", ",").rpartition(",")
-        name = " ".join(name.split())
-        if not sep or not name:
-            out["errors"].append(f"line {n}: needs a name, a comma, then the number")
+        fields = [" ".join(f.split()) for f in re.split(r"[,\t]", raw)]
+        fields = [f for f in fields if f]
+        if len(fields) != 2:
+            out["errors"].append(f"line {n}: use exactly “Name, clock-in number” "
+                                 "(no extra columns, first name first)")
+            continue
+        name, code = fields
+        if re.search(r"\d", name):
+            out["errors"].append(f"line {n}: the name has numbers in it — "
+                                 "use “Name, clock-in number”")
             continue
         if not normalize_code(code):
             out["errors"].append(f"line {n} ({name}): that isn't a clock-in number")
@@ -891,20 +1058,21 @@ def member_for_login(name: str, raw_code: str) -> dict | None:
     with closing(connect()) as conn:
         digest = _code_hash(conn, code)
         rows = conn.execute(
-            "SELECT m.id, m.name, a.code_hash FROM hub_access a JOIN team_members m "
+            "SELECT m.id, m.name, a.code_hash, a.nonce FROM hub_access a JOIN team_members m "
             "ON m.id = a.member_id WHERE m.active=1").fetchall()
     for r in rows:
         full = r["name"].casefold()
         if typed in (full, full.split()[0]) and hmac.compare_digest(r["code_hash"], digest):
-            return {"id": r["id"], "name": r["name"], "tag": r["code_hash"][:16]}
+            return {"id": r["id"], "name": r["name"], "tag": r["nonce"]}
     return None
 
 
 def member_session(member_id: int) -> dict | None:
-    """The signed-in member's current name + access tag (None = no longer
-    allowed in: removed from the roster, access revoked or number changed)."""
+    """The signed-in member's current name + session nonce (None = no longer
+    allowed in: off the roster or access removed; a changed nonce means
+    access was re-granted or they left the roster since this sign-in)."""
     with closing(connect()) as conn:
         row = conn.execute(
-            "SELECT m.id, m.name, a.code_hash FROM hub_access a JOIN team_members m "
+            "SELECT m.id, m.name, a.nonce FROM hub_access a JOIN team_members m "
             "ON m.id = a.member_id WHERE m.id=? AND m.active=1", (member_id,)).fetchone()
-    return {"id": row["id"], "name": row["name"], "tag": row["code_hash"][:16]} if row else None
+    return {"id": row["id"], "name": row["name"], "tag": row["nonce"]} if row else None

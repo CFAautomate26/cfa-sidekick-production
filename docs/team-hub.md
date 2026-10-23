@@ -55,9 +55,11 @@ from the Shift Lead app.
   never into a chat, email or Slack. They're stored scrambled (keyed
   HMAC), never shown again, never written to logs, and left out of backups.
   The same number can't be given to two people (catches typos).
-- **Remove** signs the person out on their next tap; so does changing their
-  number or making them inactive on the roster.
-- Sign-in tries are limited: 5 misses locks a first name for 10 minutes, and
+- **Remove** signs the person out on every phone they used, for good —
+  giving the same number back later means signing in again. Changing their
+  number, or making them inactive on the roster, does the same.
+- Sign-in tries are limited: 5 misses locks a first name for 10 minutes (a
+  successful sign-in doesn't reset it), and
   50 misses store-wide pauses clock-in sign-ins for 10 minutes (leaders
   aren't affected). A clock-in number is a short, guessable credential —
   fine for "how we do it" content, which is why the Hub must never hold
@@ -79,6 +81,17 @@ from the Shift Lead app.
   open in Word → Save As `.docx` first.
 - Files: PDF, JPG/PNG/GIF/WebP, and Word/Excel/PowerPoint without macros,
   up to 15 MB each. The type is checked from the file itself, not its name.
+- Photo numbers are fixed when a photo is uploaded and never reused, so
+  removing photo 1 can't make `[photo: 2]` show the wrong picture.
+- On a **published** page, adding or removing a file is a change people
+  read, so it makes a new version (with the same "small fix / everyone
+  re-reads" choice, and the policy checks on HR pages). A removed file stays
+  in the page's History; the Operator can **Delete for good** from History
+  if it should never have been uploaded.
+- If someone else saves a page while you have it open, your save (or
+  publish) is refused instead of overwriting their change — your text is
+  kept on screen to copy. Publishing a draft publishes exactly the version
+  you were looking at.
 
 ## HR and policies (Ontario)
 

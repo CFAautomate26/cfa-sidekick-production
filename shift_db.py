@@ -447,9 +447,12 @@ CREATE TABLE IF NOT EXISTS hub_categories (
 
 -- A page's live state; every published version is also kept, immutably,
 -- in hub_page_versions. status: draft (editors only) | published | retired.
--- version 0 = never published.
+-- version 0 = never published. rev changes on every write, so a form
+-- (edit, publish, file change) saved from a stale copy is refused. Ids are
+-- never reused (AUTOINCREMENT): a deleted draft's history and links can't
+-- attach to a later page.
 CREATE TABLE IF NOT EXISTS hub_pages (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id INTEGER NOT NULL REFERENCES hub_categories(id) ON DELETE CASCADE,
     section TEXT NOT NULL DEFAULT '',           -- e.g. Training, Procedures
     title TEXT NOT NULL,
@@ -468,7 +471,8 @@ CREATE TABLE IF NOT EXISTS hub_pages (
     created_by TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     updated_by TEXT NOT NULL,
-    published_at TEXT
+    published_at TEXT,
+    rev INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_hub_pages_category ON hub_pages(category_id, status);
 
@@ -485,11 +489,15 @@ CREATE TABLE IF NOT EXISTS hub_page_versions (
     saved_by TEXT NOT NULL,
     reviewed_by TEXT,                           -- policy pages: who checked it, when
     reviewed_at TEXT,
+    files TEXT NOT NULL DEFAULT '[]',           -- JSON: the page's files at this version
     UNIQUE (page_id, version)
 );
 
+-- A file taken off a published page is only marked removed (earlier
+-- versions and read confirmations still point at it); the Operator can
+-- purge it, which deletes the bytes but keeps this row as a tombstone.
 CREATE TABLE IF NOT EXISTS hub_attachments (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
     filename TEXT NOT NULL,                     -- the uploader's name, display only
     stored_name TEXT NOT NULL UNIQUE,           -- 32 hex chars + no extension, on disk
@@ -499,7 +507,11 @@ CREATE TABLE IF NOT EXISTS hub_attachments (
     alt TEXT NOT NULL DEFAULT '',               -- images: what it shows
     text TEXT NOT NULL DEFAULT '',              -- extracted words, for search
     uploaded_at TEXT NOT NULL,
-    uploaded_by TEXT NOT NULL
+    uploaded_by TEXT NOT NULL,
+    photo_no INTEGER,                           -- images: [photo: N], never reused
+    removed_at TEXT,
+    removed_by TEXT,
+    purged_at TEXT
 );
 
 -- Append-only proof a person received a version: never edited or deleted.
@@ -536,13 +548,21 @@ CREATE TABLE IF NOT EXISTS hub_audit (
 -- from team_members (whose rows are read and exported whole) and never in
 -- backups; a restore re-attaches each grant by name (see import_json).
 -- code_hash is an HMAC under meta.hub_pepper, so the same number can't be
--- given to two people.
+-- given to two people. Sessions carry `nonce`, which is new on every grant
+-- and rotates when the person leaves the roster: removing access (or the
+-- person) signs out every phone they used, for good.
 CREATE TABLE IF NOT EXISTS hub_access (
     member_id INTEGER PRIMARY KEY REFERENCES team_members(id) ON DELETE CASCADE,
     code_hash TEXT NOT NULL,
+    nonce TEXT NOT NULL,
     granted_at TEXT NOT NULL,
     granted_by TEXT NOT NULL
 );
+CREATE TRIGGER IF NOT EXISTS hub_access_member_off
+AFTER UPDATE OF active ON team_members WHEN NEW.active = 0
+BEGIN
+    UPDATE hub_access SET nonce = lower(hex(randomblob(16))) WHERE member_id = NEW.id;
+END;
 """
 
 
@@ -3236,6 +3256,29 @@ def export_json() -> str:
     return json.dumps(payload, ensure_ascii=False, indent=1)
 
 
+def _rekey_hub_acks(conn) -> None:
+    """Read confirmations kept across a restore of an older backup point at
+    roster/leader ids the backup may have reassigned: re-point each at the
+    person of the same name, or retire its key so it can never attach to
+    whoever gets that id next."""
+    people: dict[str, dict[str, list[int]]] = {}
+    for kind, table in (("leader", "leaders"), ("member", "team_members")):
+        for r in conn.execute(f"SELECT id, name FROM {table}"):
+            people.setdefault(r["name"].casefold(), {}).setdefault(kind, []).append(r["id"])
+    for r in conn.execute("SELECT id, reader_key, reader_name FROM hub_acks "
+                          "WHERE reader_key LIKE 'member:%' OR reader_key LIKE 'leader:%'"
+                          ).fetchall():
+        kind, _, old_id = r["reader_key"].partition(":")
+        ids = people.get(r["reader_name"].casefold(), {}).get(kind, [])
+        if old_id.isdigit() and int(old_id) in ids:
+            continue
+        new_key = f"{kind}:{ids[0]}" if len(ids) == 1 else f"former:{r['reader_key']}"
+        if not conn.execute("UPDATE OR IGNORE hub_acks SET reader_key=? WHERE id=?",
+                            (new_key, r["id"])).rowcount:
+            conn.execute("UPDATE OR IGNORE hub_acks SET reader_key=? WHERE id=?",
+                         (f"former:{r['reader_key']}", r["id"]))
+
+
 class _RestoreError(Exception):
     """Raised inside the restore transaction so `with conn:` rolls back."""
 
@@ -3296,6 +3339,7 @@ def import_json(raw: str) -> str | None:
                         "SELECT m.name, a.code_hash, a.granted_at, a.granted_by "
                         "FROM hub_access a JOIN team_members m ON m.id = a.member_id"
                     ).fetchall()
+                    hub_kept = "hub_acks" not in payload
                     conn.execute("DELETE FROM leaders")
                     for row in payload.get("leaders", []):
                         conn.execute(
@@ -3323,12 +3367,15 @@ def import_json(raw: str) -> str | None:
                                 [row[c] for c in cols],
                             )
                     for row in access:
+                        # A fresh nonce: everyone signs in again after a restore.
                         conn.execute(
-                            "INSERT OR IGNORE INTO hub_access (member_id, code_hash, "
-                            "granted_at, granted_by) SELECT id, ?, ?, ? FROM team_members "
+                            "INSERT OR IGNORE INTO hub_access (member_id, code_hash, nonce, "
+                            "granted_at, granted_by) SELECT id, ?, ?, ?, ? FROM team_members "
                             "WHERE name=? COLLATE NOCASE",
-                            (row["code_hash"], row["granted_at"], row["granted_by"],
-                             row["name"]))
+                            (row["code_hash"], secrets.token_hex(16), row["granted_at"],
+                             row["granted_by"], row["name"]))
+                    if hub_kept:
+                        _rekey_hub_acks(conn)
                     # Keep the course-seed flag in sync with what the backup
                     # actually restored: a pre-course backup (no lessons)
                     # clears it so the next boot re-seeds from code, and a

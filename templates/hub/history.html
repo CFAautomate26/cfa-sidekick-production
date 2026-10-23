@@ -17,6 +17,32 @@
 <div class="empty">Not published yet.</div>
 {% endfor %}
 
+{% if removed %}
+<div class="section-label">Files taken off this page</div>
+{% for f in removed %}
+<div class="card">
+  <div class="row-between">
+    <div style="min-width:0;">
+      {% if f.purged_at %}<strong>{{ f.filename }}</strong>
+      {% else %}<a href="{{ url_for('hub.file', file_id=f.id) }}" style="color:var(--cfa-red); font-weight:700;">{{ f.filename }}</a>{% endif %}
+      <div class="muted">Removed {{ f.removed_at }} by {{ f.removed_by }}{% if f.purged_at %} · deleted for good {{ f.purged_at }}{% endif %}</div>
+    </div>
+  </div>
+  {% if viewer.is_operator and not f.purged_at %}
+  <details class="more" style="margin-top:8px;">
+    <summary>Delete for good</summary>
+    <form method="post" action="{{ url_for('hub.purge_file', file_id=f.id) }}">
+      <label class="checkline"><input type="checkbox" name="confirm" value="1" required>
+        Delete the file itself — older versions will show it was there, but not what it was.
+        Use this only for something that should never have been uploaded.</label>
+      <button class="pill small" type="submit">Delete for good</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
 {% if reviews %}
 <div class="section-label">Yearly reviews</div>
 <div class="card"><table class="plain">

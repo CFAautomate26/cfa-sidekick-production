@@ -5,6 +5,16 @@
 <h1 class="page">{{ v.title }}</h1>
 <div class="sub">Version {{ v.version }} · published {{ v.saved_at }} by {{ v.saved_by }}{% if v.change_note %} · {{ v.change_note }}{% endif %}</div>
 {% if v.summary %}<div class="sub" style="color:var(--ink);">{{ v.summary }}</div>{% endif %}
-<div class="card doc">{{ body }}</div>
+<div class="card doc">{{ body }}
+  {% if files %}
+  <div class="section-label" style="margin-top:14px;">Files in this version</div>
+  {% for f in files %}
+  <div style="padding:4px 0;">
+    {% if f.att and not f.att.purged_at %}<a href="{{ url_for('hub.file', file_id=f.id) }}" style="color:var(--cfa-red); font-weight:700;">{{ ('Photo %d · ' % f.photo) if f.photo }}{{ f.name }}</a>
+    {% else %}{{ ('Photo %d · ' % f.photo) if f.photo }}{{ f.name }} <span class="muted">(deleted for good)</span>{% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>
 <div class="muted">Content fingerprint (SHA-256): <span style="overflow-wrap:anywhere;">{{ v.content_hash }}</span></div>
 {% endblock %}
