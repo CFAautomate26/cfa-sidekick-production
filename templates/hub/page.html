@@ -100,7 +100,8 @@
 {% if not can_edit %}<div class="muted" style="margin-bottom:12px;">Only the Operator changes a published {{ page.category_name }} page.</div>{% endif %}
 
 {% if can_edit %}
-<details class="more card">
+{% if upload_error %}<div class="callout warm" id="upload">{{ upload_error }}</div>{% endif %}
+<details class="more card" {{ 'open' if upload_error }}>
   <summary>📎 Add a photo or file</summary>
   <form method="post" action="{{ url_for('hub.upload', page_id=page.id) }}" enctype="multipart/form-data">
     <input type="file" name="file" required

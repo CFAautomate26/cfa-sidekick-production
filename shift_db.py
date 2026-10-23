@@ -3260,11 +3260,13 @@ def _rekey_hub_acks(conn) -> None:
     """Read confirmations kept across a restore of an older backup point at
     roster/leader ids the backup may have reassigned: re-point each at the
     person of the same name, or retire its key so it can never attach to
-    whoever gets that id next."""
+    whoever gets that id next. Two passes (via temporary keys) so swapped
+    ids can't collide with a row that hasn't moved yet."""
     people: dict[str, dict[str, list[int]]] = {}
     for kind, table in (("leader", "leaders"), ("member", "team_members")):
         for r in conn.execute(f"SELECT id, name FROM {table}"):
             people.setdefault(r["name"].casefold(), {}).setdefault(kind, []).append(r["id"])
+    moves = []
     for r in conn.execute("SELECT id, reader_key, reader_name FROM hub_acks "
                           "WHERE reader_key LIKE 'member:%' OR reader_key LIKE 'leader:%'"
                           ).fetchall():
@@ -3272,11 +3274,15 @@ def _rekey_hub_acks(conn) -> None:
         ids = people.get(r["reader_name"].casefold(), {}).get(kind, [])
         if old_id.isdigit() and int(old_id) in ids:
             continue
-        new_key = f"{kind}:{ids[0]}" if len(ids) == 1 else f"former:{r['reader_key']}"
-        if not conn.execute("UPDATE OR IGNORE hub_acks SET reader_key=? WHERE id=?",
-                            (new_key, r["id"])).rowcount:
-            conn.execute("UPDATE OR IGNORE hub_acks SET reader_key=? WHERE id=?",
-                         (f"former:{r['reader_key']}", r["id"]))
+        target = f"{kind}:{ids[0]}" if len(ids) == 1 else f"former:{r['reader_key']}"
+        moves.append((r["id"], r["reader_key"], target))
+    for ack_id, _, _ in moves:
+        conn.execute("UPDATE hub_acks SET reader_key=? WHERE id=?", (f"tmp:{ack_id}", ack_id))
+    for ack_id, old_key, target in moves:
+        for key in (target, f"former:{old_key}", f"former:{old_key}:{ack_id}"):
+            if conn.execute("UPDATE OR IGNORE hub_acks SET reader_key=? WHERE id=?",
+                            (key, ack_id)).rowcount:
+                break
 
 
 class _RestoreError(Exception):

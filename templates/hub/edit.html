@@ -19,7 +19,7 @@
 {% endif %}
 
 <form method="post" action="{{ url_for('hub.edit_page', page_id=page.id) if page else url_for('hub.new_page') }}" class="card">
-  {% if page %}<input type="hidden" name="rev" value="{{ page.rev }}">{% endif %}
+  {% if page %}<input type="hidden" name="rev" value="{{ form_rev }}">{% endif %}
   <label class="field" for="category_id">Category</label>
   <select id="category_id" name="category_id" required>
     {% for c in categories %}
@@ -72,6 +72,8 @@ Leave a blank line between paragraphs.</pre>
   {% set policy = viewer.is_operator %}
   {% set policy_label = 'Policy (HR) page, or moving it into one? Confirm each before it goes live:' %}
   {% set field_id = 'edit' %}
+  {% set rev_in_form = true %}
+  {% set checks_required = false %}
   {% include "hub/_change_fields.html" %}
   {% endif %}
 

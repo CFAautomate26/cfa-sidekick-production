@@ -275,6 +275,10 @@ def editor_queues() -> dict:
 # someone else's change (or publishing text a reviewer never saw).
 # ---------------------------------------------------------------------------
 
+BODY_MAX = 100_000
+BODY_TOO_LONG = ("The page text is over 100,000 characters — split it into two pages "
+                 "(your text is below, nothing was saved).")
+
 STALE = ("This page changed since you opened it — someone else saved it. "
          "Your text is below: copy what you need, then reload the page.")
 
@@ -289,7 +293,7 @@ def clean_fields(form) -> dict:
         "title": line("title", 140),
         "summary": line("summary", 300),
         "keywords": line("keywords", 300),
-        "body": hub_text.clean(form.get("body") or "").strip()[:100_000],
+        "body": hub_text.clean(form.get("body") or "").strip(),     # BODY_MAX checked by routes
         "leaders_only": 1 if form.get("leaders_only") else 0,
         "required": 1 if form.get("required") else 0,
         "annual_review": 1 if form.get("annual_review") else 0,
@@ -524,19 +528,26 @@ def reviews(page_id: int) -> list[dict]:
 # "I've read this"
 # ---------------------------------------------------------------------------
 
-def _keys_by_name(conn) -> dict[str, set[str]]:
-    """One person, however they sign in: every leader login and roster row
-    with the same name (active or not) shares read confirmations. Both the
-    reader's own To read list and the editors' Who's read it use this."""
-    keys: dict[str, set[str]] = {}
-    for kind, table in (("leader", "leaders"), ("member", "team_members")):
-        for r in conn.execute(f"SELECT id, name FROM {table}"):
-            keys.setdefault(r["name"].casefold(), set()).add(f"{kind}:{r['id']}")
-    return keys
+def _linked_keys(conn) -> dict[str, set[str]]:
+    """A leader login and a roster row count as one person only when the
+    Slack roster pull linked them (same Slack account) — never by name, so
+    a new hire who shares a departed leader's name starts with nothing
+    confirmed. Both the reader's own To read list and the editors' Who's
+    read it use this. key -> every key of that person (itself included)."""
+    links: dict[str, set[str]] = {}
+    for r in conn.execute(
+            "SELECT l.id AS leader_id, m.id AS member_id FROM leaders l "
+            "JOIN team_members m ON m.slack_id = l.slack_id WHERE l.slack_id IS NOT NULL"):
+        group = {f"leader:{r['leader_id']}", f"member:{r['member_id']}"}
+        for key in list(group):
+            group |= links.get(key, set())
+        for key in group:
+            links[key] = group
+    return links
 
 
 def _identity_keys(conn, viewer: Viewer) -> list[str]:
-    return sorted({viewer.key} | _keys_by_name(conn).get(viewer.name.casefold(), set()))
+    return sorted(_linked_keys(conn).get(viewer.key, {viewer.key}))
 
 
 def my_acks(viewer: Viewer, page_ids: list[int] | None = None) -> dict[int, dict]:
@@ -591,22 +602,25 @@ def readers(page: dict) -> list[dict]:
     """Everyone the page is for, with where they are on it: current, an
     older version, or not yet. People who can sign in both ways count once."""
     with closing(connect()) as conn:
-        all_keys = _keys_by_name(conn)
-        people: dict[str, dict] = {}
-        for r in conn.execute("SELECT id, name FROM leaders WHERE active=1"):
-            people[r["name"].casefold()] = {"name": r["name"], "leader": True}
-        for r in conn.execute(
-                "SELECT m.id, m.name FROM team_members m JOIN hub_access a "
-                "ON a.member_id = m.id WHERE m.active=1"):
-            people.setdefault(r["name"].casefold(), {"name": r["name"], "leader": False})
-        for name, person in people.items():
-            person["keys"] = all_keys.get(name, set())
+        links = _linked_keys(conn)
+        people: list[dict] = []
+        seen: set[str] = set()
+        for kind, q in (("leader", "SELECT id, name FROM leaders WHERE active=1"),
+                        ("member", "SELECT m.id, m.name FROM team_members m JOIN hub_access a "
+                                   "ON a.member_id = m.id WHERE m.active=1")):
+            for r in conn.execute(q):
+                key = f"{kind}:{r['id']}"
+                if key in seen:
+                    continue          # the leader login already listed this person
+                keys = links.get(key, {key})
+                seen |= keys
+                people.append({"name": r["name"], "leader": kind == "leader", "keys": keys})
         acks: dict[str, dict] = {}
         for r in conn.execute("SELECT * FROM hub_acks WHERE page_id=? ORDER BY version",
                               (page["id"],)):
             acks[r["reader_key"]] = dict(r)
     out = []
-    for person in people.values():
+    for person in people:
         if is_leaders_only(page) and not person["leader"]:
             continue
         mine = [acks[k] for k in person["keys"] if k in acks]
@@ -759,9 +773,9 @@ def _remove_file(stored_name: str) -> None:
 
 
 def safe_filename(name: str, kind: str) -> str:
-    base = os.path.basename(hub_text.clean(name or "").replace("\\", "/"))
-    base = re.sub(r"[^\w .()-]", "", base).strip(" .")[:80] or "file"
-    stem = base.rsplit(".", 1)[0] if "." in base else base
+    base = os.path.basename(hub_text.clean(name or "").replace("\\", "/").replace("\n", " "))
+    stem = os.path.splitext(base)[0]
+    stem = re.sub(r"[^\w .()-]", "", stem).strip(" .")[:80].rstrip(" .")
     return f"{stem or 'file'}.{kind}"
 
 
@@ -852,8 +866,12 @@ def remove_attachment(viewer: Viewer, attachment: dict, page: dict, rev: int | N
     """Take a file off its page. A draft's file is deleted outright; a
     published page's is kept for History (new version). Error or None."""
     if page["version"] == 0:
+        # Nothing has fingerprinted a draft's file: its bytes go now, but the
+        # row stays as a tombstone so its photo number is never handed out again.
+        stamp = now_stamp()
         with closing(connect()) as conn, conn:
-            conn.execute("DELETE FROM hub_attachments WHERE id=?", (attachment["id"],))
+            conn.execute("UPDATE hub_attachments SET removed_at=?, removed_by=?, purged_at=?, "
+                         "text='' WHERE id=?", (stamp, viewer.name, stamp, attachment["id"]))
             _touch(conn, page["id"], viewer.name)
             _audit(conn, viewer.name, "file removed", page["id"], attachment["filename"])
         _remove_file(attachment["stored_name"])

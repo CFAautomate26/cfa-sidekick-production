@@ -256,7 +256,7 @@ def _safe_next(default_endpoint: str = "shift.today"):
     Hub), never off-site."""
     target = request.form.get("next", "") or request.args.get("next", "")
     if (target.startswith(("/shift", "/hub")) and "//" not in target
-            and "\\" not in target):
+            and "\\" not in target and target.isprintable()):
         return redirect(target)
     return redirect(url_for(default_endpoint))
 

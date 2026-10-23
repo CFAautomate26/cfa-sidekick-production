@@ -685,6 +685,12 @@ def test_unicode_digit_ids_are_not_a_crash(client):
     assert resp.status_code == 302
 
 
+def _link_slack(member_id, leader_name, slack_id="U123"):
+    with shift_db.connect() as conn:
+        conn.execute("UPDATE team_members SET slack_id=? WHERE id=?", (slack_id, member_id))
+        conn.execute("UPDATE leaders SET slack_id=? WHERE name=?", (slack_id, leader_name))
+
+
 def test_promoted_member_counts_once_and_consistently(client):
     member = add_member("Sam Patel", "1042")
     login_operator(client)
@@ -694,12 +700,30 @@ def test_promoted_member_counts_once_and_consistently(client):
     client.post(f"/hub/page/{pid}/ack", data={"version": "1"})
     client.post("/hub/logout")
     make_leader(client, "Sam Patel", "7777")           # promoted...
-    hub_db.revoke(member["id"], "Operator")            # ...and clock-in access removed
+    _link_slack(member["id"], "Sam Patel")             # ...and the Slack pull links them
+    hub_db.revoke(member["id"], "Operator")
     page = hub_db.get_page(pid)
-    sam = next(p for p in hub_db.readers(page) if p["name"] == "Sam Patel")
-    assert sam["state"] == "current"
+    sams = [p for p in hub_db.readers(page) if p["name"] == "Sam Patel"]
+    assert [p["state"] for p in sams] == ["current"]   # listed once, as read
     login_leader(client, "Sam Patel", "7777")
     assert b"all caught up" in client.get("/hub/to-read").data
+
+
+def test_same_name_is_not_the_same_person(client):
+    login_operator(client)
+    pid = new_page(client, title="Harassment policy", category="HR", required="1")
+    client.post("/shift/logout")
+    make_leader(client, "Alex", "5151")
+    login_leader(client, "Alex", "5151")
+    client.post(f"/hub/page/{pid}/ack", data={"version": "1"})
+    client.post("/shift/logout")
+    leader = next(l for l in shift_db.leaders() if l["name"] == "Alex")
+    shift_db.set_leader_active(leader["id"], False)    # Alex leaves...
+    new_alex = add_member("Alex", "7070")               # ...a new hire shares the name
+    viewer = hub_db.Viewer("member", new_alex["id"], "Alex")
+    assert [p["id"] for p in hub_db.to_read(viewer)] == [pid]
+    states = {p["name"]: p["state"] for p in hub_db.readers(hub_db.get_page(pid))}
+    assert states["Alex"] == "none"
 
 
 def test_restoring_an_older_backup_never_hands_confirmations_to_someone_else(client):
@@ -858,3 +882,68 @@ def test_too_big_goes_back_to_the_page(client):
 
 def test_emoji_joiners_survive():
     assert hub_text.clean("🧑‍🍳 cook") == "🧑‍🍳 cook"
+
+
+def test_review_round_two(client):
+    # next= with a line break is refused, not a 500 after signing in
+    add_member()
+    resp = client.post("/hub/login", data={"name": "Sam", "code": "1042",
+                                           "next": "/hub/\r\nx"})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/hub/")
+    client.post("/hub/logout")
+    login_operator(client)
+    pid = new_page(client, title="Cash", body="Steps.")
+    stale = rev(pid)
+    form = {"category_id": category_id("FOH Operations"), "title": "Cash", "body": "Steps.",
+            "section": "Training"}
+    client.post(f"/hub/page/{pid}/edit", data=dict(form, leaders_only="1", rev=rev(pid)))
+    # previewing a stale copy keeps the stale rev in the form (and says so)
+    preview = client.post(f"/hub/page/{pid}/edit", data=dict(form, rev=stale, action="preview"))
+    assert f'name="rev" value="{stale}"'.encode() in preview.data
+    assert b"changed since you opened it" in preview.data
+    assert client.post(f"/hub/page/{pid}/edit", data=dict(form, rev=stale)).status_code == 409
+    assert hub_db.get_page(pid)["leaders_only"] == 1
+    # page text over the limit is refused with the text kept, never cut
+    long_body = "word " * 20_001
+    resp = client.post(f"/hub/page/{pid}/edit", data=dict(form, body=long_body, rev=rev(pid)))
+    assert resp.status_code == 400 and b"over 100,000 characters" in resp.data
+    assert hub_db.get_page(pid)["body"] == "Steps."
+
+
+def test_draft_photo_numbers_are_not_reused(client):
+    login_operator(client)
+    pid = new_page(client, title="Draft photos", body="[photo: 1]", publish=False)
+    upload(client, pid, PNG, "a.png")
+    first = hub_db.attachments(pid)[0]
+    client.post(f"/hub/file/{first['id']}/remove", data={"rev": rev(pid)})
+    upload(client, pid, PNG + b"x", "b.png")
+    assert hub_db.attachments(pid)[0]["photo_no"] == 2
+    assert not os.path.exists(hub_db.file_path(first))
+
+
+def test_word_import_utf16_bomb_moves_and_wrapped_rows():
+    w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    bomb = ('<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE d [<!ENTITY e "' + "A" * 200
+            + f'">]><w:document {w}><w:body><w:p><w:r><w:t>' + "&e;" * 5000
+            + "</w:t></w:r></w:p></w:body></w:document>").encode("utf-16")
+    assert hub_text.docx_import(io.BytesIO(_docx_raw(bomb))) == ("", [])
+    moved = (f'<w:document {w}><w:body><w:p><w:moveFrom><w:r><w:t>Wash hands</w:t></w:r>'
+             '</w:moveFrom></w:p><w:p><w:r><w:t>Gloves on</w:t></w:r></w:p><w:p><w:moveTo>'
+             '<w:r><w:t>Wash hands</w:t></w:r></w:moveTo></w:p>'
+             '<w:tbl><w:sdt><w:sdtContent><w:tr><w:tc><w:p><w:r><w:t>Below 41F</w:t></w:r>'
+             '</w:p></w:tc><w:tc><w:p><w:r><w:t>OK</w:t></w:r></w:p></w:tc></w:tr>'
+             '</w:sdtContent></w:sdt></w:tbl></w:body></w:document>')
+    text, notes = hub_text.docx_import(io.BytesIO(_docx_raw(moved.encode())))
+    assert text.count("Wash hands") == 1 and "Below 41F · OK" in text
+    assert notes and "tracked changes" in notes[0]
+
+
+def test_links_and_photo_lines():
+    html = str(hub_text.render("Order at <https://www.cfahome.com/order>. **https://x.com**"))
+    assert 'href="https://www.cfahome.com/order"' in html
+    assert '<strong><a href="https://x.com"' in html
+    assert "[photo: 3]" not in str(hub_text.render("Step\n[photo: 3]"))
+    assert hub_text.clean("a\u2028[photo: 1]") == "a\n[photo: 1]"
+    assert hub_db.safe_filename("Version 2.1 - Fryer cleaning procedure for the boh team "
+                                "with lots of words here to be long enough.pdf", "pdf"
+                                ).startswith("Version 2.1 - Fryer")

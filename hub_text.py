@@ -19,8 +19,10 @@ _CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b\u200e\u200f"
                       "\u202a-\u202e\u2066-\u2069]")
 _SAFE_URL = re.compile(r"^(https?://[^/\\]|mailto:|tel:|/hub/)", re.I)
 _LINK = re.compile(r"\[([^\]\n]{1,200})\]\(([^)\s]{1,500})\)")
-_BARE_URL = re.compile(r"(?<![\w\"'=/])https?://[^\s<]{1,500}")
-_URL_TAIL = ".,;:!?)'\""
+_BARE_URL = re.compile(r"(?<![\w\"'=/])https?://[^\s<>\"]{1,500}")
+_URL_TAIL = ".,;:!?)'\"*_"
+_TOKEN = re.compile("\x00(\\d+)\x00")         # a finished link, held aside
+_LINE_BREAKS = re.compile("[\u2028\u2029\x85]")
 # Spans can't contain their own marker and stop at 300 characters, so a
 # long line full of stray ** or _ stays linear to render.
 _BOLD = re.compile(r"\*\*(?=[^\s*])([^*\n]{1,300}?)(?<=[^\s*])\*\*")
@@ -34,41 +36,38 @@ PHOTO = re.compile(r"^\s*\[photo:\s*(\d{1,3})\]\s*$", re.I)
 def clean(text: str) -> str:
     """Normalize newlines and drop control/bidi characters (which could
     disguise a link or reorder what a reader sees)."""
-    return _CONTROL.sub("", (text or "").replace("\r\n", "\n").replace("\r", "\n"))
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    return _CONTROL.sub("", _LINE_BREAKS.sub("\n", text))
 
 
 def _inline(text: str) -> str:
-    """Escape one line, then add links and emphasis."""
-    out, last = [], 0
-    for m in _LINK.finditer(text):
-        out.append(_plain(text[last:m.start()]))
+    """One line -> safe HTML. Links are built first (from the raw text, so
+    an address never carries an escaped entity or a ** marker) and held
+    aside as tokens; the rest is escaped, emphasis is applied (it can wrap a
+    link, never reach inside one), then the links go back in."""
+    links: list[str] = []
+
+    def hold(html: str) -> str:
+        links.append(html)
+        return f"\x00{len(links) - 1}\x00"
+
+    def markdown_link(m) -> str:
         label, url = m.group(1), m.group(2)
-        if _SAFE_URL.match(url) and "\\" not in url:
-            external = "" if url.startswith("/") else ' target="_blank" rel="noopener"'
-            out.append(f'<a href="{escape(url)}"{external}>{_emphasis(str(escape(label)))}</a>')
-        else:
-            out.append(_plain(m.group(0)))
-        last = m.end()
-    out.append(_plain(text[last:]))
-    return "".join(out)
+        if not _SAFE_URL.match(url) or "\\" in url:
+            return m.group(0)
+        external = "" if url.startswith("/") else ' target="_blank" rel="noopener"'
+        return hold(f'<a href="{escape(url)}"{external}>{_emphasis(str(escape(label)))}</a>')
 
-
-def _plain(text: str) -> str:
-    """Escaped text with bare http(s) URLs linked and emphasis applied
-    (never inside a link, where an underscore is part of the address)."""
-    escaped = str(escape(text))
-    out, last = [], 0
-    for m in _BARE_URL.finditer(escaped):
+    def bare_link(m) -> str:
         url = m.group(0).rstrip(_URL_TAIL)
-        while url.endswith(("&#34", "&#39")):   # an escaped quote, minus its ';'
-            url = url[:-4].rstrip(_URL_TAIL)
         if len(url) <= len("https://"):
-            continue
-        out.append(_emphasis(escaped[last:m.start()]))
-        out.append(f'<a href="{url}" target="_blank" rel="noopener">{url}</a>')
-        last = m.start() + len(url)
-    out.append(_emphasis(escaped[last:]))
-    return "".join(out)
+            return m.group(0)
+        return hold(f'<a href="{escape(url)}" target="_blank" rel="noopener">{escape(url)}</a>'
+                    ) + m.group(0)[len(url):]
+
+    text = _BARE_URL.sub(bare_link, _LINK.sub(markdown_link, text))
+    html = _emphasis(str(escape(text)))
+    return _TOKEN.sub(lambda m: links[int(m.group(1))], html)
 
 
 def _emphasis(escaped: str) -> str:
@@ -101,12 +100,13 @@ def render(text: str, photos: dict | None = None) -> Markup:
         if not line.strip():
             flush_para()
             close_list()
-        elif photo and int(photo.group(1)) in photos:
+        elif photo:
             flush_para()
             close_list()
-            url, alt = photos[int(photo.group(1))]
-            html.append(f'<figure><img src="{escape(url)}" alt="{escape(alt)}" '
-                        f'loading="lazy"></figure>')
+            if int(photo.group(1)) in photos:        # a removed photo shows nothing
+                url, alt = photos[int(photo.group(1))]
+                html.append(f'<figure><img src="{escape(url)}" alt="{escape(alt)}" '
+                            f'loading="lazy"></figure>')
         elif heading:
             flush_para()
             close_list()
@@ -160,18 +160,24 @@ def _read_document(source) -> tuple[ElementTree.Element | None, list[str]]:
                 return None, []
             with z.open(info) as f:
                 data = f.read(_MAX_XML + 1)
-        # Word never writes a DTD; one here can only be an entity bomb.
-        if (len(data) > _MAX_XML or b"<!DOCTYPE" in data or b"<!ENTITY" in data
-                or data.count(b"<") > _MAX_TAGS):
+        if len(data) > _MAX_XML:
             return None, []
-        root = ElementTree.fromstring(data)
+        # Word always writes UTF-8. Checking and parsing the decoded text
+        # (not the bytes) means no declared encoding can hide a DTD — and
+        # Word never writes one, so a DTD here can only be an entity bomb.
+        text = data.decode("utf-8").lstrip("\ufeff")
+        if ("\x00" in text or "<!DOCTYPE" in text or "<!ENTITY" in text
+                or text.count("<") > _MAX_TAGS):
+            return None, []
+        root = ElementTree.fromstring(text)
     except Exception:          # damaged, hostile or simply not a Word file
         return None, []
     notes = []
     if "word/comments.xml" in names:
         notes.append("it had comments (left out — check nothing important was in them)")
-    if root.find(f".//{_W}ins") is not None or root.find(f".//{_W}del") is not None:
-        notes.append("it had tracked changes (insertions kept, deletions left out)")
+    if any(root.find(f".//{_W}{tag}") is not None
+           for tag in ("ins", "del", "moveFrom", "moveTo")):
+        notes.append("it had tracked changes (the latest wording was kept)")
     return root, notes
 
 
@@ -181,7 +187,8 @@ def _run_text(el) -> str:
     parts = []
     for child in el:
         tag = child.tag
-        if tag in (f"{_W}p", f"{_W}txbxContent", f"{_W}del", f"{_MC}Fallback"):
+        if tag in (f"{_W}p", f"{_W}txbxContent", f"{_W}del", f"{_W}moveFrom",
+                   f"{_MC}Fallback"):
             continue
         if tag == f"{_W}r" and _hidden(child):
             continue
@@ -211,8 +218,23 @@ def _paragraphs(el):
     for child in el:
         if child.tag == f"{_W}p":
             yield child
-        elif child.tag not in (f"{_W}txbxContent", f"{_MC}Fallback", f"{_W}del"):
+        elif child.tag not in (f"{_W}txbxContent", f"{_MC}Fallback", f"{_W}del",
+                               f"{_W}moveFrom", f"{_W}tbl"):
             yield from _paragraphs(child)
+        elif child.tag == f"{_W}tbl":
+            for row in _wrapped(child, "tr"):
+                for cell in _wrapped(row, "tc"):
+                    yield from _paragraphs(cell)
+
+
+def _wrapped(el, tag: str):
+    """el's `tag` children, including those Word wraps in content controls
+    (repeating sections) or custom XML."""
+    for child in el:
+        if child.tag == f"{_W}{tag}":
+            yield child
+        elif child.tag in (f"{_W}sdt", f"{_W}sdtContent", f"{_W}customXml"):
+            yield from _wrapped(child, tag)
 
 
 def _text_boxes(el):
@@ -262,9 +284,9 @@ def docx_import(source) -> tuple[str, list[str]]:
 
     def table(tbl):
         new_block()
-        for row in tbl.findall(f"{_W}tr"):
+        for row in _wrapped(tbl, "tr"):
             cells = []
-            for cell in row.findall(f"{_W}tc"):
+            for cell in _wrapped(row, "tc"):
                 parts = []
                 for p in _paragraphs(cell):
                     parts.append(_run_text(p))
@@ -283,7 +305,7 @@ def docx_import(source) -> tuple[str, list[str]]:
                 paragraph(child)
             elif child.tag == f"{_W}tbl":
                 table(child)
-            elif child.tag != f"{_W}del":
+            elif child.tag not in (f"{_W}del", f"{_W}moveFrom"):
                 walk(child)
 
     body = root.find(f"{_W}body")

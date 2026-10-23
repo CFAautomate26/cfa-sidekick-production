@@ -8,6 +8,7 @@
 <div class="card"><img src="{{ url_for('hub.file', file_id=att.id) }}" alt="{{ att.alt or att.filename }}"
   style="max-width:100%; height:auto; border-radius:10px;"></div>
 {% endif %}
+{% if error %}<div class="callout warm">{{ error }}</div>{% endif %}
 <form method="post" action="{{ url_for('hub.remove_file', file_id=att.id) }}" class="card">
   {% if page.version %}
   <div class="muted" style="margin-bottom:6px;">This page is published, so removing the file makes a new version.

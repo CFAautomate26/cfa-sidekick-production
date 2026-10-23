@@ -272,11 +272,11 @@ def _file_url(f: dict) -> str:
 
 
 @hub_bp.route("/page/<int:page_id>")
-def page(page_id):
+def page(page_id, upload_error: str | None = None):
     pg = _viewable_page(page_id)
     files = hub_db.attachments(page_id)
     photos = hub_db.photo_map(files, _file_url)
-    shown = {int(m.group(1)) for line in pg["body"].splitlines()
+    shown = {int(m.group(1)) for line in hub_text.clean(pg["body"]).split("\n")
              if (m := hub_text.PHOTO.match(line))}
     gallery = [(n, url, alt) for n, (url, alt) in sorted(photos.items()) if n not in shown]
     mine = hub_db.my_acks(g.viewer, [page_id]).get(page_id)
@@ -290,7 +290,7 @@ def page(page_id):
         gallery=gallery, mine=mine, needs_ack=needs_ack, POLICY_CHECKS=_POLICY_CHECKS,
         changes=(hub_db.changes_since(page_id, mine["version"])
                  if needs_ack and mine else []),
-        can_edit=hub_db.can_edit(g.viewer, pg),
+        can_edit=hub_db.can_edit(g.viewer, pg), upload_error=upload_error,
         publish_block=(hub_db.publish_block(g.viewer, pg)
                        if pg["status"] == "draft" else None),
         ACK_WORDING=hub_db.ACK_WORDING)
@@ -386,7 +386,11 @@ def _change_to_live_page(pg: dict) -> tuple[dict | None, str | None]:
 def _edit_context(page: dict | None, fields: dict, **extra) -> dict:
     cats = hub_db.categories(include_inactive=True)
     files = hub_db.attachments(page["id"]) if page else []
-    return dict(page=page, f=fields, categories=cats,
+    # A re-drawn form (preview, error) keeps the rev it was first drawn
+    # from: a stale copy must stay stale until the editor reloads.
+    form_rev = (request.form.get("rev", "") if request.method == "POST"
+                else page["rev"] if page else "")
+    return dict(page=page, f=fields, categories=cats, form_rev=form_rev,
                 sections=hub_db.sections(), POLICY_CHECKS=_POLICY_CHECKS,
                 photo_numbers=hub_db.photo_map(files, _file_url), **extra)
 
@@ -401,6 +405,8 @@ def _check_category(fields: dict, page: dict | None) -> str | None:
         return "Pick a category."
     if not fields["title"]:
         return "Give the page a title."
+    if len(fields["body"]) > hub_db.BODY_MAX:
+        return hub_db.BODY_TOO_LONG
     was_policy = bool(page and page["category_policy"])
     if (page and page["version"] > 0 and (cat["policy"] or was_policy)
             and not g.viewer.is_operator):
@@ -448,6 +454,8 @@ def edit_page(page_id):
     publishing = pg["version"] > 0 and (content_changed or into_policy)
     preview = request.form.get("action") == "preview"
     error = _check_category(fields, pg)
+    if not error and hub_db.as_id(request.form.get("rev")) != pg["rev"]:
+        error = hub_db.STALE
     if not error and not preview and publishing:
         if pg["needs_counsel"]:
             error = ("This page is flagged for a lawyer's review — the Operator clears "
@@ -456,7 +464,8 @@ def edit_page(page_id):
             error = "Tick each review check before publishing a policy change."
     if error or preview:
         photos = hub_db.photo_map(hub_db.attachments(page_id), _file_url)
-        return _render_edit(pg, fields, 400 if error else 200, error=error,
+        status = 409 if error == hub_db.STALE else 400 if error else 200
+        return _render_edit(pg, fields, status, error=error,
                             preview=None if error else hub_text.render(fields["body"], photos))
     summary = hub_db.update_page(
         g.viewer, pg, fields, hub_db.as_id(request.form.get("rev")),
@@ -589,15 +598,16 @@ def upload(page_id):
         flash("Choose a file first.")
         return redirect(url_for("hub.page", page_id=page_id))
     change, error = _change_to_live_page(pg)
+    row = None
+    if not error:
+        row, error = hub_db.add_attachment(g.viewer, pg, upload.filename,
+                                           upload.read(hub_db.MAX_FILE_BYTES + 1),
+                                           alt=request.form.get("alt") or "", **change)
     if error:
-        flash(error)
-        return redirect(url_for("hub.page", page_id=page_id))
-    row, error = hub_db.add_attachment(g.viewer, pg, upload.filename,
-                                       upload.read(hub_db.MAX_FILE_BYTES + 1),
-                                       alt=request.form.get("alt") or "", **change)
-    if error:
-        flash(error)
-    elif row["photo_no"]:
+        # Re-draw the page with the upload form open, keeping what was typed
+        # (browsers never let a page re-fill the chosen file).
+        return page(page_id, upload_error=error), 400
+    if row["photo_no"]:
         flash(f"Photo {row['photo_no']} added. Type [photo: {row['photo_no']}] on its own "
               "line in the page text to show it there — otherwise it shows at the bottom.")
     else:
@@ -626,8 +636,8 @@ def remove_file(file_id):
     if not error:
         error = hub_db.remove_attachment(g.viewer, att, pg, **(change or {"rev": None}))
     if error:
-        flash(error)
-        return redirect(url_for("hub.remove_file", file_id=file_id))
+        return render_template("hub/file_remove.html", att=att, page=pg, error=error,
+                               POLICY_CHECKS=_POLICY_CHECKS), 400
     flash(f"Removed {att['filename']}." + (" It stays in the page's History."
                                            if pg["version"] else ""))
     return redirect(url_for("hub.page", page_id=att["page_id"]))
@@ -663,6 +673,11 @@ def import_word():
               "them in Word and Save As .docx first.")
         return redirect(url_for("hub.category", category_id=cat["id"]))
     text, notes = hub_text.docx_import(io.BytesIO(data))
+    if len(text) > hub_db.BODY_MAX:
+        flash(f"That document is too long for one page ({len(text):,} characters of text; "
+              f"the limit is {hub_db.BODY_MAX:,}). Split it into parts in Word, then import "
+              "each one.")
+        return redirect(url_for("hub.category", category_id=cat["id"]))
     if not text.strip():
         flash("No text could be read from that Word file — it may be all pictures, or "
               "saved as “Strict Open XML”. Save it as a regular Word Document (.docx) "
@@ -670,7 +685,7 @@ def import_word():
         return redirect(url_for("hub.category", category_id=cat["id"]))
     title, body = _split_title(text, upload.filename)
     fields = {"category_id": cat["id"], "section": _line("section", 60), "title": title,
-              "summary": "", "keywords": "", "body": body[:100_000], "leaders_only": 0,
+              "summary": "", "keywords": "", "body": body, "leaders_only": 0,
               "required": 0, "annual_review": 0}
     page_id = hub_db.create_page(g.viewer, fields)
     flash("Imported as a draft — check the formatting, then publish."

@@ -1,6 +1,6 @@
 {# The "what changed" part of a change to a published page. Needs `page`
    and POLICY_CHECKS; `policy` (optional) forces the policy checks. #}
-<input type="hidden" name="rev" value="{{ page.rev }}">
+{% if not rev_in_form %}<input type="hidden" name="rev" value="{{ request.form.get('rev', page.rev) if request.method == 'POST' else page.rev }}">{% endif %}
 {% if page.version %}
 <label class="field" for="change_note-{{ field_id|default('x') }}">What changed <span class="muted">(optional)</span></label>
 <input type="text" id="change_note-{{ field_id|default('x') }}" name="change_note" maxlength="300"
@@ -14,7 +14,7 @@
 {% if page.category_policy or policy %}
 <div class="muted" style="margin-top:8px;">{{ policy_label|default('Policy page — confirm each before the change goes live:') }}</div>
 {% for key, label in POLICY_CHECKS %}
-<label class="checkline"><input type="checkbox" name="{{ key }}" value="1" {{ 'checked' if request.form.get(key) }}> {{ label }}</label>
+<label class="checkline"><input type="checkbox" name="{{ key }}" value="1" {{ 'checked' if request.form.get(key) }}{{ ' required' if page.category_policy and checks_required|default(true) }}> {{ label }}</label>
 {% endfor %}
 {% endif %}
 {% endif %}
