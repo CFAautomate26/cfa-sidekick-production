@@ -355,8 +355,9 @@ details.more[open] > summary { margin-bottom: 10px; }
 table.plain { width: 100%; border-collapse: collapse; font-size: var(--fs-small); }
 table.plain td, table.plain th { padding: 9px 6px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
 
-/* Hub badges by meaning (b-* are the design names) */
-.badge { background: var(--gray-100); color: var(--gray-700); }
+/* Hub badges by meaning (aliases of the b-* design colours; a plain .badge
+   is the neutral gray — :not() keeps this rule from overriding .b-*) */
+.badge:not([class*=" b-"]):not(.req):not(.ok):not(.warn) { background: var(--gray-100); color: var(--gray-700); }
 .badge.req { background: var(--red-100); color: var(--red-700); }
 .badge.ok { background: var(--ok-bg); color: var(--ok); }
 .badge.warn { background: var(--tan-300); color: var(--tan-ink); }
