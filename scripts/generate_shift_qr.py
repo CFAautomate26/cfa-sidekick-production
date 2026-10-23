@@ -99,7 +99,20 @@ def centred_text(draw, y, text, font, fill, width):
     return y + (box[3] - box[1])
 
 
-def build_poster(qr_img: Image.Image) -> Image.Image:
+SHIFT_TEXT = {
+    "eyebrow": "LEADERSHIP TEAM",
+    "title": "SHIFT LEAD APP",
+    "body": ("Checklists, lineups, goals and shift notes —",
+             "everything you need to run the shift,",
+             "right on your phone."),
+    "hints": ("Sign in with your PIN, then Add to Home Screen",
+              "No PIN yet? Ask the Operator."),
+}
+
+
+def build_poster(qr_img: Image.Image, text: dict = SHIFT_TEXT) -> Image.Image:
+    """The 8.5x11 poster; `text` swaps the wording (the Team Hub poster in
+    generate_hub_qr.py reuses this layout)."""
     W, H = 2550, 3300  # 8.5x11" at 300 DPI
     poster = Image.new("RGB", (W, H), CREAM)
     d = ImageDraw.Draw(poster)
@@ -114,8 +127,8 @@ def build_poster(qr_img: Image.Image) -> Image.Image:
     f_hint = load_font("Medium", 58)
 
     y = 90
-    y = centred_text(d, y, "LEADERSHIP TEAM", f_eyebrow, WHITE, W) + 28
-    centred_text(d, y, "SHIFT LEAD APP", f_title, WHITE, W)
+    y = centred_text(d, y, text["eyebrow"], f_eyebrow, WHITE, W) + 28
+    centred_text(d, y, text["title"], f_title, WHITE, W)
 
     logo = Image.open(LOGO_PATH).convert("RGBA")
     scale = 620 / logo.width
@@ -125,11 +138,7 @@ def build_poster(qr_img: Image.Image) -> Image.Image:
     y = 590 + logo_r.height + 40
     y = centred_text(d, y, "WHARNCLIFFE & WONDERLAND", f_store, CFA_RED, W) + 70
 
-    for line in (
-        "Checklists, lineups, goals and shift notes —",
-        "everything you need to run the shift,",
-        "right on your phone.",
-    ):
+    for line in text["body"]:
         y = centred_text(d, y, line, f_body, INK, W) + 26
 
     qr_size = 1150
@@ -145,9 +154,9 @@ def build_poster(qr_img: Image.Image) -> Image.Image:
 
     y = qy + qr_card.height + 70
     y = centred_text(d, y, "SCAN TO OPEN", f_scan, CFA_RED, W) + 40
-    y = centred_text(d, y, "Sign in with your PIN, then Add to Home Screen",
-                     f_hint, SOFT, W) + 22
-    centred_text(d, y, "No PIN yet? Ask the Operator.", f_hint, SOFT, W)
+    first_hint, second_hint = text["hints"]
+    y = centred_text(d, y, first_hint, f_hint, SOFT, W) + 22
+    centred_text(d, y, second_hint, f_hint, SOFT, W)
 
     foot_h = 170
     d.rectangle([0, H - foot_h, W, H], fill=CFA_RED)

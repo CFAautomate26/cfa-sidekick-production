@@ -3,7 +3,7 @@
 {% block content %}
 <div class="crumbs"><a href="{{ url_for('hub.manage') }}">← Manage</a></div>
 <h1 class="page">Who can sign in</h1>
-<div class="sub">{{ with_access }} of {{ people|length }} people on the roster can sign in with first name +
+<div class="sub">{{ with_access }} of {{ total }} people on the roster can sign in with first name +
   clock-in number. Leaders always sign in with their Shift Lead PIN.</div>
 
 <div class="callout">🔒 Clock-in numbers act as passwords: type them here only — never in a chat or email.
@@ -19,6 +19,17 @@
     <div style="margin-top:10px;"><button class="pill primary small" type="submit">Give access</button></div>
   </form>
 </details>
+
+<form method="get" action="{{ url_for('hub.people') }}" class="inline-form" style="margin-bottom:8px;">
+  <input type="text" name="q" value="{{ q }}" placeholder="Find a name" aria-label="Find a name" maxlength="60">
+  {% if show %}<input type="hidden" name="show" value="{{ show }}">{% endif %}
+  <button class="pill small" type="submit">Find</button>
+</form>
+<div class="chiprow">
+  {% for key, label in [('', 'Everyone'), ('no', 'No access yet'), ('yes', 'Can sign in')] %}
+  <a class="pill small {{ 'on' if show == key }}" href="{{ url_for('hub.people', q=q or None, show=key or None) }}">{{ label }}</a>
+  {% endfor %}
+</div>
 
 {% for p in people %}
 <div class="card" id="m{{ p.id }}">
@@ -41,6 +52,6 @@
   {% endif %}
 </div>
 {% else %}
-<div class="empty">The roster is empty — add people in the Shift Lead app's Team roster.</div>
+<div class="empty">{{ 'No one matches.' if q or show else "The roster is empty — add people in the Shift Lead app's Team roster." }}</div>
 {% endfor %}
 {% endblock %}

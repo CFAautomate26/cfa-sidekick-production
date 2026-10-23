@@ -62,6 +62,24 @@ Canada.
   `assets/shift-qr/` points at the live `/shift` URL;
   `scripts/generate_shift_qr.py` regenerates it (pass a different URL as
   an argument if the service ever moves).
+- `hub.py` + `hub_db.py` + `hub_text.py` — the Team Hub at `/hub`: the
+  store's "here's how we do it" library (categories HR / FOH Operations /
+  BOH Operations / Leadership Development, with sections inside; drafts →
+  versioned publishing; required reading with append-only "I've received
+  and read this version" confirmations; search; photos/files; Word import;
+  yearly-review and lawyer-review flags; activity log). Team members sign
+  in with first name + clock-in number (`hub_access`, HMAC under
+  `meta.hub_pepper`, Operator-granted, never exported or logged); leaders
+  reuse the Shift Lead session (`shift_app.leader_session_valid`). Editors
+  = Operator + admin-role leaders; the HR "policy" category is published
+  and changed only by the Operator after the review checks. Same SQLite DB
+  and backups (hub tables in `EXPORT_TABLES`, minus `hub_access`; files in
+  `hub_files/` beside the DB or `SHIFT_HUB_FILES_DIR`, not in backups).
+  Registered fault-isolated after `/shift`. No scripts; strict CSP. Pages
+  hold processes and policies only — never records about a specific
+  person. Templates in `templates/hub/`; guide:
+  [docs/team-hub.md](docs/team-hub.md); crew-room QR poster in
+  `assets/hub-qr/` (`scripts/generate_hub_qr.py`).
 - `slack_coverage.py` — Slack Events API blueprint (`POST /slack/events`)
   that auto-responds in-thread in the #shift-coverage Slack channel:
   validates `🔄 COVERAGE REQUEST` template posts, nags un-released shifts

@@ -653,7 +653,12 @@ def save_category():
 @operator_required
 def people():
     rows = hub_db.people()
-    return render_template("hub/people.html", people=rows,
+    q = " ".join((request.args.get("q") or "").split())[:60]
+    show = request.args.get("show") if request.args.get("show") in ("yes", "no") else ""
+    shown = [p for p in rows
+             if (not q or q.casefold() in p["name"].casefold())
+             and (not show or bool(p["has_access"]) == (show == "yes"))]
+    return render_template("hub/people.html", people=shown, total=len(rows), q=q, show=show,
                            with_access=sum(1 for p in rows if p["has_access"]))
 
 

@@ -13,6 +13,7 @@
 {% include "shared/cfa_style.html" %}
 <style>
   .doc { font-size: 16px; line-height: 1.55; }
+  .doc > :first-child { margin-top: 0; }
   .doc h2 { font-size: 19px; margin: 18px 0 6px; }
   .doc h3 { font-size: 17px; margin: 16px 0 6px; }
   .doc h4 { font-size: 15px; margin: 14px 0 4px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--soft); }
@@ -64,7 +65,7 @@
 <div class="topbar">
   <a class="brand" href="{{ url_for('hub.home') }}">Team Hub
     <small>CFA Wharncliffe &amp; Wonderland</small></a>
-  <a class="whoami" href="{{ url_for('hub.me') }}">{{ viewer.name }}
+  <a class="whoami" href="{{ url_for('hub.me') }}">{{ viewer.name.split()[0] if viewer.kind == 'member' else viewer.name }}
     {% if hub_to_read %}<span class="dot" title="Pages to read"></span>{% endif %}</a>
 </div>
 {% endif %}
