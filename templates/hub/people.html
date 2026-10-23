@@ -1,0 +1,46 @@
+{% extends "hub/base.html" %}
+{% block title %}Who can sign in{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ url_for('hub.manage') }}">← Manage</a></div>
+<h1 class="page">Who can sign in</h1>
+<div class="sub">{{ with_access }} of {{ people|length }} people on the roster can sign in with first name +
+  clock-in number. Leaders always sign in with their Shift Lead PIN.</div>
+
+<div class="callout">🔒 Clock-in numbers act as passwords: type them here only — never in a chat or email.
+  They're stored scrambled and never shown again, and they're left out of backups.</div>
+
+<details class="more card">
+  <summary>📋 Add many at once</summary>
+  <form method="post" action="{{ url_for('hub.bulk_grant') }}" autocomplete="off">
+    <label class="field" for="lines">One person per line: name, clock-in number</label>
+    <textarea id="lines" name="lines" rows="8" placeholder="Sam Patel, 1042&#10;Jordan, 1077" spellcheck="false"></textarea>
+    <label class="checkline"><input type="checkbox" name="add_missing" value="1"> Add names that aren't on the roster yet</label>
+    <div class="muted">A first name alone works when only one person on the roster has it.</div>
+    <div style="margin-top:10px;"><button class="pill primary small" type="submit">Give access</button></div>
+  </form>
+</details>
+
+{% for p in people %}
+<div class="card" id="m{{ p.id }}">
+  <div class="row-between">
+    <div><strong>{{ p.name }}</strong>
+      {% if p.has_access %}<span class="badge ok">Can sign in</span>{% endif %}
+      {% if not p.active %}<span class="badge">Off the roster</span>{% endif %}
+      {% if p.has_access %}<div class="muted">Since {{ p.granted_at }} · by {{ p.granted_by }}</div>{% endif %}</div>
+    {% if p.has_access %}
+    <form method="post" action="{{ url_for('hub.revoke', member_id=p.id) }}">
+      <button class="pill small" type="submit">Remove</button></form>
+    {% endif %}
+  </div>
+  {% if p.active %}
+  <form method="post" action="{{ url_for('hub.grant', member_id=p.id) }}" class="inline-form" style="margin-top:8px;" autocomplete="off">
+    <input type="password" name="code" inputmode="numeric" autocomplete="off" maxlength="20"
+           placeholder="{{ 'New clock-in number' if p.has_access else 'Clock-in number' }}" aria-label="Clock-in number for {{ p.name }}" required>
+    <button class="pill small {{ '' if p.has_access else 'primary' }}" type="submit">{{ 'Change' if p.has_access else 'Give access' }}</button>
+  </form>
+  {% endif %}
+</div>
+{% else %}
+<div class="empty">The roster is empty — add people in the Shift Lead app's Team roster.</div>
+{% endfor %}
+{% endblock %}

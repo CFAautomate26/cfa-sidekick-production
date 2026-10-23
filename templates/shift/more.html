@@ -4,6 +4,10 @@
 <h1 class="page">More</h1>
 <div class="sub">Signed in as <strong>{{ shift_name }}</strong>{{ ' (admin)' if shift_is_admin }}</div>
 
+<a class="card tap" href="/hub/">
+  <h2>📚 Team Hub</h2>
+  <div class="progress-note">How we do it here — processes, training and policies for the whole team</div>
+</a>
 <a class="card tap" href="{{ url_for('shift.announcements') }}">
   <h2>📣 Announcements
     {% if unread_announcements %}<span class="critical-flag">● {{ unread_announcements }} new</span>{% endif %}</h2>

@@ -429,6 +429,120 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_lineup_slot
     ON lineup_assignments(lineup_date, daypart, position_id, member_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_notes_date ON shift_notes(note_date);
 CREATE INDEX IF NOT EXISTS idx_goal_updates_goal ON goal_updates(goal_id);
+
+-- ---------------------------------------------------------------------------
+-- Team Hub (/hub): the store's "how we do it" library — see hub_db.py and
+-- docs/team-hub.md. Processes and policies only, never personnel records.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS hub_categories (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT '📘',
+    blurb TEXT NOT NULL DEFAULT '',
+    leaders_only INTEGER NOT NULL DEFAULT 0,
+    policy INTEGER NOT NULL DEFAULT 0,          -- HR-style: only the Operator publishes
+    sort INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+-- A page's live state; every published version is also kept, immutably,
+-- in hub_page_versions. status: draft (editors only) | published | retired.
+-- version 0 = never published.
+CREATE TABLE IF NOT EXISTS hub_pages (
+    id INTEGER PRIMARY KEY,
+    category_id INTEGER NOT NULL REFERENCES hub_categories(id) ON DELETE CASCADE,
+    section TEXT NOT NULL DEFAULT '',           -- e.g. Training, Procedures
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    keywords TEXT NOT NULL DEFAULT '',          -- "also called", for search
+    body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    leaders_only INTEGER NOT NULL DEFAULT 0,
+    required INTEGER NOT NULL DEFAULT 0,        -- everyone with access acknowledges it
+    needs_counsel INTEGER NOT NULL DEFAULT 0,   -- blocks publishing until cleared
+    annual_review INTEGER NOT NULL DEFAULT 0,   -- e.g. OHSA harassment policy
+    review_by TEXT,                             -- YYYY-MM-DD
+    version INTEGER NOT NULL DEFAULT 0,
+    ack_version INTEGER NOT NULL DEFAULT 0,     -- read confirmations count from here
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    published_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_hub_pages_category ON hub_pages(category_id, status);
+
+CREATE TABLE IF NOT EXISTS hub_page_versions (
+    id INTEGER PRIMARY KEY,
+    page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    change_note TEXT NOT NULL DEFAULT '',       -- shown to earlier readers on re-read
+    content_hash TEXT NOT NULL,
+    saved_at TEXT NOT NULL,
+    saved_by TEXT NOT NULL,
+    reviewed_by TEXT,                           -- policy pages: who checked it, when
+    reviewed_at TEXT,
+    UNIQUE (page_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS hub_attachments (
+    id INTEGER PRIMARY KEY,
+    page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,                     -- the uploader's name, display only
+    stored_name TEXT NOT NULL UNIQUE,           -- 32 hex chars + no extension, on disk
+    kind TEXT NOT NULL,                         -- pdf|png|jpg|gif|webp|docx|xlsx|pptx
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    alt TEXT NOT NULL DEFAULT '',               -- images: what it shows
+    text TEXT NOT NULL DEFAULT '',              -- extracted words, for search
+    uploaded_at TEXT NOT NULL,
+    uploaded_by TEXT NOT NULL
+);
+
+-- Append-only proof a person received a version: never edited or deleted.
+CREATE TABLE IF NOT EXISTS hub_acks (
+    id INTEGER PRIMARY KEY,
+    page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    reader_key TEXT NOT NULL,                   -- member:<id> | leader:<id> | operator
+    reader_name TEXT NOT NULL,
+    wording TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    acked_at TEXT NOT NULL,
+    UNIQUE (page_id, version, reader_key)
+);
+
+CREATE TABLE IF NOT EXISTS hub_reviews (
+    id INTEGER PRIMARY KEY,
+    page_id INTEGER NOT NULL REFERENCES hub_pages(id) ON DELETE CASCADE,
+    reviewed_at TEXT NOT NULL,
+    reviewed_by TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS hub_audit (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL,
+    who TEXT NOT NULL,
+    action TEXT NOT NULL,
+    page_id INTEGER,
+    detail TEXT NOT NULL DEFAULT ''
+);
+
+-- Who may sign in to the Hub with first name + clock-in number. Kept apart
+-- from team_members (whose rows are read and exported whole) and never in
+-- backups; a restore re-attaches each grant by name (see import_json).
+-- code_hash is an HMAC under meta.hub_pepper, so the same number can't be
+-- given to two people.
+CREATE TABLE IF NOT EXISTS hub_access (
+    member_id INTEGER PRIMARY KEY REFERENCES team_members(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    granted_at TEXT NOT NULL,
+    granted_by TEXT NOT NULL
+);
 """
 
 
@@ -534,6 +648,18 @@ SEED_TEMPLATES = [
     ]),
 ]
 
+# Team Hub categories, seeded once (the Operator renames/adds them in the
+# Hub). (name, icon, blurb, leaders_only, policy)
+HUB_SEED_CATEGORIES = [
+    ("HR", "📋", "Policies, the handbook, and how HR works here", 0, 1),
+    ("FOH Operations", "🥤",
+     "Front counter, drive-thru and dining room — procedures and training", 0, 0),
+    ("BOH Operations", "🍳", "The kitchen — procedures, food safety and training", 0, 0),
+    ("Leadership Development", "🌱", "LDP — for our leaders", 1, 0),
+]
+HUB_PAGE_STATUSES = ("draft", "published", "retired")
+HUB_FILE_KINDS = ("pdf", "png", "jpg", "gif", "webp", "docx", "xlsx", "pptx")
+
 SEED_POSITIONS = [
     # (name, area, sort)
     ("Shift Lead — FOH", "Leadership", 0),
@@ -575,6 +701,7 @@ def init_db() -> None:
             _seed_course(conn)
             _seed_cleaning(conn)
             _seed_schedule_log(conn)
+            _seed_hub(conn)
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -882,6 +1009,18 @@ def _seed_cleaning(conn) -> None:
             added += 1
         conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, stamp))
         print(f"shift_db: seeded {added} station cleaning lists ({key}) at {stamp}")
+
+
+def _seed_hub(conn) -> None:
+    """Seed the Team Hub's starting categories once."""
+    if conn.execute("SELECT 1 FROM meta WHERE key='hub_seeded'").fetchone():
+        return
+    if not conn.execute("SELECT 1 FROM hub_categories LIMIT 1").fetchone():
+        conn.executemany(
+            "INSERT INTO hub_categories (name, icon, blurb, leaders_only, policy, sort) "
+            "VALUES (?,?,?,?,?,?)",
+            [(*c, n) for n, c in enumerate(HUB_SEED_CATEGORIES)])
+    conn.execute("INSERT INTO meta (key, value) VALUES ('hub_seeded', ?)", (now_stamp(),))
 
 
 def _seed_schedule_log(conn) -> None:
@@ -3051,7 +3190,11 @@ EXPORT_TABLES = [
     "positions", "lineup_assignments", "shift_notes", "announcements",
     "announcement_reads", "course_lessons", "lesson_progress", "leader_tasks",
     "guest_recoveries", "oneonone_topics", "oneonone_member_topics", "shoutouts",
+    "hub_categories", "hub_pages", "hub_page_versions", "hub_attachments", "hub_acks",
+    "hub_reviews", "hub_audit",
 ]
+# A backup from before the Team Hub existed leaves the Hub as it is.
+HUB_TABLES = [t for t in EXPORT_TABLES if t.startswith("hub_")]
 
 
 def session_epoch() -> str:
@@ -3129,6 +3272,14 @@ def import_json(raw: str) -> str | None:
             if not all(isinstance(v, (str, int, float, type(None)))
                        for v in row.values()):
                 return f"Backup section '{table}' has a malformed row."
+    # Hub file rows name files on disk: only names the Hub itself makes.
+    for row in payload.get("hub_attachments", []):
+        if (not re.fullmatch(r"[0-9a-f]{32}", str(row.get("stored_name", "")))
+                or row.get("kind") not in HUB_FILE_KINDS):
+            return "Backup section 'hub_attachments' has a malformed row."
+    for row in payload.get("hub_pages", []):
+        if row.get("status", "draft") not in HUB_PAGE_STATUSES:
+            return "Backup section 'hub_pages' has a malformed row."
 
     # Restored leader accounts get an unmatchable PIN hash: the Operator
     # resets PINs after a restore. Keeping the leaders' original ids is what
@@ -3139,6 +3290,12 @@ def import_json(raw: str) -> str | None:
         with closing(connect()) as conn:
             try:
                 with conn:  # one transaction; any exception rolls it back
+                    # Hub sign-in grants never leave the database; deleting
+                    # the roster cascades them away, so re-attach each by name.
+                    access = conn.execute(
+                        "SELECT m.name, a.code_hash, a.granted_at, a.granted_by "
+                        "FROM hub_access a JOIN team_members m ON m.id = a.member_id"
+                    ).fetchall()
                     conn.execute("DELETE FROM leaders")
                     for row in payload.get("leaders", []):
                         conn.execute(
@@ -3150,6 +3307,8 @@ def import_json(raw: str) -> str | None:
                              row.get("slack_id")),
                         )
                     for table in EXPORT_TABLES:
+                        if table in HUB_TABLES and table not in payload:
+                            continue
                         valid_cols = {r["name"] for r in
                                       conn.execute(f"PRAGMA table_info({table})")}
                         conn.execute(f"DELETE FROM {table}")
@@ -3163,6 +3322,13 @@ def import_json(raw: str) -> str | None:
                                 f"VALUES ({','.join('?' * len(cols))})",
                                 [row[c] for c in cols],
                             )
+                    for row in access:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO hub_access (member_id, code_hash, "
+                            "granted_at, granted_by) SELECT id, ?, ?, ? FROM team_members "
+                            "WHERE name=? COLLATE NOCASE",
+                            (row["code_hash"], row["granted_at"], row["granted_by"],
+                             row["name"]))
                     # Keep the course-seed flag in sync with what the backup
                     # actually restored: a pre-course backup (no lessons)
                     # clears it so the next boot re-seeds from code, and a

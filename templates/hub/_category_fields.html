@@ -1,0 +1,11 @@
+<div class="inline-form">
+  <input type="text" name="icon" value="{{ c.icon }}" maxlength="8" aria-label="Icon (emoji)" style="flex:0 0 64px; text-align:center;">
+  <input type="text" name="name" value="{{ c.name }}" maxlength="60" placeholder="Name" aria-label="Name" required>
+</div>
+<label class="field">Description</label>
+<input type="text" name="blurb" value="{{ c.blurb }}" maxlength="200">
+<label class="field">Order</label>
+<input type="number" name="sort" value="{{ c.sort }}" min="0" max="999" style="width:100px;">
+<label class="checkline"><input type="checkbox" name="leaders_only" value="1" {{ 'checked' if c.leaders_only }}> Leaders only</label>
+<label class="checkline"><input type="checkbox" name="policy" value="1" {{ 'checked' if c.policy }}> Policy category — only the Operator publishes, after the review checks</label>
+<label class="checkline"><input type="checkbox" name="active" value="1" {{ 'checked' if c.active }}> Shown</label>

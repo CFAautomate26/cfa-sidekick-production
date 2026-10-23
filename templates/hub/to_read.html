@@ -1,0 +1,20 @@
+{% extends "hub/base.html" %}
+{% block title %}To read{% endblock %}
+{% block content %}
+<h1 class="page">To read</h1>
+<div class="sub">Required pages you haven't confirmed yet — or that changed since you did.</div>
+{% if pages %}
+<div class="callout">Required reading counts as paid work time — read it on shift, or tell a leader
+  how long it took you.</div>
+<div class="pagelist">
+{% for p in pages %}
+  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
+    <div class="title">{{ p.title }} {% if p.last_ack %}<span class="badge warn">Updated</span>{% endif %}</div>
+    <div class="summary">{{ p.category_icon }} {{ p.category_name }}{% if p.summary %} · {{ p.summary }}{% endif %}</div>
+  </a>
+{% endfor %}
+</div>
+{% else %}
+<div class="empty">✓ You're all caught up.</div>
+{% endif %}
+{% endblock %}

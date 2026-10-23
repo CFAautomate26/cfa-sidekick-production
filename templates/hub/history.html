@@ -1,0 +1,32 @@
+{% extends "hub/base.html" %}
+{% block title %}History — {{ page.title }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ url_for('hub.page', page_id=page.id) }}">← {{ page.title }}</a></div>
+<h1 class="page">History</h1>
+<div class="sub">Every published version is kept as it was.</div>
+
+<div class="section-label">Versions</div>
+{% for v in versions %}
+<a class="card tap" href="{{ url_for('hub.old_version', page_id=page.id, version=v.version) }}">
+  <h2>v{{ v.version }}{% if v.version == page.version %} <span class="badge ok">Live</span>{% endif %}
+    {% if v.version == page.ack_version and page.required %}<span class="badge req">Read from here</span>{% endif %}</h2>
+  <div class="progress-note">{{ v.saved_at }} · {{ v.saved_by }}{% if v.change_note %} · {{ v.change_note }}{% endif %}
+    {% if v.reviewed_by %}<br>Policy checks confirmed by {{ v.reviewed_by }}{% endif %}</div>
+</a>
+{% else %}
+<div class="empty">Not published yet.</div>
+{% endfor %}
+
+{% if reviews %}
+<div class="section-label">Yearly reviews</div>
+<div class="card"><table class="plain">
+{% for r in reviews %}<tr><td>{{ r.reviewed_at }}</td><td>{{ r.reviewed_by }}</td><td>{{ r.note }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+
+<div class="section-label">Activity</div>
+<div class="card"><table class="plain">
+{% for a in log %}<tr><td style="white-space:nowrap;">{{ a.at }}</td><td>{{ a.who }}</td><td>{{ a.action }}{% if a.detail %} — {{ a.detail }}{% endif %}</td></tr>
+{% else %}<tr><td>No activity yet.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

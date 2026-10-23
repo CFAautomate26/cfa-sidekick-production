@@ -1,0 +1,66 @@
+{% extends "hub/base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<h1 class="page">Here's how we do it</h1>
+<div class="sub">Systems, processes, training and policies for Chick-fil-A Wharncliffe &amp; Wonderland.</div>
+
+<form method="get" action="{{ url_for('hub.search') }}" class="inline-form" style="margin-bottom:14px;">
+  <input type="text" name="q" placeholder="Search — e.g. drive-thru, fryer, uniform" maxlength="100"
+         aria-label="Search the Hub">
+  <button class="pill primary" type="submit">Search</button>
+</form>
+
+{% if to_read %}
+<div class="section-label">To read ({{ to_read|length }})</div>
+<div class="callout">Required reading counts as paid work time — read it on shift, or tell
+  a leader how long it took you.</div>
+<div class="pagelist">
+{% for p in to_read[:5] %}
+  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
+    <div class="title">{{ p.title }} {% if p.last_ack %}<span class="badge warn">Updated</span>{% endif %}</div>
+    <div class="summary">{{ p.category_icon }} {{ p.category_name }}{% if p.summary %} · {{ p.summary }}{% endif %}</div>
+  </a>
+{% endfor %}
+{% if to_read|length > 5 %}<a class="pill small" href="{{ url_for('hub.to_read') }}">See all {{ to_read|length }}</a>{% endif %}
+</div>
+{% endif %}
+
+<div class="section-label">Categories</div>
+{% if categories %}
+<div class="catgrid">
+{% for c in categories %}
+  <a class="card" href="{{ url_for('hub.category', category_id=c.id) }}">
+    <div class="ico">{{ c.icon }}</div>
+    <div class="name">{{ c.name }}</div>
+    <div class="count">{{ counts.get(c.id, 0) }} page{{ '' if counts.get(c.id, 0) == 1 else 's' }}{% if c.leaders_only %} · leaders{% endif %}</div>
+  </a>
+{% endfor %}
+</div>
+{% else %}
+<div class="empty">No categories yet.</div>
+{% endif %}
+
+{% if queues %}
+<div class="section-label">For editors</div>
+<a class="card tap" href="{{ url_for('hub.manage') }}">
+  <h2>🛠 Manage the Hub</h2>
+  <div class="progress-note">
+    {{ queues.drafts|length }} draft{{ '' if queues.drafts|length == 1 else 's' }}
+    · {{ queues.review_due|length }} review{{ '' if queues.review_due|length == 1 else 's' }} due
+    · {{ queues.counsel|length }} flagged for counsel
+  </div>
+</a>
+{% endif %}
+
+{% if recent %}
+<div class="section-label">Recently updated</div>
+<div class="pagelist">
+{% for p in recent %}
+  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
+    <div class="title">{{ p.title }}</div>
+    <div class="summary">{{ p.category_icon }} {{ p.category_name }} · {{ (p.published_at or '')[:10] }}</div>
+  </a>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

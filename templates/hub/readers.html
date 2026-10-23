@@ -1,0 +1,25 @@
+{% extends "hub/base.html" %}
+{% block title %}Who's read — {{ page.title }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ url_for('hub.page', page_id=page.id) }}">← {{ page.title }}</a></div>
+<h1 class="page">Who's read it</h1>
+<div class="sub">Counting from version {{ page.ack_version }} · everyone who can sign in and see this page
+  {{ '(leaders only)' if page.leaders_only or page.category_leaders_only }}.</div>
+<div class="pillrow">
+  <span class="badge ok">✓ {{ counts.current }} read</span>
+  <span class="badge warn">{{ counts.old }} read an older version</span>
+  <span class="badge req">{{ counts.none }} not yet</span>
+  <a class="pill small" href="{{ url_for('hub.readers_csv', page_id=page.id) }}">⬇ Download all confirmations (CSV)</a>
+</div>
+<div class="card"><table class="plain">
+{% for p in people %}
+<tr><td>{{ p.name }}{% if p.leader %} <span class="badge">Leader</span>{% endif %}</td>
+  <td>{% if p.state == 'current' %}<span class="badge ok">✓ v{{ p.ack.version }}</span> {{ p.ack.acked_at }}
+      {% elif p.state == 'old' %}<span class="badge warn">v{{ p.ack.version }}</span> {{ p.ack.acked_at }}
+      {% else %}<span class="badge req">Not yet</span>{% endif %}</td></tr>
+{% else %}
+<tr><td>No one can sign in yet — give people access under Manage → Who can sign in.</td></tr>
+{% endfor %}
+</table></div>
+<div class="muted">Each confirmation records the person, the time, the wording they agreed to and a fingerprint of exactly what the page said.</div>
+{% endblock %}

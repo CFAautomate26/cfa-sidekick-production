@@ -102,6 +102,40 @@ def is_admin() -> bool:
     return session.get("shift_role") == "admin"
 
 
+def _operator_pin_tag() -> str:
+    """Ties an Operator session to the current master PIN: changing
+    SHIFT_ADMIN_PIN signs every Operator session out."""
+    if not SHIFT_ADMIN_PIN:
+        return ""
+    return hmac.new(str(current_app.secret_key).encode(),
+                    b"operator-pin:" + SHIFT_ADMIN_PIN.encode(), "sha256").hexdigest()[:32]
+
+
+def leader_session_valid() -> bool:
+    """Re-check a signed-in leader/Operator against the database on every
+    request (the Shift Lead app and the Team Hub both call this). Clears the
+    session and returns False when it no longer stands."""
+    leader_id = session.get("shift_leader_id")
+    if leader_id:
+        # Deactivated leaders lose access — and role changes (a demoted
+        # admin) take effect — on their next request, not when the cookie
+        # expires. A backup restore can renumber leader ids, so sessions
+        # minted before the restore must re-login rather than attach to a
+        # different row.
+        leader = shift_db.get_leader(leader_id)
+        if (not leader or not leader["active"]
+                or session.get("shift_epoch", "") != shift_db.session_epoch()):
+            session.clear()
+            return False
+        session["shift_role"] = leader["role"]
+        return True
+    tag = _operator_pin_tag()
+    if not tag or not hmac.compare_digest(session.get("shift_pin_tag", ""), tag):
+        session.clear()
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Request guards + template context
 # ---------------------------------------------------------------------------
@@ -117,20 +151,8 @@ def require_login():
         return render_template("shift/not_configured.html"), 200
     if not session.get("shift_name"):
         return redirect(url_for("shift.login", next=request.path))
-    # Deactivated leaders lose access — and role changes (a demoted admin)
-    # take effect — on their next request, not when the cookie expires.
-    leader_id = session.get("shift_leader_id")
-    if leader_id:
-        leader = shift_db.get_leader(leader_id)
-        if not leader or not leader["active"]:
-            session.clear()
-            return redirect(url_for("shift.login"))
-        # A backup restore can renumber leader ids; sessions minted before
-        # the restore must re-login rather than attach to a different row.
-        if session.get("shift_epoch", "") != shift_db.session_epoch():
-            session.clear()
-            return redirect(url_for("shift.login"))
-        session["shift_role"] = leader["role"]
+    if not leader_session_valid():
+        return redirect(url_for("shift.login"))
     return None
 
 
@@ -230,9 +252,11 @@ def _optional_date(value: str | None) -> str:
 
 
 def _safe_next(default_endpoint: str = "shift.today"):
-    """Only redirect back to same-app paths, never off-site."""
+    """Only redirect back to same-app paths (the Shift Lead app or the Team
+    Hub), never off-site."""
     target = request.form.get("next", "") or request.args.get("next", "")
-    if target.startswith("/shift") and "//" not in target:
+    if (target.startswith(("/shift", "/hub")) and "//" not in target
+            and "\\" not in target):
         return redirect(target)
     return redirect(url_for(default_endpoint))
 
@@ -266,6 +290,7 @@ def login():
                 session.permanent = True
                 session["shift_name"] = OPERATOR_NAME
                 session["shift_role"] = "admin"
+                session["shift_pin_tag"] = _operator_pin_tag()
                 return _safe_next()
             error = "Wrong PIN."
             _record_fail(name)

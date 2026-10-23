@@ -1,0 +1,47 @@
+{% extends "hub/base.html" %}
+{% block title %}Me{% endblock %}
+{% block content %}
+<h1 class="page">{{ viewer.name }}</h1>
+<div class="sub">{% if viewer.is_operator %}Operator — you manage the Hub and who can sign in.
+  {% elif viewer.kind == 'leader' %}Leader{{ ' · editor' if viewer.is_editor }} — signed in with your Shift Lead login.
+  {% else %}Team member — signed in with your clock-in number.{% endif %}</div>
+
+{% if viewer.is_leader %}
+<a class="card tap" href="{{ url_for('shift.today') }}">
+  <h2>🧢 Shift Lead app</h2>
+  <div class="progress-note">Checklists, lineups, goals and notes</div>
+</a>
+{% endif %}
+{% if viewer.is_operator %}
+<a class="card tap" href="{{ url_for('hub.people') }}">
+  <h2>🔑 Who can sign in</h2>
+  <div class="progress-note">Give team members access with their clock-in number</div>
+</a>
+{% endif %}
+
+{% if not viewer.is_operator %}
+<div class="section-label">What you've confirmed</div>
+{% if done %}
+<div class="pagelist">
+{% for p in done %}
+  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
+    <div class="title">{{ p.title }}
+      {% if p.ack.version >= p.ack_version %}<span class="badge ok">✓ v{{ p.ack.version }}</span>
+      {% else %}<span class="badge warn">Updated — re-read</span>{% endif %}</div>
+    <div class="summary">Confirmed {{ p.ack.acked_at }}</div>
+  </a>
+{% endfor %}
+</div>
+{% else %}
+<div class="empty">Nothing yet.</div>
+{% endif %}
+{% endif %}
+
+<form method="post" action="{{ url_for('hub.logout') }}" style="margin-top:18px;">
+  <button class="pill" type="submit" style="width:100%;">Sign out</button>
+</form>
+{% if viewer.is_leader %}<div class="muted" style="text-align:center; margin-top:6px;">Signs you out of the Shift Lead app too.</div>{% endif %}
+<div class="sub" style="text-align:center; margin-top:16px;">
+  Tip: open this in Safari/Chrome and “Add to Home Screen” for one-tap access.
+</div>
+{% endblock %}

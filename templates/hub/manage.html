@@ -1,0 +1,65 @@
+{% extends "hub/base.html" %}
+{% block title %}Manage{% endblock %}
+{% block content %}
+<h1 class="page">Manage the Hub</h1>
+<div class="sub">{{ 'Operator' if viewer.is_operator else 'Editor' }} tools.</div>
+
+<div class="pillrow">
+  <a class="pill primary small" href="{{ url_for('hub.new_page') }}">+ New page</a>
+  {% if viewer.is_operator %}<a class="pill small" href="{{ url_for('hub.people') }}">🔑 Who can sign in</a>{% endif %}
+</div>
+
+{% macro pagecards(pages, empty) %}
+  {% for p in pages %}
+  <a class="card tap" href="{{ url_for('hub.page', page_id=p.id) }}">
+    <h2>{{ p.title }}</h2>
+    <div class="progress-note">{{ p.category_icon }} {{ p.category_name }}{% if p.section %} · {{ p.section }}{% endif %}
+      · {{ p.updated_at }} by {{ p.updated_by }}{% if p.review_by and p.annual_review %} · review by {{ p.review_by }}{% endif %}</div>
+  </a>
+  {% else %}<div class="muted" style="margin-bottom:10px;">{{ empty }}</div>{% endfor %}
+{% endmacro %}
+
+<div class="section-label">Drafts</div>
+{{ pagecards(queues.drafts, 'No drafts.') }}
+<div class="section-label">Yearly reviews due soon</div>
+{{ pagecards(queues.review_due, 'Nothing due in the next 30 days.') }}
+<div class="section-label">Flagged for a lawyer</div>
+{{ pagecards(queues.counsel, 'Nothing flagged.') }}
+{% if queues.retired %}
+<details class="more"><summary>Retired pages ({{ queues.retired|length }})</summary>
+{{ pagecards(queues.retired, '') }}
+</details>
+{% endif %}
+
+<div class="section-label">Categories</div>
+{% for c in categories %}
+<details class="more card">
+  <summary>{{ c.icon }} {{ c.name }}{% if c.leaders_only %} · leaders only{% endif %}{% if c.policy %} · Operator publishes{% endif %}{% if not c.active %} · hidden{% endif %}</summary>
+  {% if viewer.is_operator %}
+  <form method="post" action="{{ url_for('hub.save_category') }}">
+    <input type="hidden" name="category_id" value="{{ c.id }}">
+    {% include "hub/_category_fields.html" %}
+    <div style="margin-top:10px;"><button class="pill small primary" type="submit">Save</button></div>
+  </form>
+  {% else %}<div class="muted">{{ c.blurb }}</div>{% endif %}
+</details>
+{% endfor %}
+{% if viewer.is_operator %}
+<details class="more card">
+  <summary>+ Add a category</summary>
+  <form method="post" action="{{ url_for('hub.save_category') }}">
+    {% set c = {'name': '', 'icon': '📘', 'blurb': '', 'leaders_only': 0, 'policy': 0, 'active': 1, 'sort': categories|length} %}
+    {% include "hub/_category_fields.html" %}
+    <div style="margin-top:10px;"><button class="pill small primary" type="submit">Add</button></div>
+  </form>
+</details>
+{% endif %}
+
+<div class="section-label">Recent activity</div>
+<div class="card"><table class="plain">
+{% for a in log %}
+<tr><td style="white-space:nowrap;">{{ a.at }}</td><td>{{ a.who }}</td>
+  <td>{{ a.action }}{% if a.title %} — <a href="{{ url_for('hub.page', page_id=a.page_id) }}">{{ a.title }}</a>{% endif %}{% if a.detail and not a.title %} — {{ a.detail }}{% endif %}</td></tr>
+{% else %}<tr><td>Nothing yet.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

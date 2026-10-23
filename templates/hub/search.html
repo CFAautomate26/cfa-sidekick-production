@@ -1,0 +1,26 @@
+{% extends "hub/base.html" %}
+{% block title %}Search{% endblock %}
+{% block content %}
+<h1 class="page">Search</h1>
+<form method="get" action="{{ url_for('hub.search') }}" class="inline-form" style="margin:10px 0 14px;">
+  <input type="text" name="q" value="{{ q }}" placeholder="e.g. drive-thru, fryer, uniform" maxlength="100"
+         aria-label="Search the Hub" autofocus>
+  <button class="pill primary" type="submit">Search</button>
+</form>
+{% if q %}
+  {% if results %}
+  <div class="sub">{{ results|length }} page{{ '' if results|length == 1 else 's' }}</div>
+  <div class="pagelist">
+  {% for p in results %}
+    <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
+      <div class="title">{{ p.title }}</div>
+      <div class="summary">{{ p.category_icon }} {{ p.category_name }}{% if p.section %} · {{ p.section }}{% endif %}</div>
+      {% if p.snippet %}<div style="font-size:14px; margin-top:4px;">{% for text, hit in p.snippet %}{% if hit %}<mark>{{ text }}</mark>{% else %}{{ text }}{% endif %}{% endfor %}</div>{% endif %}
+    </a>
+  {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">Nothing matched “{{ q }}”. Try a shorter word — or ask a leader.</div>
+  {% endif %}
+{% endif %}
+{% endblock %}
