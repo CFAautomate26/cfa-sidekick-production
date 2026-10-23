@@ -1294,14 +1294,83 @@ def _can_view_oneonone(leader_id: int) -> bool:
     return _is_operator() or session.get("shift_leader_id") == leader_id
 
 
+LD_CATEGORY = "leadership development"
+
+
+def _ld_library() -> dict | None:
+    """The Library on Leadership Development: the published pages of the
+    Hub's "Leadership Development" category, read as this leader (or the
+    Operator) so hub_db's own visibility rules decide what's listed. None
+    when the Hub isn't loaded or the category is gone — the page then
+    just leaves the section out; the Hub's trouble never breaks /shift."""
+    if not teamhub_nav.hub_up():
+        return None
+    try:
+        import hub_db
+        leader_id = session.get("shift_leader_id")
+        viewer = (hub_db.Viewer("leader", leader_id, current_name(),
+                                session.get("shift_role", "lead"))
+                  if leader_id else hub_db.Viewer("operator", None, OPERATOR_NAME, "admin"))
+        category = next((c for c in hub_db.categories(viewer)
+                         if " ".join(c["name"].split()).lower() == LD_CATEGORY), None)
+        if not hub_db.can_view_category(viewer, category):
+            return None
+        pages = [p for p in hub_db.pages_for_category(viewer, category["id"])
+                 if p["status"] == "published"]
+        unread = {p["id"] for p in hub_db.to_read(viewer)}
+        groups: dict[str, list[dict]] = {}
+        for p in pages:
+            groups.setdefault(p["section"] or "General", []).append(
+                dict(p, url=url_for("hub.page", page_id=p["id"]), to_read=p["id"] in unread))
+        return {
+            "groups": list(groups.items()),
+            "count": len(pages),
+            "new_url": (url_for("hub.new_page", category=category["id"])
+                        if viewer.is_editor else None),
+        }
+    except Exception as e:      # noqa: BLE001 — the Hub's trouble stays the Hub's
+        print(f"Leadership Development library unavailable: {e}")
+        return None
+
+
+def _course_progress(modules: list[dict]) -> dict:
+    """One leader's course at a glance: per-stage done/total, the stage
+    they're on and their next lesson (None once everything's done)."""
+    stages = [{"module": m["module"], "done": m["done"], "total": m["total"]}
+              for m in modules]
+    upcoming = next(((m["module"], l) for m in modules for l in m["lessons"]
+                     if not l["done"]), None)
+    return {
+        "stages": stages,
+        "done": sum(s["done"] for s in stages),
+        "total": sum(s["total"] for s in stages),
+        "stage": upcoming[0] if upcoming else None,
+        "next": upcoming[1] if upcoming else None,
+    }
+
+
 @shift_bp.route("/development")
 def development():
     if is_admin():
+        me = session.get("shift_leader_id")
+        leaders = []
+        for l in shift_db.leader_course_summary():
+            leaders.append(dict(l, me=l["id"] == me,
+                                **_course_progress(shift_db.course_overview(l["id"]))))
+        leaders.sort(key=lambda l: not l["me"])      # an admin leader sees their own first
+        # The course's stages (no leader has id 0, so this is the bare
+        # course) and how many leaders have finished each one.
+        stages = [{"module": m["module"], "total": m["total"],
+                   "finished": sum(1 for l in leaders for s in l["stages"]
+                                   if s["module"] == m["module"] and s["done"] == s["total"])}
+                  for m in shift_db.course_overview(0)]
         return render_template(
             "shift/development.html",
-            leaders=shift_db.leader_course_summary(),
+            leaders=leaders,
+            stages=stages,
             total=shift_db.course_lesson_count(),
             course_url=shift_course.COURSE_FOLDER_URL,
+            library=_ld_library(),
         )
     leader_id = session.get("shift_leader_id")
     if not leader_id:
@@ -1320,11 +1389,16 @@ def development_leader(leader_id):
         flash("That leader doesn't exist.")
         return redirect(url_for("shift.development"))
     modules = shift_db.course_overview(leader_id)
-    done = sum(m["done"] for m in modules)
-    total = sum(m["total"] for m in modules)
+    progress = _course_progress(modules)
+    # The stage being worked on opens; finished and later ones fold away.
+    # After a save, the lesson just touched (?lesson=) opens with its stage.
+    opened = _optional_int(request.args.get("lesson"))
     return render_template(
         "shift/development_leader.html", leader=leader, modules=modules,
-        done=done, total=total, course_url=shift_course.COURSE_FOLDER_URL,
+        done=progress["done"], total=progress["total"], next_lesson=progress["next"],
+        current_stage=progress["stage"], opened_lesson=opened,
+        is_me=session.get("shift_leader_id") == leader_id,
+        course_url=shift_course.COURSE_FOLDER_URL, library=_ld_library(),
     )
 
 
@@ -1340,8 +1414,8 @@ def development_update(leader_id, lesson_id):
             flash("That lesson doesn't exist any more — reload the page.")
     elif action == "uncomplete":
         shift_db.clear_lesson_done(lesson_id, leader_id)
-    return redirect(url_for("shift.development_leader", leader_id=leader_id)
-                    + f"#lesson-{lesson_id}")
+    return redirect(url_for("shift.development_leader", leader_id=leader_id,
+                            lesson=lesson_id) + f"#lesson-{lesson_id}")
 
 
 # ---------------------------------------------------------------------------

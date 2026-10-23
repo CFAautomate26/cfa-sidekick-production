@@ -1,215 +1,230 @@
 {% extends "shift/base.html" %}
-{% block title %}Guest Recovery{% endblock %}
-{% block content %}
-<h1 class="page">Guest recovery</h1>
-<div class="sub">A guest had a bad experience — log it, make it right, close the loop.</div>
+{% from "shift/_leader_ui.html" import ui_styles, month_day, short_stamp with context %}
+{% block title %}Guest recovery{% endblock %}
+{% block head %}{{ ui_styles() }}
+<style>
+.rec { padding: 16px; }
+.rec.alert { border-color: var(--red-200); box-shadow: inset 4px 0 0 var(--accent); }
+.rec-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.rec-head .row-meta { margin: 0; white-space: nowrap; }
+.rec .tags { margin-top: 8px; }
+.rec .contact { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 10px; font-size: 0.9375rem; color: var(--text); }
+.rec .contact .i { width: 18px; height: 18px; color: var(--text-muted); }
+.rec .contact a { color: var(--nav); font-weight: 700; }
+.rec .said { font-size: 0.9375rem; color: var(--text); white-space: pre-line; margin-top: 8px; line-height: 1.45; }
+.rec .agreed { font-size: 0.9375rem; color: var(--text-strong); margin-top: 8px; }
+.rec .row-meta.by { margin-top: 8px; }
+.rec-acts { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 14px; align-items: center; }
+.rec-acts form { margin: 0; }
+.rec-acts details > summary { list-style: none; }
+.rec-acts details > summary::-webkit-details-marker { display: none; }
+.rec-acts details[open] { flex-basis: 100%; order: -1; }
+.rec-acts details[open] > summary { margin-bottom: 10px; }
+.rec-acts details form .btn { margin-top: 10px; }
+.done-row .row-title { color: var(--text-muted); }
+.done-row .acts { margin-top: 4px; }
+.stat .bar > span { background: var(--accent); }
+</style>
+{% endblock %}
 
-<details class="compose" open>
-  <summary>+ Log a recovery</summary>
-  <form method="post" action="{{ url_for('shift.recovery_create') }}" class="card">
+{% macro badges(r) %}
+<div class="row-meta tags">
+  <span class="badge b-red">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
+  <span class="badge b-tan">→ {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) }}</span>
+  {% if r.follow_up and not r.contacted_at and not r.resolved_at %}<span class="badge b-red">{{ icon('phone') }}Call back</span>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro contact(r, warn=False) %}
+{% if r.guest_phone or r.guest_email %}
+<p class="contact">{{ icon('phone' if r.guest_phone else 'chat') }}
+  {% if r.phone_digits %}<a href="tel:{{ r.phone_digits }}">{{ r.guest_phone }}</a>
+  {% elif r.guest_phone %}<span>{{ r.guest_phone }}</span>{% endif %}
+  {% if r.guest_email %}<a href="mailto:{{ r.guest_email }}">{{ r.guest_email }}</a>{% endif %}
+</p>
+{% elif warn %}
+<p class="contact" style="color:var(--text-muted);">{{ icon('phone') }}no contact on file — can't call back</p>
+{% endif %}
+{% endmacro %}
+
+{% block content %}
+{% set n_open, n_waiting = open_recs | length, awaiting_recs | length %}
+{% set month_total = issue_counts | sum(attribute='count') %}
+<section class="hero compact">
+  <p class="eyebrow">Guest recovery</p>
+  <h1 class="headline">{% if n_open %}{{ n_open }} guest{{ 's' if n_open != 1 }} to take care of{% elif n_waiting %}{{ n_waiting }} guest{{ 's' if n_waiting != 1 }} coming back{% else %}All guests taken care of{% endif %}</h1>
+  <p class="triage"><b>{{ n_open }}</b> to contact · <b>{{ n_waiting }}</b> coming back · <b>{{ month_total }}</b> in 28 days</p>
+</section>
+
+<div class="split">
+<details class="feature cream composer" id="log" open>
+  <summary><span class="plus">{{ icon('plus') }}</span><span class="grow">Log a recovery</span>{{ icon('chev', 'chev') }}</summary>
+  <form method="post" action="{{ url_for('shift.recovery_create') }}">
     <label class="field" for="r-name">Guest name</label>
     <input type="text" id="r-name" name="guest_name" required
            placeholder="Guest's name (or how to spot them)">
-    <div style="display:flex; gap:8px;">
-      <div style="flex:1;">
+    <div class="two">
+      <div>
         <label class="field" for="r-phone">Phone</label>
         <input type="tel" id="r-phone" name="guest_phone" placeholder="Optional">
       </div>
-      <div style="flex:1;">
+      <div>
         <label class="field" for="r-email">Email</label>
         <input type="text" inputmode="email" id="r-email" name="guest_email" placeholder="Optional">
       </div>
     </div>
-    <div class="progress-note">Name + phone/email only — never write down payment
-    or card info. Injury or damage claim? Log the basics and tell the Operator
-    directly.</div>
-    <div style="display:flex; gap:8px;">
-      <div style="flex:1;">
-        <label class="field" for="r-issue">What went wrong</label>
-        <select id="r-issue" name="issue">
-          {% for i in RECOVERY_ISSUES %}<option value="{{ i }}">{{ RECOVERY_ISSUE_LABELS[i] }}</option>{% endfor %}
-        </select>
-      </div>
-      <div style="flex:1;">
-        <label class="field" for="r-remedy">Making it right with</label>
-        <select id="r-remedy" name="remedy">
-          {% for m in RECOVERY_REMEDIES %}<option value="{{ m }}">{{ RECOVERY_REMEDY_LABELS[m] }}</option>{% endfor %}
-        </select>
-      </div>
-    </div>
+    <div class="callout tan" style="margin-top:12px;">{{ icon('shield') }}<span>Name + phone/email only — never write down payment
+    or card info. Injury or damage claim? Log the basics and tell the Operator directly.</span></div>
+    <label class="field" for="r-issue">What went wrong</label>
+    <select id="r-issue" name="issue">
+      {% for i in RECOVERY_ISSUES %}<option value="{{ i }}">{{ RECOVERY_ISSUE_LABELS[i] }}</option>{% endfor %}
+    </select>
+    <label class="field" for="r-remedy">Making it right with</label>
+    <select id="r-remedy" name="remedy">
+      {% for m in RECOVERY_REMEDIES %}<option value="{{ m }}">{{ RECOVERY_REMEDY_LABELS[m] }}</option>{% endfor %}
+    </select>
     <label class="field" for="r-details">Details</label>
-    <textarea id="r-details" name="details" style="min-height:70px;"
+    <textarea id="r-details" name="details"
       placeholder="What happened + exactly what we promised — e.g. order #, 'mail 2 free entrée cards'"></textarea>
-    <label class="pill" style="cursor:pointer; margin-top:8px; display:inline-block;">
-      <input type="checkbox" name="follow_up" value="1" style="accent-color:var(--cfa-red);">
-      Guest expects a call-back
-    </label>
-    <label class="pill" style="cursor:pointer; margin-top:8px; display:inline-block;">
-      <input type="checkbox" name="contacted_now" value="1" style="accent-color:var(--cfa-red);">
-      Already talked to the guest — they'll come back for it
-    </label>
-    <label class="pill" style="cursor:pointer; margin-top:8px; display:inline-block;">
-      <input type="checkbox" name="resolved_now" value="1" style="accent-color:var(--cfa-red);">
-      Handled on the spot — nothing left to do
-    </label>
-    <div style="margin-top:12px;">
-      <button class="pill primary" type="submit">Log recovery</button>
-    </div>
+    <label class="check"><input type="checkbox" name="follow_up" value="1"><span>Guest expects a call-back</span></label>
+    <label class="check"><input type="checkbox" name="contacted_now" value="1"><span>Already talked to the guest — they'll come back for it</span></label>
+    <label class="check"><input type="checkbox" name="resolved_now" value="1"><span>Handled on the spot — nothing left to do</span></label>
+    <button class="btn btn-primary block" type="submit">Log recovery</button>
   </form>
 </details>
 
-<div class="section-label">Open — take care of these ({{ open_recs | length }})</div>
-{% for r in open_recs %}
-<div class="card" id="rec-{{ r.id }}" {% if r.stale or r.follow_up %}style="border-color: var(--cfa-red);"{% endif %}>
-  <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
-    <span style="font-size:15px; font-weight:700;">{{ r.guest_name }}</span>
-    <span class="progress-note" style="margin:0;{% if r.stale %} color:var(--cfa-red); font-weight:700;{% endif %}">
-      {{ r.recovery_date }}{% if r.age_days %} · {{ r.age_days }}d open{% endif %}</span>
-  </div>
-  <div style="margin-top:6px;">
-    <span class="note-cat cat-issue">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
-    <span class="note-cat">→ {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) }}</span>
-    {% if r.follow_up %}<span class="critical-flag">📞 call-back</span>{% endif %}
-  </div>
-  <div style="font-size:14px; margin-top:6px;">
-    {% if r.phone_digits %}<a href="tel:{{ r.phone_digits }}">{{ r.guest_phone }}</a>
-    {% elif r.guest_phone %}{{ r.guest_phone }}{% endif %}
-    {% if r.guest_email %}{% if r.guest_phone %} · {% endif %}<a href="mailto:{{ r.guest_email }}">{{ r.guest_email }}</a>{% endif %}
-    {% if not r.guest_phone and not r.guest_email %}<span style="color:var(--soft);">no contact on file — can't call back</span>{% endif %}
-  </div>
-  {% if r.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:4px;">{{ r.details }}</div>{% endif %}
-  <div class="progress-note">logged by {{ r.logged_by }} · {{ r.created_at }}</div>
-  <div style="display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px; margin-top:8px;">
-    <details style="flex:1; min-width:130px;">
-      <summary class="pill small" style="cursor:pointer; display:inline-block;">📞 Contacted</summary>
-      <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}" style="margin-top:8px;">
-        <input type="hidden" name="contacted" value="1">
-        <input type="text" name="note" placeholder="What was agreed — e.g. coming Sat for the remake">
-        <div style="margin-top:8px;">
-          <button class="pill small" type="submit">They'll come back for it</button>
-        </div>
+<div class="feed">
+<section class="sec" id="open">
+  <div class="sec-head"><h2>Open — take care of these {% if n_open %}<span class="badge b-red">{{ n_open }} open</span>{% endif %}</h2></div>
+  {% for r in open_recs %}
+  <article class="card rec {{ 'alert' if r.stale or r.follow_up }}" id="rec-{{ r.id }}">
+    <div class="rec-head">
+      <span class="row-title">{{ r.guest_name }}</span>
+      <span class="row-meta"{% if r.stale %} style="color:var(--red-700); font-weight:700;"{% endif %}>{{ month_day(r.recovery_date) }}{% if r.age_days %} · {{ r.age_days }}d open{% endif %}</span>
+    </div>
+    {{ badges(r) }}
+    {{ contact(r, warn=True) }}
+    {% if r.details %}<p class="said">{{ r.details }}</p>{% endif %}
+    <p class="row-meta by">Logged by {{ r.logged_by }} · {{ short_stamp(r.created_at) }}</p>
+    <div class="rec-acts">
+      <details>
+        <summary class="btn btn-secondary sm">{{ icon('phone') }}Contacted</summary>
+        <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}">
+          <input type="hidden" name="contacted" value="1">
+          <label class="sr" for="c-{{ r.id }}">What was agreed</label>
+          <input type="text" id="c-{{ r.id }}" name="note" placeholder="What was agreed — e.g. coming Sat for the remake">
+          <button class="btn btn-secondary sm" type="submit">They'll come back for it</button>
+        </form>
+      </details>
+      <details>
+        <summary class="btn btn-primary sm">{{ icon('check') }}Resolve</summary>
+        <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}">
+          <input type="hidden" name="resolved" value="1">
+          <label class="sr" for="v-{{ r.id }}">How it was closed</label>
+          <input type="text" id="v-{{ r.id }}" name="note" placeholder="How it was closed — e.g. called, card mailed">
+          <button class="btn btn-primary sm" type="submit">Mark resolved</button>
+        </form>
+      </details>
+      {% if shift_is_admin %}
+      <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
+            onsubmit="return confirm('Delete this recovery?');">
+        <button class="linkbtn" type="submit">Delete</button>
       </form>
-    </details>
-    <details style="flex:1; min-width:130px;">
-      <summary class="pill small primary" style="cursor:pointer; display:inline-block;">Resolve ✓</summary>
-      <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}" style="margin-top:8px;">
-        <input type="hidden" name="resolved" value="1">
-        <input type="text" name="note" placeholder="How it was closed — e.g. called, card mailed">
-        <div style="margin-top:8px;">
-          <button class="pill primary small" type="submit">Mark resolved</button>
-        </div>
-      </form>
-    </details>
-    {% if shift_is_admin %}
-    <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
-          onsubmit="return confirm('Delete this recovery?');">
-      <button class="pill small ghost" type="submit">Delete</button>
-    </form>
-    {% endif %}
-  </div>
-</div>
-{% else %}
-<div class="empty">{% if awaiting_recs %}Nobody left to contact — {{ awaiting_recs | length }} guest{{ 's' if awaiting_recs | length != 1 }} below waiting to come back.{% else %}No open recoveries — every guest taken care of ✓{% endif %}</div>
-{% endfor %}
+      {% endif %}
+    </div>
+  </article>
+  {% else %}
+  <div class="empty">{% if awaiting_recs %}Nobody left to contact — {{ n_waiting }} guest{{ 's' if n_waiting != 1 }} below waiting to come back.{% else %}No open recoveries — every guest taken care of.{% endif %}</div>
+  {% endfor %}
+</section>
 
 {% if awaiting_recs %}
-<div class="section-label">Waiting to come back ({{ awaiting_recs | length }})</div>
-{% for r in awaiting_recs %}
-<div class="card" id="rec-{{ r.id }}">
-  <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
-    <span style="font-size:15px; font-weight:700;">{{ r.guest_name }}</span>
-    <span class="progress-note" style="margin:0;">{{ r.recovery_date }}</span>
-  </div>
-  <div style="margin-top:6px;">
-    <span class="note-cat cat-issue">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
-    <span class="note-cat">→ {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) }}</span>
-  </div>
-  <div style="font-size:14px; margin-top:6px;">
-    {% if r.phone_digits %}<a href="tel:{{ r.phone_digits }}">{{ r.guest_phone }}</a>
-    {% elif r.guest_phone %}{{ r.guest_phone }}{% endif %}
-    {% if r.guest_email %}{% if r.guest_phone %} · {% endif %}<a href="mailto:{{ r.guest_email }}">{{ r.guest_email }}</a>{% endif %}
-  </div>
-  {% if r.contact_note %}<div style="font-size:14px; color:var(--soft); margin-top:4px;">{{ r.contact_note }}</div>{% endif %}
-  {% if r.details %}<div style="font-size:14px; color:var(--soft); white-space:pre-line; margin-top:4px;">{{ r.details }}</div>{% endif %}
-  <div class="progress-note">📞 contacted {{ r.contacted_at }} by {{ r.contacted_by }}{% if r.waiting_days %} ·
-    <span {% if r.waiting_days >= 7 %}class="critical-flag"{% endif %}>waiting {{ r.waiting_days }}d</span>{% endif %}</div>
-  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-top:8px;">
-    <details style="flex:1;">
-      <summary class="pill small primary" style="cursor:pointer; display:inline-block;">They came back ✓</summary>
-      <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}" style="margin-top:8px;">
-        <input type="hidden" name="resolved" value="1">
-        <input type="text" name="note" placeholder="Optional — e.g. picked up the replacement">
-        <div style="margin-top:8px;">
-          <button class="pill primary small" type="submit">Mark resolved</button>
-        </div>
+<section class="sec" id="waiting">
+  <div class="sec-head"><h2>Waiting to come back ({{ n_waiting }})</h2></div>
+  {% for r in awaiting_recs %}
+  <article class="card rec" id="rec-{{ r.id }}">
+    <div class="rec-head">
+      <span class="row-title">{{ r.guest_name }}</span>
+      <span class="row-meta">{{ month_day(r.recovery_date) }}</span>
+    </div>
+    {{ badges(r) }}
+    {{ contact(r) }}
+    {% if r.contact_note %}<p class="agreed"><b>Agreed:</b> {{ r.contact_note }}</p>{% endif %}
+    {% if r.details %}<p class="said">{{ r.details }}</p>{% endif %}
+    <p class="row-meta tags by"><span>Contacted {{ short_stamp(r.contacted_at) }} by {{ r.contacted_by }}</span>{% if r.waiting_days %}<span class="badge {{ 'b-red' if r.waiting_days >= 7 else 'b-tan' }}">Waiting {{ r.waiting_days }}d</span>{% endif %}</p>
+    <div class="rec-acts">
+      <details>
+        <summary class="btn btn-primary sm">{{ icon('check') }}They came back</summary>
+        <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}">
+          <input type="hidden" name="resolved" value="1">
+          <label class="sr" for="v-{{ r.id }}">How it went</label>
+          <input type="text" id="v-{{ r.id }}" name="note" placeholder="Optional — e.g. picked up the replacement">
+          <button class="btn btn-primary sm" type="submit">Mark resolved</button>
+        </form>
+      </details>
+      <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}"
+            onsubmit="return confirm('Undo? This clears the contacted stamp and the note about what was agreed, and moves it back to the open list.');">
+        <input type="hidden" name="contacted" value="0">
+        <button class="linkbtn" type="submit">Undo</button>
       </form>
-    </details>
-    <form method="post" action="{{ url_for('shift.recovery_contact', recovery_id=r.id) }}"
-          onsubmit="return confirm('Undo? This clears the contacted stamp and the note about what was agreed, and moves it back to the open list.');">
-      <input type="hidden" name="contacted" value="0">
-      <button class="pill small ghost" type="submit">Undo</button>
-    </form>
-    {% if shift_is_admin %}
-    <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
-          onsubmit="return confirm('Delete this recovery?');">
-      <button class="pill small ghost" type="submit">Delete</button>
-    </form>
-    {% endif %}
-  </div>
-</div>
-{% endfor %}
+      {% if shift_is_admin %}
+      <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
+            onsubmit="return confirm('Delete this recovery?');">
+        <button class="linkbtn" type="submit">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</section>
 {% endif %}
 
 {% if resolved_recs %}
-<details style="margin-top:14px;">
-  <summary style="cursor:pointer;" class="section-label">Resolved ({% if resolved_recs | length >= 50 %}latest 50{% else %}{{ resolved_recs | length }}{% endif %})</summary>
-  {% for r in resolved_recs %}
-  <div class="card" id="rec-{{ r.id }}" style="opacity:0.75;">
-    <div style="display:flex; gap:12px; align-items:flex-start;">
-      <span class="checkmark" style="background:var(--good); border-color:var(--good); color:#fff; flex:none;">✓</span>
-      <div style="flex:1;">
-        <div style="font-size:15px; font-weight:700;">{{ r.guest_name }}</div>
-        <div style="margin-top:4px;">
-          <span class="note-cat cat-issue">{{ RECOVERY_ISSUE_LABELS.get(r.issue, r.issue) }}</span>
-          <span class="note-cat">→ {{ RECOVERY_REMEDY_LABELS.get(r.remedy, r.remedy) }}</span>
+<details class="fold" id="resolved">
+  <summary><span class="grow">Resolved ({% if resolved_recs | length >= 50 %}latest 50{% else %}{{ resolved_recs | length }}{% endif %})</span>{{ icon('chev', 'chev') }}</summary>
+  <div class="card list">
+    {% for r in resolved_recs %}
+    <div class="row top done-row" id="rec-{{ r.id }}">
+      <span class="lead-ico green">{{ icon('check') }}</span>
+      <div class="row-main">
+        <span class="row-title">{{ r.guest_name }}</span>
+        {{ badges(r) }}
+        {% if r.resolution_note %}<span class="row-body">{{ r.resolution_note }}</span>{% endif %}
+        <span class="row-meta">{% if r.contacted_at %}Contacted {{ short_stamp(r.contacted_at) }} by {{ r.contacted_by }} · {% endif %}Resolved {{ short_stamp(r.resolved_at) }} by {{ r.resolved_by }}</span>
+        <div class="acts">
+          <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}">
+            <input type="hidden" name="resolved" value="0">
+            <button class="linkbtn nav" type="submit">Reopen</button>
+          </form>
+          {% if shift_is_admin %}
+          <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
+                onsubmit="return confirm('Delete this recovery?');">
+            <button class="linkbtn" type="submit">Delete</button>
+          </form>
+          {% endif %}
         </div>
-        {% if r.resolution_note %}<div style="font-size:14px; color:var(--soft); margin-top:4px;">{{ r.resolution_note }}</div>{% endif %}
-        <div class="progress-note">{% if r.contacted_at %}📞 contacted {{ r.contacted_at }} by {{ r.contacted_by }} · {% endif %}resolved {{ r.resolved_at }} by {{ r.resolved_by }}</div>
-      </div>
-      <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-        <form method="post" action="{{ url_for('shift.recovery_resolve', recovery_id=r.id) }}">
-          <input type="hidden" name="resolved" value="0">
-          <button class="pill small ghost" type="submit">Reopen</button>
-        </form>
-        {% if shift_is_admin %}
-        <form method="post" action="{{ url_for('shift.recovery_delete', recovery_id=r.id) }}"
-              onsubmit="return confirm('Delete this recovery?');">
-          <button class="pill small ghost" type="submit">Delete</button>
-        </form>
-        {% endif %}
       </div>
     </div>
+    {% endfor %}
   </div>
-  {% endfor %}
 </details>
 {% endif %}
 
 {% if issue_counts %}
 {% set max_count = issue_counts | map(attribute='count') | max %}
-<details style="margin-top:14px;">
-  <summary style="cursor:pointer;" class="section-label">📊 Last 28 days</summary>
+<details class="fold" id="radar">
+  <summary><span class="grow">Last 28 days</span>{{ icon('chev', 'chev') }}</summary>
   <div class="card">
     {% for row in issue_counts %}
-    <div style="padding:4px 0;">
-      <div style="display:flex; justify-content:space-between; font-size:13px;">
-        <span>{{ RECOVERY_ISSUE_LABELS.get(row.issue, row.issue) }}</span>
-        <strong>{{ row.count }}</strong>
-      </div>
-      <div class="bar"><span style="width: {{ (row.count / max_count * 100) | round }}%"></span></div>
+    <div class="stat">
+      <div class="row-between"><span>{{ RECOVERY_ISSUE_LABELS.get(row.issue, row.issue) }}</span><b>{{ row.count }}</b></div>
+      <span class="bar"><span style="width: {{ (row.count / max_count * 100) | round }}%"></span></span>
     </div>
     {% endfor %}
-    <div class="progress-note">What keeps going wrong — worth a huddle topic if one bar grows.</div>
+    <p class="hint">What keeps going wrong — worth a huddle topic if one bar grows.</p>
   </div>
 </details>
 {% endif %}
+</div>
+</div>
 {% endblock %}

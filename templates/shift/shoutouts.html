@@ -1,16 +1,29 @@
 {% extends "shift/base.html" %}
+{% from "shift/_leader_ui.html" import ui_styles, short_stamp with context %}
 {% block title %}Shout-outs{% endblock %}
+{% block head %}{{ ui_styles() }}
+<style>
+.radar { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.radar h3 { font-size: 0.875rem; font-weight: 700; color: var(--text-strong); margin-bottom: 4px; }
+.radar .row-between { padding: 4px 0; font-size: 0.9375rem; }
+.radar .row-between b { font-variant-numeric: tabular-nums; color: var(--text-strong); }
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">Shout-outs</h1>
-<div class="sub">Catch someone doing it right — 30 seconds, big smile.</div>
+<section class="hero compact">
+  <p class="eyebrow">Shout-outs</p>
+  <h1 class="headline">Shout-outs</h1>
+  <p class="triage">Catch someone doing it right — 30 seconds.</p>
+</section>
 
 <datalist id="roster-names">
   {% for n in suggest %}<option value="{{ n }}">{% endfor %}
 </datalist>
 
-<details class="compose" open>
-  <summary>+ Give a shout-out</summary>
-  <form method="post" action="{{ url_for('shift.shoutout_create') }}" class="card">
+<div class="split">
+<details class="feature cream composer" open>
+  <summary><span class="plus">{{ icon('plus') }}</span><span class="grow">Give a shout-out</span>{{ icon('chev', 'chev') }}</summary>
+  <form method="post" action="{{ url_for('shift.shoutout_create') }}">
     <label class="field" for="s-name">Who crushed it?</label>
     <input type="text" id="s-name" name="member_name" list="roster-names"
            autocomplete="off" required placeholder="Team member's name">
@@ -20,69 +33,70 @@
       {% for v in SHOUTOUT_VALUES %}<option value="{{ v }}">{{ SHOUTOUT_VALUE_LABELS[v] }}</option>{% endfor %}
     </select>
     <label class="field" for="s-msg">What happened</label>
-    <textarea id="s-msg" name="message" required style="min-height:70px;"
+    <textarea id="s-msg" name="message" required
       placeholder="e.g. Ran a guest's forgotten sauces out to the parking lot in the rain"></textarea>
     {% if share_on %}
-    <label style="display:flex; gap:8px; align-items:center; margin-top:10px; font-size:14px;">
-      <input type="checkbox" name="share" value="1" checked style="width:auto; accent-color:var(--cfa-red);">
-      📣 Share to the team Slack
-    </label>
+    <label class="check"><input type="checkbox" name="share" value="1" checked><span>Share to the team Slack</span></label>
     {% else %}
-    <div class="sub">Slack cross-posting isn't configured — shout-outs stay in-app.</div>
+    <p class="hint">Slack cross-posting isn't configured — shout-outs stay in-app.</p>
     {% endif %}
-    <div style="margin-top:12px;">
-      <button class="pill primary" type="submit">Post it 🌟</button>
-    </div>
+    <button class="btn btn-primary block" type="submit">Post it</button>
   </form>
 </details>
 
-<div class="chiprow">
-  <a class="pill small {{ 'on' if not value }}" href="{{ url_for('shift.shoutouts') }}">All</a>
+<div class="feed">
+<nav class="seg filters" aria-label="Shout-out value">
+  <a href="{{ url_for('shift.shoutouts') }}"{% if not value %} class="on" aria-current="page"{% endif %}>All</a>
   {% for v in SHOUTOUT_VALUES %}
-  <a class="pill small {{ 'on' if value == v }}" href="{{ url_for('shift.shoutouts', value=v) }}">{{ SHOUTOUT_VALUE_SHORT[v] }}</a>
+  <a href="{{ url_for('shift.shoutouts', value=v) }}"{% if value == v %} class="on" aria-current="page"{% endif %}>{{ SHOUTOUT_VALUE_SHORT[v] }}</a>
   {% endfor %}
-</div>
+</nav>
 
 {% if counts and (counts.receivers or counts.givers) %}
-<details style="margin-bottom:10px;">
-  <summary style="cursor:pointer;" class="section-label">📊 Recognition radar — last 28 days</summary>
-  <div class="card" style="display:flex; gap:16px;">
-    <div style="flex:1;">
-      <div style="font-weight:700; font-size:13px; margin-bottom:4px;">Most recognized</div>
-      {% for r in counts.receivers[:6] %}
-      <div style="display:flex; justify-content:space-between; font-size:13px; padding:2px 0;">
-        <span>{{ r.name }}</span><strong>{{ r.count }}</strong></div>
-      {% endfor %}
+<details class="fold">
+  <summary><span class="grow">Recognition radar · last 28 days</span>{{ icon('chev', 'chev') }}</summary>
+  <div class="card radar">
+    <div>
+      <h3>Most recognized</h3>
+      {% for r in counts.receivers[:6] %}<div class="row-between"><span>{{ r.name }}</span><b>{{ r.count }}</b></div>{% endfor %}
     </div>
-    <div style="flex:1;">
-      <div style="font-weight:700; font-size:13px; margin-bottom:4px;">Top recognizers</div>
-      {% for g in counts.givers[:6] %}
-      <div style="display:flex; justify-content:space-between; font-size:13px; padding:2px 0;">
-        <span>{{ g.name }}</span><strong>{{ g.count }}</strong></div>
-      {% endfor %}
+    <div>
+      <h3>Top recognizers</h3>
+      {% for g in counts.givers[:6] %}<div class="row-between"><span>{{ g.name }}</span><b>{{ g.count }}</b></div>{% endfor %}
     </div>
   </div>
 </details>
 {% endif %}
 
-{% for s in feed %}
-<div class="card" id="shout-{{ s.id }}">
-  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-    <span style="font-size:15px; font-weight:700;">🌟 {{ s.member_name }}</span>
-    {% if s.value_tag %}<span class="note-cat cat-win">{{ SHOUTOUT_VALUE_LABELS.get(s.value_tag, s.value_tag) }}</span>{% endif %}
+<section class="sec">
+  <div class="sec-head"><h2>{% if value %}{{ SHOUTOUT_VALUE_LABELS.get(value, value) }}{% else %}Latest{% endif %}</h2></div>
+  {% if feed %}
+  <div class="card list">
+    {% for s in feed %}
+    <div class="row top" id="shout-{{ s.id }}">
+      <span class="lead-ico gold">{{ icon('star') }}</span>
+      <div class="row-main">
+        <span class="row-title">{{ s.member_name }}</span>
+        {% if s.value_tag %}<span class="row-meta tags"><span class="badge b-yellow">{{ SHOUTOUT_VALUE_LABELS.get(s.value_tag, s.value_tag) }}</span></span>{% endif %}
+        <span class="row-body">{{ s.message }}</span>
+        <div class="acts" style="margin-top:6px;">
+          <span class="row-meta" style="margin:0;">from {{ s.author }} · {{ short_stamp(s.created_at) }}</span>
+          {% if s.delivered_at %}<span class="badge b-navy">{{ icon('share') }}On Slack</span>{% endif %}
+          {% if shift_is_admin or s.author == shift_name %}
+          <form method="post" action="{{ url_for('shift.shoutout_delete', shoutout_id=s.id) }}"
+                onsubmit="return confirm('Delete this shout-out? (If it reached Slack, that post stays.)');">
+            <button class="linkbtn" type="submit">Delete</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
   </div>
-  <div style="font-size:14px; margin-top:6px; white-space:pre-line;">{{ s.message }}</div>
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
-    <div class="progress-note" style="margin:0;">{{ s.author }} · {{ s.created_at }}{{ ' · 📣 Slack' if s.delivered_at }}</div>
-    {% if shift_is_admin or s.author == shift_name %}
-    <form method="post" action="{{ url_for('shift.shoutout_delete', shoutout_id=s.id) }}"
-          onsubmit="return confirm('Delete this shout-out? (If it reached Slack, that post stays.)');">
-      <button class="pill small ghost" type="submit">Delete</button>
-    </form>
-    {% endif %}
-  </div>
+  {% else %}
+  <div class="empty">No shout-outs yet — be the first to catch someone being great.</div>
+  {% endif %}
+</section>
 </div>
-{% else %}
-<div class="empty">No shout-outs yet — be the first to catch someone being great.</div>
-{% endfor %}
+</div>
 {% endblock %}

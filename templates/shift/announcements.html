@@ -1,66 +1,96 @@
 {% extends "shift/base.html" %}
+{% from "shift/_leader_ui.html" import ui_styles, month_day, short_stamp with context %}
 {% block title %}Announcements{% endblock %}
+{% block head %}{{ ui_styles() }}
+<style>
+.ann { margin-top: 14px; }
+.ann .f-eyebrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ann .f-eyebrow .badge { text-transform: none; letter-spacing: 0; }
+.ann .f-eyebrow .i { width: 15px; height: 15px; stroke-width: 2.2; }
+.ann .f-body { font-size: 1.0625rem; line-height: 1.45; color: var(--text-strong); white-space: pre-line; margin-top: 8px; }
+.ann .acts { margin-top: 14px; }
+.ann.seen { background: #fff; border: 1px solid var(--rule); }
+.ann.seen .f-eyebrow { color: var(--text-muted); }
+.ann details.who-read { margin-top: 12px; }
+.ann details.who-read > summary { cursor: pointer; font-size: 0.875rem; font-weight: 700; color: var(--nav); }
+.ann table.plain { margin-top: 6px; }
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">Announcements</h1>
-<div class="sub">From the Operator — tap “Got it” so we know you've seen it.</div>
+{% set unread = items | rejectattr('acked') | list %}
+{% set seen = items | selectattr('acked') | list %}
+<section class="hero compact">
+  <p class="eyebrow">Announcements</p>
+  <h1 class="headline">{% if unread %}{{ unread | length }} new for you{% else %}You're all caught up{% endif %}</h1>
+  <p class="triage">Tap “Got it” so we know you've seen it.</p>
+</section>
 
+<div class="{{ 'split' if shift_is_admin }}">
 {% if shift_is_admin %}
-<details class="compose">
-  <summary>+ New announcement</summary>
-  <form method="post" action="{{ url_for('shift.announcement_create') }}" class="card">
+<details class="feature cream composer">
+  <summary><span class="plus">{{ icon('plus') }}</span><span class="grow">New announcement</span>{{ icon('chev', 'chev') }}</summary>
+  <form method="post" action="{{ url_for('shift.announcement_create') }}">
     <label class="field" for="a-body">Announcement</label>
     <textarea id="a-body" name="body" required placeholder="e.g. New sauce portioning SOP starts Monday — see the poster in BOH."></textarea>
-    <div style="display:flex; gap:8px; align-items:end;">
-      <div style="flex:1;">
-        <label class="field" for="a-exp">Expires (optional)</label>
-        <input type="date" id="a-exp" name="expires_on">
-      </div>
-      <label class="pill" style="cursor:pointer;">
-        <input type="checkbox" name="pinned" value="1" style="accent-color:var(--cfa-red);"> Pin on top
-      </label>
-    </div>
-    <div style="margin-top:12px;">
-      <button class="pill primary" type="submit">Post</button>
-    </div>
+    <label class="field" for="a-exp">Expires (optional)</label>
+    <input type="date" id="a-exp" name="expires_on">
+    <label class="check"><input type="checkbox" name="pinned" value="1"><span>Pin on top<small>Pinned ones stay first until they expire.</small></span></label>
+    <button class="btn btn-primary block" type="submit">Post</button>
   </form>
 </details>
 {% endif %}
 
-{% for a in items %}
-<div class="card" {% if not a.acked %}style="border-color: var(--cfa-red);"{% endif %}>
-  <div style="display:flex; gap:8px; align-items:flex-start;">
-    {% if a.pinned %}<span title="Pinned">📌</span>{% endif %}
-    <div style="flex:1; font-size:15px; white-space:pre-line;">{{ a.body }}</div>
-  </div>
-  <div class="progress-note">{{ a.author }} · {{ a.created_at }}{% if a.expires_on %} · until {{ a.expires_on }}{% endif %}</div>
-  <div style="display:flex; gap:8px; margin-top:10px; align-items:center; flex-wrap:wrap;">
+{% macro ann_card(a) %}
+<article class="feature cream ann {{ 'seen' if a.acked }}" id="ann-{{ a.id }}">
+  <p class="f-eyebrow">{{ icon('mega') }}From {{ 'the Operator' if a.author == 'Operator' else a.author }} · {{ short_stamp(a.created_at) }}{% if a.pinned %} <span class="badge b-tan">{{ icon('pin') }}Pinned</span>{% endif %}{% if a.expires_on %} <span class="badge b-navy">Until {{ month_day(a.expires_on) }}</span>{% endif %}</p>
+  <p class="f-body">{{ a.body }}</p>
+  <div class="acts">
     {% if a.acked %}
-    <span class="pill small" style="border-color:var(--good); color:var(--good);">✓ Got it</span>
+    <span class="badge b-green">{{ icon('check') }}Got it</span>
     {% else %}
     <form method="post" action="{{ url_for('shift.announcement_ack', announcement_id=a.id) }}">
-      <button class="pill primary small" type="submit">Got it ✓</button>
+      <button class="btn btn-primary sm" type="submit">{{ icon('check') }}Got it</button>
     </form>
     {% endif %}
-    <span class="progress-note" style="margin:0;">{{ a.ack_count }} acknowledged</span>
+    <span class="row-meta" style="margin:0;">{{ a.ack_count }} acknowledged</span>
     {% if shift_is_admin %}
     <form method="post" action="{{ url_for('shift.announcement_delete', announcement_id=a.id) }}"
           onsubmit="return confirm('Delete this announcement?');" style="margin-left:auto;">
-      <button class="pill small ghost" type="submit">Delete</button>
+      <button class="linkbtn" type="submit">Delete</button>
     </form>
     {% endif %}
   </div>
   {% if shift_is_admin and readers.get(a.id) %}
-  <details style="margin-top:8px;">
-    <summary style="font-size:13px; color:var(--soft); cursor:pointer;">Who's seen it</summary>
-    <table class="plain" style="margin-top:6px;">
+  <details class="who-read">
+    <summary>Who's seen it</summary>
+    <table class="plain">
       {% for r in readers[a.id] %}
-      <tr><td>{{ r.reader }}</td><td style="color:var(--soft);">{{ r.read_at }}</td></tr>
+      <tr><td>{{ r.reader }}</td><td style="color:var(--text-muted);">{{ short_stamp(r.read_at) }}</td></tr>
       {% endfor %}
     </table>
   </details>
   {% endif %}
+</article>
+{% endmacro %}
+
+<div class="feed">
+{% if unread %}
+<section class="sec">
+  <div class="sec-head"><h2>New</h2></div>
+  {% for a in unread %}{{ ann_card(a) }}{% endfor %}
+</section>
+{% endif %}
+
+{% if seen %}
+<section class="sec">
+  <div class="sec-head"><h2>Seen</h2></div>
+  {% for a in seen %}{{ ann_card(a) }}{% endfor %}
+</section>
+{% endif %}
+
+{% if not items %}
+<div class="empty" style="margin-top:24px;">No announcements right now.</div>
+{% endif %}
 </div>
-{% else %}
-<div class="empty">No announcements right now.</div>
-{% endfor %}
+</div>
 {% endblock %}

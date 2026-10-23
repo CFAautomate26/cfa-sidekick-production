@@ -1,53 +1,115 @@
 {% extends "shift/base.html" %}
-{% block title %}{{ leader.name }} — Development{% endblock %}
+{% from "shift/_leader_ui.html" import ui_styles, month_day, library_section with context %}
+{% block title %}{{ leader.name }} · Leadership Development{% endblock %}
+{% block head %}{{ ui_styles() }}
+<style>
+.stage-no { font-weight: 700; font-size: 1rem; font-variant-numeric: tabular-nums; }
+.stages .bar { margin-top: 8px; }
+details.lesson + details.lesson { border-top: 1px solid var(--rule); }
+details.lesson > summary { list-style: none; cursor: pointer; }
+details.lesson > summary::-webkit-details-marker { display: none; }
+details.lesson > summary .chev { transition: transform .15s; }
+details.lesson[open] > summary .chev { transform: rotate(90deg); }
+.tick { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--gray-400); background: #fff;
+  flex: 0 0 auto; display: grid; place-items: center; color: #fff; }
+.tick .i { width: 16px; height: 16px; stroke-width: 3; }
+.tick.done { background: var(--ok); border-color: var(--ok); }
+.tick.next { border-color: var(--info); box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 9px var(--navy-100); }
+details.lesson.is-done .row-title { color: var(--text-muted); }
+.lesson-body { padding: 0 16px 16px 56px; }
+details.stage { margin-top: 28px; }
+details.stage > summary .badge { vertical-align: 3px; margin-left: 4px; }
+.lesson-body .acts { margin-top: 0; margin-bottom: 12px; gap: 8px; }
+.lesson-body form .acts { margin: 10px 0 0; }
+.lesson-body input[type=text] { min-height: 48px; }
+@media (max-width: 400px) { .lesson-body { padding-left: 16px; } }
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">{{ leader.name }}</h1>
-<div class="sub">Leadership development · {{ done }} of {{ total }} lessons complete</div>
-<div class="bar {{ 'full' if total and done == total }}" style="margin-bottom:16px;">
-  <span style="width: {{ (done / total * 100) | round if total else 0 }}%"></span>
-</div>
+{% if shift_is_admin %}
+<p class="crumbs"><a class="back" href="{{ url_for('shift.development') }}">{{ icon('back') }}All leaders</a></p>
+{% endif %}
+<section class="hero compact">
+  <p class="eyebrow">Leadership Development</p>
+  <h1 class="headline">{{ 'Your leadership course' if is_me else leader.name ~ '’s course' }}</h1>
+  <p class="triage"><b>{{ done }}</b> of <b>{{ total }}</b> lessons done{% if next_lesson %} · up next: {{ next_lesson.title }}{% elif total %} · all done{% endif %}</p>
+  {% if library %}
+  <nav class="seg fit" aria-label="Leadership Development">
+    <a class="on" href="#course" aria-current="true">Course</a>
+    <a href="#library">Library</a>
+  </nav>
+  {% endif %}
+</section>
+
+<section class="sec" id="course">
+  <div class="sec-head"><h2>The {{ modules | length }} stages</h2><a class="more" href="{{ course_url }}" target="_blank" rel="noopener">Course folder</a></div>
+  <div class="card list stages">
+    {% for m in modules %}
+    <a class="row" href="#stage-{{ loop.index }}">
+      <span class="lead-ico {{ 'green' if m.total and m.done == m.total }}">{% if m.total and m.done == m.total %}{{ icon('check') }}{% else %}<span class="stage-no">{{ loop.index }}</span>{% endif %}</span>
+      <span class="row-main">
+        <span class="row-title">{{ m.module }}</span>
+        <span class="bar navy {{ 'done' if m.total and m.done == m.total }}"><span style="width: {{ (m.done / m.total * 100) | round if m.total else 0 }}%"></span></span>
+        <span class="row-meta"><b>{{ m.done }}</b> of {{ m.total }} lessons{% if m.total and m.done == m.total %} · done{% endif %}</span>
+      </span>{{ icon('chev', 'chev') }}
+    </a>
+    {% endfor %}
+  </div>
+</section>
 
 {% for m in modules %}
-<div class="section-label">{{ m.module }} · {{ m.done }}/{{ m.total }}</div>
-<div class="card" style="padding: 4px 14px;">
-  {% for l in m.lessons %}
-  <details id="lesson-{{ l.id }}" style="padding: 10px 0; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <summary style="list-style:none; cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
-      <span class="checkmark" style="{% if l.done %}background:var(--good); border-color:var(--good); color:#fff;{% endif %}">✓</span>
-      <span style="flex:1; font-size:15px; {% if l.done %}color:var(--soft);{% endif %}">{{ l.title }}
-        <span class="meta" style="display:block; font-size:12px; color:var(--soft);">
-          {% if l.done %}completed {{ l.completed_at }}{% if l.note %} · 📝{% endif %}{% else %}not started{% endif %}
-        </span>
-      </span>
-    </summary>
-    <div style="padding: 10px 0 4px 36px;">
-      <div class="pillrow" style="margin-bottom:8px;">
-        {% if l.doc_url %}<a class="pill small" href="{{ l.doc_url }}" target="_blank" rel="noopener">📄 Doc</a>{% endif %}
-        {% if l.slides_url %}<a class="pill small" href="{{ l.slides_url }}" target="_blank" rel="noopener">📊 Slides</a>{% endif %}
-        {% if l.video_url %}<a class="pill small" href="{{ l.video_url }}" target="_blank" rel="noopener">🎬 Video</a>{% endif %}
-      </div>
-      <form method="post" action="{{ url_for('shift.development_update', leader_id=leader.id, lesson_id=l.id) }}">
-        <input type="text" name="note" value="{{ l.note or '' }}"
-               placeholder="Session note — what clicked, what to revisit…">
-        <div class="pillrow" style="margin-top:8px;">
-          {% if l.done %}
-          <button class="pill small primary" type="submit" name="action" value="save">Save note</button>
-          <button class="pill small ghost" type="submit" name="action" value="uncomplete">Mark not done</button>
-          {% else %}
-          <button class="pill small primary" type="submit" name="action" value="complete">✓ Mark complete</button>
-          {% endif %}
+{% set has_opened = opened_lesson and (m.lessons | selectattr('id', 'equalto', opened_lesson) | list) %}
+<details class="fold stage" id="stage-{{ loop.index }}"{% if m.module == current_stage or has_opened %} open{% endif %}>
+  <summary><span class="grow">{{ m.module }} {% if m.total and m.done == m.total %}<span class="badge b-green">Done</span>{% else %}<span class="badge b-tan">{{ m.done }} of {{ m.total }}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</summary>
+  <div class="card list">
+    {% for l in m.lessons %}
+    {% set is_next = next_lesson and l.id == next_lesson.id %}
+    <details class="lesson {{ 'is-done' if l.done }}" id="lesson-{{ l.id }}"{% if l.id == opened_lesson %} open{% endif %}>
+      <summary class="row">
+        <span class="tick {{ 'done' if l.done }} {{ 'next' if is_next }}" aria-hidden="true">{% if l.done %}{{ icon('check') }}{% endif %}</span>
+        <span class="row-main">
+          <span class="row-title">{{ l.title }}</span>
+          <span class="row-meta tags">
+            {% if l.done %}<span>Completed {{ month_day(l.completed_at[0:10]) }}</span>{% if l.note %}<span class="badge b-tan">{{ icon('note') }}Note</span>{% endif %}
+            {% elif is_next %}<span class="badge b-navy">Up next</span>
+            {% else %}<span>Not started</span>{% endif %}
+          </span>
+        </span>{{ icon('chev', 'chev') }}
+      </summary>
+      <div class="lesson-body">
+        {% if l.doc_url or l.slides_url or l.video_url %}
+        <div class="acts">
+          {% if l.doc_url %}<a class="btn btn-secondary sm" href="{{ l.doc_url }}" target="_blank" rel="noopener">{{ icon('file') }}Doc</a>{% endif %}
+          {% if l.slides_url %}<a class="btn btn-secondary sm" href="{{ l.slides_url }}" target="_blank" rel="noopener">{{ icon('list') }}Slides</a>{% endif %}
+          {% if l.video_url %}<a class="btn btn-secondary sm" href="{{ l.video_url }}" target="_blank" rel="noopener">{{ icon('camera') }}Video</a>{% endif %}
         </div>
-      </form>
-    </div>
-  </details>
-  {% endfor %}
-</div>
+        {% endif %}
+        <form method="post" action="{{ url_for('shift.development_update', leader_id=leader.id, lesson_id=l.id) }}">
+          <label class="sr" for="note-{{ l.id }}">Session note</label>
+          <input type="text" id="note-{{ l.id }}" name="note" value="{{ l.note or '' }}"
+                 placeholder="Session note — what clicked, what to revisit…">
+          <div class="acts">
+            {% if l.done %}
+            <button class="btn btn-primary sm" type="submit" name="action" value="save">Save note</button>
+            <button class="linkbtn" type="submit" name="action" value="uncomplete">Mark not done</button>
+            {% else %}
+            <button class="btn btn-primary sm" type="submit" name="action" value="complete">{{ icon('check') }}Mark complete</button>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+</details>
 {% endfor %}
 
-<div class="pillrow" style="margin-top:14px;">
-  <a class="pill small ghost" href="{{ course_url }}" target="_blank" rel="noopener">📁 Course folder on Drive</a>
-  {% if shift_is_admin %}<a class="pill small ghost" href="{{ url_for('shift.development') }}">← All leaders</a>{% endif %}
+<div class="callout tan" style="margin-top:24px;">{{ icon('info') }}<span>Notes are visible to {{ leader.name }} and the admins — keep them developmental. Anything HR-related stays out of this app.</span></div>
+
+{% if library %}{{ library_section(library) }}{% endif %}
+
+<div class="acts" style="margin-top:24px;">
+  <a class="btn btn-secondary sm" href="{{ course_url }}" target="_blank" rel="noopener">{{ icon('folder') }}Course folder on Drive</a>
+  {% if shift_is_admin %}<a class="btn btn-secondary sm" href="{{ url_for('shift.development') }}">{{ icon('back') }}All leaders</a>{% endif %}
 </div>
-<div class="sub">Notes are visible to {{ leader.name }} and the admins — keep
-them developmental. Anything HR-related stays out of this app.</div>
 {% endblock %}
