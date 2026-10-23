@@ -39,6 +39,7 @@
 .goal-form .private { font-size: 0.8125rem; color: var(--text-muted); margin-top: 12px; line-height: 1.4; }
 .todo-row .row-main { min-width: 0; }
 .due-red { color: var(--red-700); font-weight: 700; }
+.triage .textlink { white-space: nowrap; }
 .team-row .row-title { font-size: 1rem; }
 .later { margin-top: 32px; }
 @media (min-width: 960px) {
@@ -63,7 +64,7 @@
     <form class="card goal-form" method="post" action="{{ url_for('shift.today_goals_save') }}">
       {% if not goals %}<p class="lede">Coming in with a purpose: set them now, tick them off as you go.</p>{% endif %}
       <label class="field" for="g-leadership">Leadership goal <small>Who will you grow or support today, and how?</small></label>
-      <textarea id="g-leadership" name="leadership" maxlength="{{ goal_max }}" rows="2" placeholder="e.g. Give one team member specific praise and one coaching tip on the Core 4">{{ lead.body if lead }}</textarea>
+      <textarea id="g-leadership" name="leadership" maxlength="{{ goal_max }}" rows="2" placeholder="e.g. Coach one team member on the Core 4">{{ lead.body if lead }}</textarea>
       <label class="field" for="g-operational">Operational goal <small>What will you move in your area today?</small></label>
       <textarea id="g-operational" name="operational" maxlength="{{ goal_max }}" rows="2" placeholder="e.g. Keep lunch drive-thru under 4:30 a car">{{ ops.body if ops }}</textarea>
       <label class="field" for="g-area">Your area of ownership</label>

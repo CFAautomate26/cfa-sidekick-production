@@ -37,10 +37,10 @@
 </a>
 {% endmacro %}
 
-{% macro daily_lines(lead, ops, area='') %}
+{% macro daily_lines(lead, ops, show_area=true) %}
 {% for kind, g in (('leadership', lead), ('operational', ops)) %}
 {% if g %}
-<span class="daily-line"><span class="k{{ ' on' if g.done_at }}" role="img" aria-label="{{ 'Done' if g.done_at else 'Not done yet' }}"></span><span class="t"><b>{{ 'Leadership' if kind == 'leadership' else 'Operational' }}{% if kind == 'operational' and (g.area or area) %} · {{ g.area or area }}{% endif %}</b>{{ g.body }}</span></span>
+<span class="daily-line"><span class="k{{ ' on' if g.done_at }}" role="img" aria-label="{{ 'Done' if g.done_at else 'Not done yet' }}"></span><span class="t"><b>{{ 'Leadership' if kind == 'leadership' else 'Operational' }}{% if kind == 'operational' and show_area and g.area %} · {{ g.area }}{% endif %}</b>{{ g.body }}</span></span>
 {% endif %}
 {% endfor %}
 {% endmacro %}
@@ -123,7 +123,7 @@
     {% for t in daily_team %}
     <div class="daily-row">
       <span class="daily-who">{{ t.name }}{% if t.area %}<small>{{ t.area }}</small>{% endif %}</span>
-      {% if t.leadership or t.operational %}{{ daily_lines(t.leadership, t.operational, t.area) }}{% else %}<span class="daily-line unset">Not set yet today</span>{% endif %}
+      {% if t.leadership or t.operational %}{{ daily_lines(t.leadership, t.operational, show_area=false) }}{% else %}<span class="daily-line unset">Not set yet today</span>{% endif %}
     </div>
     {% endfor %}
   </div>
