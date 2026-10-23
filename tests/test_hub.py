@@ -4,6 +4,7 @@ files, people, and how the Hub rides along with backups."""
 import io
 import json
 import os
+import re
 import zipfile
 
 import pytest
@@ -121,8 +122,17 @@ def test_member_sign_in_first_name_or_full_name(client):
 def test_member_cannot_use_shift_app(client):
     add_member()
     login_member(client)
-    resp = client.get("/shift/")
-    assert resp.status_code == 302 and "/shift/login" in resp.headers["Location"]
+    resp = client.get("/shift/", follow_redirects=True)
+    assert resp.request.path == "/hub/" and b"That part of Team Hub is for leaders" in resp.data
+    # every leader page, not just Today (walk the whole URL map)
+    for rule in cfa_app.app.url_map.iter_rules():
+        path = rule.rule
+        if (not path.startswith("/shift") or "GET" not in rule.methods
+                or rule.endpoint in ("shift.login", "shift.logout", "shift.manifest", "shift.icon")):
+            continue
+        path = re.sub(r"<(?:int:)?\w+>", "1", path)
+        resp = client.get(path)
+        assert resp.status_code == 302 and resp.headers["Location"].endswith("/hub/"), path
 
 
 def test_sign_in_throttle(client):
@@ -948,3 +958,70 @@ def test_links_and_photo_lines():
     assert hub_db.safe_filename("Version 2.1 - Fryer cleaning procedure for the boh team "
                                 "with lots of words here to be long enough.pdf", "pdf"
                                 ).startswith("Version 2.1 - Fryer")
+
+
+# --- one front door ------------------------------------------------------------------
+
+def test_front_door_modes_and_redirects(client):
+    resp = client.get("/shift/login?next=/shift/goals")
+    assert resp.status_code == 302 and "as=leader" in resp.headers["Location"]
+    assert "next=/shift/goals" in resp.headers["Location"]
+    member_side = client.get("/hub/login").data.decode()
+    assert 'action="/hub/login"' in member_side and "Clock-in number" in member_side
+    leader_side = client.get("/hub/login?as=leader").data.decode()
+    assert 'action="/shift/login"' in leader_side and 'value="Operator"' in leader_side
+    wrong = client.post("/shift/login", data={"name": "Operator", "pin": "0000"})
+    assert wrong.status_code == 401 and b'action="/shift/login"' in wrong.data
+    assert b"Wrong PIN" in wrong.data
+    login_operator(client)
+    assert client.get("/hub/login").headers["Location"].endswith("/shift/")
+    out = client.post("/shift/logout")
+    assert out.headers["Location"].endswith("/hub/login")
+    add_member()
+    login_member(client)
+    assert client.get("/hub/login").headers["Location"].endswith("/hub/")
+    assert b'action="/shift/login"' in client.get("/hub/login?as=leader").data
+
+
+def test_leaders_can_sign_in_without_the_hub(client, monkeypatch):
+    import teamhub_nav
+    monkeypatch.setattr(teamhub_nav, "hub_up", lambda: False)
+    page = client.get("/shift/login")
+    assert page.status_code == 200 and b'action="/shift/login"' in page.data
+    assert b"Team member" not in page.data                 # no member side without the Hub
+    login_operator(client)
+    menu = client.get("/shift/more").data
+    assert b"Systems &amp; Procedures" not in menu and b"Checklists" in menu
+    assert client.post("/shift/logout").headers["Location"].endswith("/shift/login")
+
+
+def test_shared_device_sign_in(client):
+    resp = client.post("/shift/login", data={"name": "Operator", "pin": "9999", "shared": "1"})
+    cookie = resp.headers.get("Set-Cookie", "")
+    assert "session=" in cookie and "Expires" not in cookie        # gone when the browser closes
+    assert client.get("/shift/").status_code == 200
+    with client.session_transaction() as sess:
+        sess["seen_at"] -= 31 * 60                                  # away 31 minutes
+    resp = client.get("/shift/")
+    assert resp.status_code == 302 and "/hub/login" in resp.headers["Location"]
+    client.post("/shift/logout")
+    resp = client.post("/shift/login", data={"name": "Operator", "pin": "9999"})
+    assert "Expires" in resp.headers.get("Set-Cookie", "")          # unticked: 30 days
+
+
+def test_menu_links_only_where_each_role_may_go(client):
+    add_member()
+    login_member(client)
+    menu = client.get("/hub/menu").data.decode()
+    assert "/shift/" not in menu.replace('href="/shift/login', "")
+    assert "HR" in menu and "FOH Operations" in menu and "Leadership Development" not in menu
+    client.post("/hub/logout")
+    make_leader(client, "Ava", "5555", role="admin")
+    login_leader(client, "Ava", "5555")
+    menu = client.get("/shift/more").data.decode()
+    assert "Manage pages" in menu and "Leader logins" in menu
+    assert "Backups" not in menu and "/hub/people" not in menu and "Categories" not in menu
+    client.post("/shift/logout")
+    login_operator(client)
+    menu = client.get("/hub/menu").data.decode()
+    assert "Backups" in menu and "/hub/people" in menu

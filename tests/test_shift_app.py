@@ -54,7 +54,7 @@ def test_requires_login(client):
                  "/shift/oneonone/member/1"]:
         resp = client.get(path)
         assert resp.status_code == 302, path
-        assert "/shift/login" in resp.headers["Location"]
+        assert "/hub/login" in resp.headers["Location"] and "as=leader" in resp.headers["Location"]
 
 
 def test_not_configured_page(client, monkeypatch):
@@ -1033,7 +1033,7 @@ def test_restore_invalidates_leader_sessions(client):
     # Her 30-day cookie predates the restore: next request re-logs-in
     resp = client.get("/shift/", follow_redirects=False)
     assert resp.status_code == 302
-    assert "/shift/login" in resp.headers["Location"]
+    assert "/hub/login" in resp.headers["Location"]
 
 
 # --- team-member 1:1s (Operator-only) ---------------------------------------

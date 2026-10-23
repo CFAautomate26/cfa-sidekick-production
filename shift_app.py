@@ -20,6 +20,7 @@ import threading
 import time
 from datetime import date
 from functools import wraps
+from urllib.parse import urlparse
 
 import requests
 from flask import (Blueprint, Response, current_app, flash, redirect,
@@ -150,11 +151,85 @@ def require_login():
         return None
     if not app_configured():
         return render_template("shift/not_configured.html"), 200
+    if shared_device_expired():
+        return redirect(front_door_url())
     if not session.get("shift_name"):
-        return redirect(url_for("shift.login", next=request.path))
+        if session.get("hub_member_id"):
+            # A clock-in sign-in only ever opens team-member content.
+            flash("That part of Team Hub is for leaders.")
+            return redirect(url_for("hub.home") if teamhub_nav.hub_up()
+                            else url_for("shift.login"))
+        return redirect(front_door_url(resume_path()))
     if not leader_session_valid():
-        return redirect(url_for("shift.login"))
+        return redirect(front_door_url())
     return None
+
+
+# "Shared phone or computer" (ticked at sign-in): the cookie lasts only for
+# the browser session, and the session also ends after 30 idle minutes —
+# so the office PC can't stay signed in as the Operator for a month.
+SHARED_IDLE_SECONDS = 30 * 60
+
+
+def start_session(shared: bool) -> None:
+    """Call right after session.clear() on a successful sign-in."""
+    session.permanent = not shared
+    if shared:
+        session["shared_device"] = True
+        session["seen_at"] = int(time.time())
+
+
+def shared_device_expired() -> bool:
+    """Both blueprints call this first: True (and the session cleared) when
+    a shared-device session has sat idle too long."""
+    if not session.get("shared_device"):
+        return False
+    now = int(time.time())
+    if now - int(session.get("seen_at", 0)) > SHARED_IDLE_SECONDS:
+        session.clear()
+        flash("Signed out after 30 minutes away (shared phone or computer).")
+        return True
+    session["seen_at"] = now
+    return False
+
+
+def front_door_url(next_path: str | None = None) -> str:
+    """The leader side of Team Hub's front door (or the /shift sign-in when
+    the Hub blueprint isn't loaded)."""
+    if teamhub_nav.hub_up():
+        return url_for("hub.login", next=next_path, **{"as": "leader"})
+    return url_for("shift.login", next=next_path)
+
+
+def resume_path() -> str | None:
+    """Where to land after signing in: the page asked for (with its query),
+    or — for a form post that can't be replayed — the page it came from."""
+    if request.method == "GET":
+        return request.full_path.rstrip("?")
+    ref = urlparse(request.referrer or "")
+    if ref.netloc == request.host and ref.path.startswith(("/shift", "/hub")):
+        return ref.path
+    return None
+
+
+def _clean_next() -> str:
+    target = request.values.get("next", "")
+    if (target.startswith(("/shift", "/hub")) and "//" not in target
+            and "\\" not in target and target.isprintable()):
+        return target
+    return ""
+
+
+def render_front_door(mode: str, error: str | None = None, picked: str = "",
+                      status: int = 200):
+    """Team Hub's one sign-in page (templates/shared/front_door.html)."""
+    names = [l["name"] for l in shift_db.leaders()]
+    if SHIFT_ADMIN_PIN:
+        names.append(OPERATOR_NAME)
+    return render_template(
+        "shared/front_door.html", mode=mode, error=error, picked=picked, names=names,
+        next_url=_clean_next(), manifest_url=url_for("shift.manifest"),
+        member_ok=teamhub_nav.hub_up(), shared=bool(request.form.get("shared"))), status
 
 
 # Blueprint-scoped (not app-wide): the bot's own pages must never touch the
@@ -278,11 +353,16 @@ def login():
     if not app_configured():
         return render_template("shift/not_configured.html"), 200
 
-    names = [l["name"] for l in shift_db.leaders()]
-    if SHIFT_ADMIN_PIN:
-        names.append(OPERATOR_NAME)
+    if request.method == "GET":
+        # One front door: the Hub's, in leader mode — or right here if the
+        # Hub isn't loaded, so leaders can always sign in.
+        if teamhub_nav.hub_up():
+            return redirect(url_for("hub.login", next=_clean_next() or None,
+                                    **{"as": "leader"}))
+        return render_front_door("leader")
 
     if request.method == "POST":
+        shared = bool(request.form.get("shared"))
         name = (request.form.get("name") or "").strip()
         pin = (request.form.get("pin") or "").strip()
         error = None
@@ -295,7 +375,7 @@ def login():
             if SHIFT_ADMIN_PIN and hmac.compare_digest(pin, SHIFT_ADMIN_PIN):
                 _clear_fails(name)
                 session.clear()
-                session.permanent = True
+                start_session(shared)
                 session["shift_name"] = OPERATOR_NAME
                 session["shift_role"] = "admin"
                 session["shift_pin_tag"] = _operator_pin_tag()
@@ -307,7 +387,7 @@ def login():
             if leader:
                 _clear_fails(name)
                 session.clear()
-                session.permanent = True
+                start_session(shared)
                 session["shift_name"] = leader["name"]
                 session["shift_role"] = leader["role"]
                 session["shift_leader_id"] = leader["id"]
@@ -316,16 +396,13 @@ def login():
             error = "Wrong name or PIN."
             _record_fail(name)
 
-        return render_template("shift/login.html", names=names, error=error,
-                               picked=name), 401
-
-    return render_template("shift/login.html", names=names, error=None, picked="")
+        return render_front_door("leader", error, name, 401)
 
 
 @shift_bp.route("/logout", methods=["POST"])
 def logout():
     session.clear()
-    return redirect(url_for("shift.login"))
+    return redirect(url_for("hub.login") if teamhub_nav.hub_up() else url_for("shift.login"))
 
 
 # ---------------------------------------------------------------------------

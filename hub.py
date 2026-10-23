@@ -109,9 +109,11 @@ def _load_viewer() -> hub_db.Viewer | None:
 def require_viewer():
     if request.endpoint in _PUBLIC_ENDPOINTS:
         return None
+    if shift_app.shared_device_expired():
+        return redirect(url_for("hub.login"))
     viewer = _load_viewer()
     if viewer is None:
-        return redirect(url_for("hub.login", next=_resume_target()))
+        return redirect(url_for("hub.login", next=shift_app.resume_path() or None))
     g.viewer = viewer
     return None
 
@@ -122,14 +124,6 @@ def _same_site_referrer() -> str | None:
     if ref.netloc == request.host and ref.path.startswith("/hub/"):
         return ref.path + (f"?{ref.query}" if ref.query else "")
     return None
-
-
-def _resume_target() -> str:
-    """Where to land after signing in: the page asked for (with its query),
-    or — for a form post that can't be replayed — the page it came from."""
-    if request.method == "GET":
-        return request.full_path.rstrip("?")
-    return _same_site_referrer() or "/hub/"
 
 
 @hub_bp.after_request
@@ -214,30 +208,32 @@ def _line(key: str, cap: int = 300) -> str:
 
 @hub_bp.route("/login", methods=["GET", "POST"])
 def login():
-    if request.method == "GET" and _load_viewer():
-        return redirect(url_for("hub.home"))
-    error, picked = None, ""
-    if request.method == "POST":
-        picked = " ".join((request.form.get("name") or "").split())[:60]
-        code = request.form.get("code") or ""
-        key = "name:" + (picked.split()[0].casefold() if picked else "")
-        error = _locked(key)
-        if not error:
-            member = hub_db.member_for_login(picked, code)
-            if member:
-                # Misses age out on their own: clearing the shared first-name
-                # bucket here would let one Alex reset the lock on another.
-                session.clear()
-                session.permanent = True
-                session["hub_member_id"] = member["id"]
-                session["hub_tag"] = member["tag"]
-                session["hub_epoch"] = shift_db.session_epoch()
-                return shift_app._safe_next("hub.home")
-            _record_miss(key)
-            error = ("That name and clock-in number don't match. "
-                     "Ask a leader if you're stuck.")
-        return render_template("hub/login.html", error=error, picked=picked), 401
-    return render_template("hub/login.html", error=None, picked="")
+    """Team Hub's front door. ?as=leader shows the leader (PIN) side, which
+    posts to shift.login; the team-member side posts here."""
+    if request.method == "GET":
+        viewer = _load_viewer()
+        as_leader = request.args.get("as") == "leader"
+        if viewer and (viewer.is_leader or not as_leader):
+            return redirect(url_for("shift.today") if viewer.is_leader else url_for("hub.home"))
+        return shift_app.render_front_door("leader" if as_leader else "member")
+    picked = " ".join((request.form.get("name") or "").split())[:60]
+    code = request.form.get("code") or ""
+    key = "name:" + (picked.split()[0].casefold() if picked else "")
+    error = _locked(key)
+    if not error:
+        member = hub_db.member_for_login(picked, code)
+        if member:
+            # Misses age out on their own: clearing the shared first-name
+            # bucket here would let one Alex reset the lock on another.
+            session.clear()
+            shift_app.start_session(bool(request.form.get("shared")))
+            session["hub_member_id"] = member["id"]
+            session["hub_tag"] = member["tag"]
+            session["hub_epoch"] = shift_db.session_epoch()
+            return shift_app._safe_next("hub.home")
+        _record_miss(key)
+        error = "That name and clock-in number don't match. Ask a leader if you're stuck."
+    return shift_app.render_front_door("member", error, picked, 401)
 
 
 @hub_bp.route("/logout", methods=["POST"])
