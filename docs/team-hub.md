@@ -116,13 +116,27 @@ from the Shift Lead app.
   numbers; no photos of people or of paperwork with personal info. The
   Hub is for how we do things. (Personnel records stay in HR files.)
 - Formatting: `# Heading`, `## Smaller heading`, `- bullet`, `1. step`,
-  `**bold**`, `_italic_`, `[link text](https://…)` or a Hub page
-  `[Opening](/hub/page/12)`. Upload photos to a page, then put
+  `**bold**`, `_italic_`, `~~crossed out~~` (what a procedure *used* to
+  say), `[link text](https://…)` or a Hub page `[Opening](/hub/page/12)`.
+  A table is lines of `| cell | cell |`; put `|---|---|` under the first
+  line to make it the header row (write `\|` for a pipe inside a cell).
+  Wide tables scroll sideways on a phone. Upload photos to a page, then put
   `[photo: 1]` on its own line to place the first one (unplaced photos show
   at the bottom). Tap **Preview** before saving.
 - Word import keeps headings, lists and tables; it leaves out hidden text,
   deleted tracked changes and comments (and says so). Old `.doc` files:
   open in Word → Save As `.docx` first.
+- **Library bundles** (Operator only, Manage → *Import a library bundle*):
+  many pages at once from a `.zip` of `.md` files. Each file starts with a
+  header between `---` lines — `category:`, `section:`, `title:`, optional
+  `summary:` / `keywords:`, `publish: yes` (or `no` to leave a draft),
+  `leaders_only: yes/no` — then the page text in the format above. Pages go
+  in file-name order; a title already in its category is skipped, so
+  importing the same bundle twice is safe; pages for a policy category
+  (HR) always arrive as drafts for the Operator's review checks. This is
+  how the Chick-fil-A Operational Requirements Guide was loaded: that text
+  is confidential to the Chick-fil-A system, so it travels as a bundle the
+  Operator uploads, never through the (public) code repository.
 - Files: PDF, JPG/PNG/GIF/WebP, and Word/Excel/PowerPoint without macros,
   up to 15 MB each. The type is checked from the file itself, not its name.
 - Photo numbers are fixed when a photo is uploaded and never reused, so

@@ -947,7 +947,7 @@ def test_word_import_utf16_bomb_moves_and_wrapped_rows():
              '</w:p></w:tc><w:tc><w:p><w:r><w:t>OK</w:t></w:r></w:p></w:tc></w:tr>'
              '</w:sdtContent></w:sdt></w:tbl></w:body></w:document>')
     text, notes = hub_text.docx_import(io.BytesIO(_docx_raw(moved.encode())))
-    assert text.count("Wash hands") == 1 and "Below 41F · OK" in text
+    assert text.count("Wash hands") == 1 and "| Below 41F | OK |" in text
     assert notes and "tracked changes" in notes[0]
 
 
@@ -1083,3 +1083,85 @@ def test_database_from_an_early_hub_build_migrates(tmp_path, monkeypatch):
     page = hub_db.get_page(1)
     assert hub_db.publish(viewer, 1, page["rev"], "", True) is None
     assert hub_db.search(viewer, "old")[0]["id"] == 1
+
+
+# --- library bundles ---------------------------------------------------------------
+
+def _bundle_zip(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, text in files.items():
+            z.writestr(name, text)
+    return buf.getvalue()
+
+
+def _bundle_page(category, title, publish="yes", section="Chicken", body="- Lid closed"):
+    return (f"---\ncategory: {category}\nsection: {section}\ntitle: {title}\n"
+            f"summary: In short\nkeywords: coater\npublish: {publish}\n---\n{body}")
+
+
+def _import_bundle(client, files):
+    return client.post("/hub/import-bundle", data={"file": (io.BytesIO(_bundle_zip(files)), "lib.zip")},
+                       content_type="multipart/form-data", follow_redirects=True)
+
+
+def test_bundle_import_publishes_pages_and_keeps_policy_pages_as_drafts(client):
+    login_operator(client)
+    resp = _import_bundle(client, {
+        "01-breading.md": _bundle_page("BOH Operations", "Breading"),
+        "02-drive.md": _bundle_page("foh operations", "Drive-thru", section="Service",
+                                    body="| **Step** | Who |\n|---|---|\n| Greet | Order taker |"),
+        "03-dress.md": _bundle_page("HR", "Appearance standards"),
+        "04-draft.md": _bundle_page("BOH Operations", "Cool down", publish="no"),
+        "05-nowhere.md": _bundle_page("Bakery", "Croissants"),
+    })
+    assert b"3 pages published" in resp.data or b"2 pages published" in resp.data
+    pages = {p["title"]: p for p in hub_db.pages_for_category(
+        hub_db.Viewer("operator", None, "Operator", "admin"), category_id("BOH Operations"))}
+    assert pages["Breading"]["status"] == "published" and pages["Breading"]["version"] == 1
+    assert pages["Breading"]["section"] == "Chicken" and pages["Breading"]["summary"] == "In short"
+    assert pages["Cool down"]["status"] == "draft"
+    foh = hub_db.pages_for_category(hub_db.Viewer("operator", None, "Operator", "admin"),
+                                    category_id("FOH Operations"))
+    assert [p["status"] for p in foh] == ["published"]            # category name matched loosely
+    hr = hub_db.pages_for_category(hub_db.Viewer("operator", None, "Operator", "admin"),
+                                   category_id("HR"))
+    assert [p["status"] for p in hr] == ["draft"]                 # policy category: Operator publishes
+    assert b"Croissants: no category called" in resp.data
+    # the published page reads like any other, table included, and is in History
+    page_id = pages["Breading"]["id"]
+    assert client.get(f"/hub/page/{page_id}").status_code == 200
+    assert len(hub_db.versions(page_id)) == 1
+    html = client.get(f"/hub/page/{foh[0]['id']}").data
+    assert b"<table>" in html and b"<th><strong>Step</strong></th>" in html
+    # team members see the published page but never the drafts
+    add_member()
+    client.post("/shift/logout")
+    login_member(client)
+    assert client.get(f"/hub/page/{page_id}").status_code == 200
+    assert client.get(f"/hub/page/{pages['Cool down']['id']}").status_code == 404
+    assert client.get(f"/hub/page/{hr[0]['id']}").status_code == 404
+    client.post("/hub/logout")
+
+
+def test_bundle_import_is_repeat_safe_and_operator_only(client):
+    login_operator(client)
+    files = {"01-breading.md": _bundle_page("BOH Operations", "Breading")}
+    _import_bundle(client, files)
+    resp = _import_bundle(client, files)
+    assert b"1 skipped (Breading: already in BOH Operations)" in resp.data
+    operator = hub_db.Viewer("operator", None, "Operator", "admin")
+    assert len(hub_db.pages_for_category(operator, category_id("BOH Operations"))) == 1
+    resp = client.post("/hub/import-bundle", data={"file": (io.BytesIO(b"nope"), "x.zip")},
+                       content_type="multipart/form-data", follow_redirects=True)
+    assert b"a .zip bundle under 15 MB" in resp.data
+    resp = _import_bundle(client, {"a.txt": "x"})
+    assert b"Nothing could be imported" in resp.data
+    client.post("/shift/logout")
+    make_leader(client, "Ava", "5555", role="admin")
+    login_leader(client, "Ava", "5555")
+    resp = client.post("/hub/import-bundle", data={"file": (io.BytesIO(_bundle_zip(files)), "lib.zip")},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 302 and "/import-bundle" not in resp.headers["Location"]
+    assert len(hub_db.pages_for_category(operator, category_id("BOH Operations"))) == 1
+    assert "Import a library bundle".encode() not in client.get("/hub/manage").data

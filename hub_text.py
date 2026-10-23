@@ -7,6 +7,7 @@ text can never inject HTML or script. Links are limited to http(s), mailto,
 tel and Hub pages.
 """
 
+import io
 import re
 import zipfile
 from xml.etree import ElementTree
@@ -27,9 +28,17 @@ _LINE_BREAKS = re.compile("[\u2028\u2029\x85]")
 # long line full of stray ** or _ stays linear to render.
 _BOLD = re.compile(r"\*\*(?=[^\s*])([^*\n]{1,300}?)(?<=[^\s*])\*\*")
 _ITALIC = re.compile(r"(?<![*\w])_(?=[^\s_])([^_\n]{1,300}?)(?<=[^\s_])_(?![*\w])")
+_STRIKE = re.compile(r"~~(?=[^\s~])([^~\n]{1,300}?)(?<=[^\s~])~~")
 _HEADING = re.compile(r"^(#{1,3})\s+(.*)$")
-_BULLET = re.compile(r"^\s*[-*•]\s+(.*)$")
-_NUMBERED = re.compile(r"^\s*\d{1,3}[.)]\s+(.*)$")
+# A table is consecutive lines "| cell | cell |"; a "|---|---|" line after the
+# first row makes that row the header. "\|" is a literal pipe inside a cell.
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+_TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
+_ESCAPED_PIPE = "\x01"
+MAX_COLUMNS = 20
+_BULLET = re.compile(r"^( *)[-*•]\s+(.*)$")
+_NUMBERED = re.compile(r"^( *)\d{1,3}[.)]\s+(.*)$")
+MAX_LIST_DEPTH = 4                           # two spaces of indent per level
 PHOTO = re.compile(r"^\s*\[photo:\s*(\d{1,3})\]\s*$", re.I)
 
 
@@ -72,13 +81,54 @@ def _inline(text: str) -> str:
 
 def _emphasis(escaped: str) -> str:
     escaped = _BOLD.sub(r"<strong>\1</strong>", escaped)
+    escaped = _STRIKE.sub(r"<s>\1</s>", escaped)
     return _ITALIC.sub(r"<em>\1</em>", escaped)
+
+
+def _cells(row: str) -> list[str]:
+    r"""The cells of a "| a | b |" line (a "\|" stays a pipe)."""
+    inner = row.strip().replace("\\|", _ESCAPED_PIPE)
+    inner = inner[1:-1] if inner.startswith("|") and inner.endswith("|") else inner
+    return [c.strip().replace(_ESCAPED_PIPE, "|") for c in inner.split("|")][:MAX_COLUMNS]
+
+
+def _cell_html(cell: str) -> str:
+    """A cell's HTML; a bullet mid-cell ("a • b") starts a new line."""
+    return _inline(cell).replace(" • ", "<br>• ")
+
+
+def _table(rows: list[str]) -> str:
+    """Consecutive table lines -> a scrollable table. The first row is the
+    header when the second line is a |---| separator."""
+    header = None
+    if len(rows) >= 2 and _TABLE_SEP.match(rows[1]):
+        header, rows = _cells(rows[0]), rows[2:]
+    parsed = [_cells(r) for r in rows if not _TABLE_SEP.match(r)]
+    if header is None and not parsed:
+        return ""
+    width = max([len(header or [])] + [len(r) for r in parsed])
+    html = ['<div class="tbl"><table>']
+    if header is not None:
+        html.append("<thead><tr>" + "".join(
+            f"<th>{_inline(c)}</th>" for c in header + [""] * (width - len(header)))
+            + "</tr></thead>")
+    if parsed:
+        html.append("<tbody>")
+        for r in parsed:
+            html.append("<tr>" + "".join(
+                f"<td>{_cell_html(c)}</td>" for c in r + [""] * (width - len(r))) + "</tr>")
+        html.append("</tbody>")
+    html.append("</table></div>")
+    return "\n".join(html)
 
 
 def render(text: str, photos: dict | None = None) -> Markup:
     """Page body (Markdown subset) -> safe HTML. A line that is just
-    "[photo: N]" shows the page's Nth photo: photos maps N -> (url, alt)."""
-    html, para, list_kind = [], [], None
+    "[photo: N]" shows the page's Nth photo: photos maps N -> (url, alt).
+    List items indented by two spaces per level nest inside the item above."""
+    html, para, table = [], [], []
+    lists: list[str] = []            # open lists, outermost first: "ul" / "ol"
+    item_open = False                # the innermost list's last <li> is still open
     photos = photos or {}
 
     def flush_para():
@@ -86,17 +136,50 @@ def render(text: str, photos: dict | None = None) -> Markup:
             html.append("<p>" + "<br>".join(_inline(line) for line in para) + "</p>")
             para.clear()
 
-    def close_list():
-        nonlocal list_kind
-        if list_kind:
-            html.append(f"</{list_kind}>")
-            list_kind = None
+    def flush_table():
+        if table:
+            html.append(_table(table))
+            table.clear()
+
+    def close_item():
+        nonlocal item_open
+        if item_open:
+            html[-1] += "</li>"
+            item_open = False
+
+    def close_list(down_to: int = 0):
+        nonlocal item_open
+        while len(lists) > down_to:
+            close_item()
+            html.append(f"</{lists.pop()}>")
+            item_open = bool(lists)      # back inside the parent's open item
+
+    def list_item(kind: str, depth: int, content: str):
+        nonlocal item_open
+        depth = min(depth, MAX_LIST_DEPTH, len(lists))     # can't skip a level
+        if len(lists) > depth + 1:
+            close_list(depth + 1)
+        if len(lists) == depth + 1 and lists[-1] != kind:
+            close_list(depth)
+        if len(lists) == depth + 1:
+            close_item()
+        else:
+            html.append(f"<{kind}>")
+            lists.append(kind)
+        html.append(f"<li>{content}")
+        item_open = True
 
     for raw in clean(text).split("\n"):
         line = raw.rstrip()
         heading, bullet, numbered = (_HEADING.match(line), _BULLET.match(line),
                                      _NUMBERED.match(line))
         photo = PHOTO.match(line)
+        if _TABLE_ROW.match(line) or (table and _TABLE_SEP.match(line)):
+            flush_para()
+            close_list()
+            table.append(line)
+            continue
+        flush_table()
         if not line.strip():
             flush_para()
             close_list()
@@ -114,16 +197,13 @@ def render(text: str, photos: dict | None = None) -> Markup:
             html.append(f"<h{level}>{_inline(heading.group(2))}</h{level}>")
         elif bullet or numbered:
             flush_para()
-            kind = "ul" if bullet else "ol"
-            if list_kind != kind:
-                close_list()
-                html.append(f"<{kind}>")
-                list_kind = kind
-            html.append(f"<li>{_inline((bullet or numbered).group(1))}</li>")
+            m = bullet or numbered
+            list_item("ul" if bullet else "ol", len(m.group(1)) // 2, _inline(m.group(2)))
         else:
             close_list()
             para.append(line.strip())
     flush_para()
+    flush_table()
     close_list()
     return Markup("\n".join(html))
 
@@ -133,11 +213,15 @@ def plain(text: str) -> str:
     out = []
     for line in clean(text).split("\n"):
         line = _HEADING.sub(r"\2", line)
-        line = _BULLET.sub(r"\1", line)
-        line = _NUMBERED.sub(r"\1", line)
+        line = _BULLET.sub(r"\2", line)
+        line = _NUMBERED.sub(r"\2", line)
         line = _LINK.sub(r"\1", line)
         line = PHOTO.sub("", line)
-        out.append(line.replace("**", ""))
+        if _TABLE_SEP.match(line):
+            continue
+        if _TABLE_ROW.match(line):
+            line = " ".join(_cells(line))
+        out.append(line.replace("**", "").replace("~~", ""))
     return " ".join(" ".join(out).split())
 
 
@@ -251,7 +335,7 @@ def _text_boxes(el):
 
 def docx_import(source) -> tuple[str, list[str]]:
     """A .docx file's text as the Markdown subset — Word headings become
-    headings, list paragraphs bullets, table rows "a · b · c" bullets — plus
+    headings, list paragraphs bullets, tables "| a | b |" rows — plus
     notes about anything left out. ("", []) when it isn't a readable Word
     document. source: a path or a binary file object."""
     root, notes = _read_document(source)
@@ -284,6 +368,7 @@ def docx_import(source) -> tuple[str, list[str]]:
 
     def table(tbl):
         new_block()
+        first = True
         for row in _wrapped(tbl, "tr"):
             cells = []
             for cell in _wrapped(row, "tc"):
@@ -293,10 +378,12 @@ def docx_import(source) -> tuple[str, list[str]]:
                     for box in _text_boxes(p):
                         parts += [_run_text(q) for q in _paragraphs(box)]
                 words = " ".join(" ".join(clean(part).split()) for part in parts)
-                if words.strip():
-                    cells.append(" ".join(words.split()))
-            if cells:
-                lines.append("- " + " · ".join(cells))
+                cells.append(" ".join(words.split()).replace("|", "\\|"))
+            if any(cells):
+                lines.append("| " + " | ".join(cells) + " |")
+                if first:
+                    lines.append("|" + "---|" * len(cells))
+                first = False
         new_block()
 
     def walk(el):
@@ -319,3 +406,100 @@ def docx_import(source) -> tuple[str, list[str]]:
 
 def docx_text(source) -> str:
     return docx_import(source)[0]
+
+
+# ---------------------------------------------------------------------------
+# Library bundles (many pages at once, from a zip of .md files)
+# ---------------------------------------------------------------------------
+
+BUNDLE_MAX_FILES = 400
+BUNDLE_MAX_FILE_BYTES = 400_000          # one page's text, before the BODY_MAX check
+BUNDLE_MAX_TOTAL_BYTES = 12 * 1024 * 1024
+_FRONT_KEYS = ("category", "section", "title", "summary", "keywords", "publish",
+               "leaders_only", "required")
+
+
+def bundle_entries(data: bytes) -> tuple[list[dict], list[str]]:
+    """A zip of Markdown pages -> page entries, plus notes about anything
+    skipped. Each .md starts with a header between "---" lines:
+
+        ---
+        category: BOH Operations
+        section: Chicken
+        title: Breading
+        summary: One line shown in the list (optional)
+        keywords: also-called words for search (optional)
+        publish: yes            (no -> stays a draft)
+        leaders_only: no
+        ---
+        page text in the Markdown subset
+
+    Files are read in name order, so a number at the front of each name
+    sets the order pages are created in. Sizes are checked before anything
+    is read, so a bundle can't be a zip bomb."""
+    entries: list[dict] = []
+    notes: list[str] = []
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        infos = [i for i in zf.infolist() if not i.is_dir()]
+    except (zipfile.BadZipFile, ValueError, OSError):
+        return [], ["that isn't a zip file"]
+    if len(infos) > BUNDLE_MAX_FILES:
+        return [], [f"too many files (the limit is {BUNDLE_MAX_FILES})"]
+    if sum(i.file_size for i in infos) > BUNDLE_MAX_TOTAL_BYTES:
+        return [], ["the bundle is too big once unpacked"]
+    for info in sorted(infos, key=lambda i: i.filename):
+        name = info.filename
+        base = name.rsplit("/", 1)[-1]
+        if base.startswith(".") or "__MACOSX" in name:
+            continue
+        if not base.lower().endswith(".md"):
+            notes.append(f"{base}: not a .md file")
+            continue
+        if info.file_size > BUNDLE_MAX_FILE_BYTES:
+            notes.append(f"{base}: too big for one page")
+            continue
+        try:
+            text = clean(zf.read(info).decode("utf-8"))
+        except (UnicodeDecodeError, zipfile.BadZipFile, OSError):
+            notes.append(f"{base}: not readable UTF-8 text")
+            continue
+        entry, why = _front_matter(text)
+        if why:
+            notes.append(f"{base}: {why}")
+            continue
+        entry["name"] = base
+        entries.append(entry)
+    return entries, notes
+
+
+def _front_matter(text: str) -> tuple[dict, str | None]:
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}, "no header between --- lines"
+    fields = {k: "" for k in _FRONT_KEYS}
+    end = None
+    for i, line in enumerate(lines[1:60], 1):
+        if line.strip() == "---":
+            end = i
+            break
+        key, _, value = line.partition(":")
+        key = key.strip().lower()
+        if key in fields:
+            fields[key] = " ".join(value.split())
+    if end is None:
+        return {}, "header never closed with ---"
+    body = "\n".join(lines[end + 1:]).strip()
+    if not fields["title"] or not fields["category"]:
+        return {}, "header needs a title and a category"
+    if not body:
+        return {}, "no page text under the header"
+    yes = {"yes", "y", "true", "1", "on"}
+    return {
+        "category": fields["category"][:60], "section": fields["section"][:60],
+        "title": fields["title"][:140], "summary": fields["summary"][:300],
+        "keywords": fields["keywords"][:300], "body": body,
+        "publish": fields["publish"].lower() in yes,
+        "leaders_only": fields["leaders_only"].lower() in yes,
+        "required": fields["required"].lower() in yes,
+    }, None

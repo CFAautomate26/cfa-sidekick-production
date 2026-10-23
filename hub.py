@@ -816,6 +816,39 @@ def import_word():
     return redirect(url_for("hub.edit_page", page_id=page_id))
 
 
+@hub_bp.route("/import-bundle", methods=["POST"])
+@operator_required
+def import_bundle():
+    """A zip of .md pages becomes many pages at once (see
+    hub_text.bundle_entries for the file format)."""
+    request.max_content_length = _UPLOAD_LIMIT
+    upload = request.files.get("file")
+    data = upload.read(hub_db.MAX_FILE_BYTES + 1) if upload else b""
+    if not data or len(data) > hub_db.MAX_FILE_BYTES or not data.startswith(b"PK"):
+        flash("That isn't a .zip bundle under 15 MB.")
+        return redirect(url_for("hub.manage"))
+    entries, notes = hub_text.bundle_entries(data)
+    if not entries:
+        flash("Nothing could be imported from that bundle"
+              + (": " + "; ".join(notes[:5]) if notes else "") + ".")
+        return redirect(url_for("hub.manage"))
+    result = hub_db.import_bundle(g.viewer, entries)
+    parts = []
+    if result["published"]:
+        parts.append(f"{len(result['published'])} page"
+                     f"{'' if len(result['published']) == 1 else 's'} published")
+    if result["drafts"]:
+        parts.append(f"{len(result['drafts'])} saved as draft"
+                     f"{'' if len(result['drafts']) == 1 else 's'}")
+    skipped = result["skipped"] + [(n, "") for n in notes]
+    if skipped:
+        parts.append(f"{len(skipped)} skipped (" + "; ".join(
+            f"{t}: {why}" if why else t for t, why in skipped[:6])
+            + ("; …" if len(skipped) > 6 else "") + ")")
+    flash("Bundle imported — " + ", ".join(parts) + "." if parts else "Nothing to import.")
+    return redirect(url_for("hub.manage"))
+
+
 def _split_title(text: str, filename: str) -> tuple[str, str]:
     """The document's first heading becomes the page title."""
     lines = text.split("\n")

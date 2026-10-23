@@ -449,6 +449,59 @@ def publish(viewer: Viewer, page_id: int, rev: int | None, change_note: str,
     return None
 
 
+def import_bundle(viewer: Viewer, entries: list[dict]) -> dict:
+    """Many pages at once (the Operator's library bundle). Each entry is a
+    page as hub_text.bundle_entries describes it. Pages whose category is a
+    policy category stay drafts whatever the bundle says (the Operator
+    publishes those one by one, after the review checks); a title that is
+    already in its category is left alone. All or nothing: one transaction.
+    Returns {"published": [...], "drafts": [...], "skipped": [(title, why)]}."""
+    stamp = now_stamp()
+    result: dict = {"published": [], "drafts": [], "skipped": []}
+    with closing(connect()) as conn, conn:
+        cats = {c["name"].strip().lower(): dict(c) for c in conn.execute(
+            "SELECT * FROM hub_categories WHERE active=1")}
+        for e in entries:
+            cat = cats.get(e["category"].strip().lower())
+            if not cat:
+                result["skipped"].append((e["title"], f"no category called “{e['category']}”"))
+                continue
+            if len(e["body"]) > BODY_MAX:
+                result["skipped"].append((e["title"], "too long for one page"))
+                continue
+            if conn.execute(
+                    "SELECT 1 FROM hub_pages WHERE category_id=? AND status != 'retired' "
+                    "AND title=? COLLATE NOCASE", (cat["id"], e["title"])).fetchone():
+                result["skipped"].append((e["title"], "already in " + cat["name"]))
+                continue
+            fields = {"category_id": cat["id"], "section": e["section"], "title": e["title"],
+                      "summary": e["summary"], "keywords": e["keywords"], "body": e["body"],
+                      "leaders_only": int(bool(e.get("leaders_only"))),
+                      "required": int(bool(e.get("required"))), "annual_review": 0}
+            cur = conn.execute(
+                "INSERT INTO hub_pages (category_id, section, title, summary, keywords, body, "
+                "status, leaders_only, required, needs_counsel, annual_review, version, "
+                "ack_version, created_at, created_by, updated_at, updated_by) "
+                "VALUES (?,?,?,?,?,?,'draft',?,?,0,0,0,0,?,?,?,?)",
+                (fields["category_id"], fields["section"], fields["title"], fields["summary"],
+                 fields["keywords"], fields["body"], fields["leaders_only"], fields["required"],
+                 stamp, viewer.name, stamp, viewer.name))
+            page_id = cur.lastrowid
+            _audit(conn, viewer.name, "draft created", page_id, f"{e['title']} (from a bundle)")
+            if e.get("publish") and not cat["policy"]:
+                conn.execute(
+                    "UPDATE hub_pages SET status='published', version=1, ack_version=1, "
+                    "published_at=?, updated_at=?, updated_by=?, rev=rev+1 WHERE id=?",
+                    (stamp, stamp, viewer.name, page_id))
+                _snapshot(conn, page_id, 1, fields, "First version (from a bundle)",
+                          viewer.name, False)
+                _audit(conn, viewer.name, "published", page_id, "v1 (from a bundle)")
+                result["published"].append(e["title"])
+            else:
+                result["drafts"].append(e["title"])
+    return result
+
+
 def _touch(conn, page_id: int, who: str) -> None:
     conn.execute("UPDATE hub_pages SET rev=rev+1, updated_at=?, updated_by=? WHERE id=?",
                  (now_stamp(), who, page_id))

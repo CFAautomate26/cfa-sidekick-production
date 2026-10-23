@@ -372,6 +372,13 @@ table.plain td, table.plain th { padding: 9px 6px; border-bottom: 1px solid var(
 .doc ul, .doc ol { margin: 0 0 14px 22px; }
 .doc li { margin: 5px 0; }
 .doc a { color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.doc s { color: var(--text-muted); }
+.doc .tbl { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 0 14px; border: 1px solid var(--rule); border-radius: var(--r-lg); }
+.doc table { border-collapse: collapse; min-width: 100%; font-size: 0.9375rem; line-height: 1.4; }
+.doc th, .doc td { padding: 8px 10px; border-bottom: 1px solid var(--rule); border-right: 1px solid var(--rule); text-align: left; vertical-align: top; min-width: 7em; }
+.doc th:last-child, .doc td:last-child { border-right: 0; }
+.doc tbody tr:last-child td { border-bottom: 0; }
+.doc th { background: var(--tan-100); font-weight: 700; color: var(--text-strong); }
 .doc figure { margin: 14px 0; }
 .doc img, .gallery img { max-width: 100%; height: auto; border-radius: var(--r-xl); display: block; }
 .gallery figure { margin: 0 0 14px; }
