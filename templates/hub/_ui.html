@@ -1,19 +1,19 @@
 {# Small pieces the Hub pages share (inline SVG + links only: the Hub runs
    no scripts). #}
 
+{# items: (label, url) pairs; a None url is plain text (where you are). #}
 {% macro crumbs(items) -%}
 <nav class="crumbs" aria-label="You are here">
-  {%- for label, url in items %}{% if not loop.first %}{{ icon('chev') }}{% endif %}<a href="{{ url }}">{{ label }}</a>{% endfor -%}
+  {%- for label, url in items %}{% if not loop.first %}{{ icon('chev') }}{% endif %}{% if url %}<a href="{{ url }}">{{ label }}</a>{% else %}<span>{{ label }}</span>{% endif %}{% endfor -%}
 </nav>
 {%- endmacro %}
 
-{% macro hero(eyebrow, headline, triage=none) -%}
-<section class="hero compact">
-  <p class="eyebrow">{{ eyebrow }}</p>
-  <h1 class="headline">{{ headline }}</h1>
-  {% if triage %}<p class="triage">{{ triage }}</p>{% endif %}
-  {{ caller() if caller }}
-</section>
+{# Systems & Procedures › Category: the trail every page view starts with. #}
+{% macro page_crumbs(page, last=none) -%}
+{%- set items = [('Procedures', url_for('hub.library')),
+                 (page.category_name, url_for('hub.category', category_id=page.category_id))] -%}
+{%- if last %}{% set items = items + [(page.title, url_for('hub.page', page_id=page.id))] %}{% endif -%}
+{{ crumbs(items) }}
 {%- endmacro %}
 
 {% macro paid_time() -%}
@@ -41,4 +41,9 @@
   <input id="q" name="q" type="search" value="{{ q }}" maxlength="100" placeholder="{{ placeholder }}"{{ ' autofocus' if autofocus }}>
   <button type="submit">Search</button>
 </form>
+{%- endmacro %}
+
+{# The privacy rule for what goes on a page (editors see it while writing). #}
+{% macro privacy_rule() -%}
+<p class="callout tan">{{ icon('lock') }}<span><strong>How we do things — never records about a person.</strong> No discipline, wages, medical or accommodation details, availability, contact info, SINs or clock-in numbers, and no photos of people or of paperwork with personal info.</span></p>
 {%- endmacro %}

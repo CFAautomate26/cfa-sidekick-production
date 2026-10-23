@@ -1,58 +1,80 @@
 {% extends "hub/base.html" %}
+{% from "hub/_ui.html" import page_crumbs with context %}
 {% block title %}History — {{ page.title }}{% endblock %}
+{% block head %}{% include "hub/_style.html" %}{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="{{ url_for('hub.page', page_id=page.id) }}">← {{ page.title }}</a></div>
-<h1 class="page">History</h1>
-<div class="sub">Every published version is kept as it was.</div>
+{{ page_crumbs(page, last=true) }}
+<section class="hero compact">
+  <p class="eyebrow">Editor tools · History</p>
+  <h1 class="headline">History</h1>
+  <p class="triage">Every published version of “{{ page.title }}” is kept as it was.</p>
+</section>
 
-<div class="section-label">Versions</div>
-{% for v in versions %}
-<a class="card tap" href="{{ url_for('hub.old_version', page_id=page.id, version=v.version) }}">
-  <h2>v{{ v.version }}{% if v.version == page.version %} <span class="badge ok">Live</span>{% endif %}
-    {% if v.version == page.ack_version and page.required %}<span class="badge req">Read from here</span>{% endif %}</h2>
-  <div class="progress-note">{{ v.saved_at }} · {{ v.saved_by }}{% if v.change_note %} · {{ v.change_note }}{% endif %}
-    {% if v.reviewed_by %}<br>Policy checks confirmed by {{ v.reviewed_by }}{% endif %}</div>
-</a>
-{% else %}
-<div class="empty">Not published yet.</div>
-{% endfor %}
+<section class="sec">
+  <div class="sec-head"><h2>Versions</h2></div>
+  {% if versions %}
+  <div class="card list">
+  {% for v in versions %}
+    <a class="row" href="{{ url_for('hub.old_version', page_id=page.id, version=v.version) }}"><span class="lead-ico{{ ' green' if v.version == page.version }}">{{ icon('note') }}</span><span class="row-main"><span class="row-title">Version {{ v.version }}</span>
+      <span class="row-meta">{{ when(v.saved_at) }} · {{ v.saved_by }}{% if v.change_note %} · {{ v.change_note }}{% endif %}</span>
+      {%- if v.reviewed_by %}<span class="row-meta">Policy checks confirmed by {{ v.reviewed_by }}</span>{% endif %}
+      {%- if v.version == page.version or (v.version == page.ack_version and page.required) %}<span class="row-meta tags">
+        {%- if v.version == page.version %}<span class="badge b-green">Live</span>{% endif %}
+        {%- if v.version == page.ack_version and page.required %}<span class="badge b-red">Read from here</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
+  {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">Not published yet.</div>
+  {% endif %}
+</section>
 
 {% if removed %}
-<div class="section-label">Files taken off this page</div>
-{% for f in removed %}
-<div class="card">
-  <div class="row-between">
-    <div style="min-width:0;">
-      {% if f.purged_at %}<strong>{{ f.filename }}</strong>
-      {% else %}<a href="{{ url_for('hub.file', file_id=f.id) }}" style="color:var(--cfa-red); font-weight:700;">{{ f.filename }}</a>{% endif %}
-      <div class="muted">Removed {{ f.removed_at }} by {{ f.removed_by }}{% if f.purged_at %} · deleted for good {{ f.purged_at }}{% endif %}</div>
-    </div>
+<section class="sec">
+  <div class="sec-head"><h2>Files taken off this page</h2></div>
+  <div class="card list">
+  {% for f in removed %}
+    {% if f.purged_at %}
+    <div class="row"><span class="lead-ico">{{ icon('file') }}</span><span class="row-main"><span class="row-title">{{ f.filename }}</span><span class="row-meta">Removed {{ when(f.removed_at) }} by {{ f.removed_by }} · deleted for good {{ when(f.purged_at) }}</span></span></div>
+    {% else %}
+    <a class="row" href="{{ url_for('hub.file', file_id=f.id) }}"><span class="lead-ico">{{ icon('file') }}</span><span class="row-main"><span class="row-title">{{ f.filename }}</span><span class="row-meta">Removed {{ when(f.removed_at) }} by {{ f.removed_by }}</span></span>{{ icon('download', 'chev') }}</a>
+    {% if viewer.is_operator %}
+    <details class="tool">
+      <summary class="row"><span class="lead-ico red">{{ icon('close') }}</span><span class="row-main"><span class="row-title">Delete it for good</span></span>{{ icon('chev', 'chev') }}</summary>
+      <div class="tool-body">
+        <form method="post" action="{{ url_for('hub.purge_file', file_id=f.id) }}">
+          <label class="checkline"><input type="checkbox" name="confirm" value="1" required>
+            <span>Delete the file itself — older versions will show it was there, but not what it was.
+            Use this only for something that should never have been uploaded.</span></label>
+          <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Delete for good</button></div>
+        </form>
+      </div>
+    </details>
+    {% endif %}
+    {% endif %}
+  {% endfor %}
   </div>
-  {% if viewer.is_operator and not f.purged_at %}
-  <details class="more" style="margin-top:8px;">
-    <summary>Delete for good</summary>
-    <form method="post" action="{{ url_for('hub.purge_file', file_id=f.id) }}">
-      <label class="checkline"><input type="checkbox" name="confirm" value="1" required>
-        Delete the file itself — older versions will show it was there, but not what it was.
-        Use this only for something that should never have been uploaded.</label>
-      <button class="pill small" type="submit">Delete for good</button>
-    </form>
-  </details>
-  {% endif %}
-</div>
-{% endfor %}
+</section>
 {% endif %}
 
 {% if reviews %}
-<div class="section-label">Yearly reviews</div>
-<div class="card"><table class="plain">
-{% for r in reviews %}<tr><td>{{ r.reviewed_at }}</td><td>{{ r.reviewed_by }}</td><td>{{ r.note }}</td></tr>{% endfor %}
-</table></div>
+<section class="sec">
+  <div class="sec-head"><h2>Yearly reviews</h2></div>
+  <div class="card list">
+  {% for r in reviews %}
+    <div class="row compact"><span class="row-main"><span class="row-title">{{ r.note or 'Reviewed' }}</span><span class="row-meta">{{ r.reviewed_by }} · {{ day(r.reviewed_at) }}</span></span></div>
+  {% endfor %}
+  </div>
+</section>
 {% endif %}
 
-<div class="section-label">Activity</div>
-<div class="card"><table class="plain">
-{% for a in log %}<tr><td style="white-space:nowrap;">{{ a.at }}</td><td>{{ a.who }}</td><td>{{ a.action }}{% if a.detail %} — {{ a.detail }}{% endif %}</td></tr>
-{% else %}<tr><td>No activity yet.</td></tr>{% endfor %}
-</table></div>
+<section class="sec">
+  <div class="sec-head"><h2>Activity</h2></div>
+  <div class="card list">
+  {% for a in log %}
+    <div class="row compact"><span class="row-main"><span class="row-title">{{ a.action[:1]|upper ~ a.action[1:] }}{% if a.detail %} — {{ a.detail }}{% endif %}</span><span class="row-meta">{{ a.who }} · {{ when(a.at) }}</span></span></div>
+  {% else %}
+    <div class="row compact"><span class="row-main"><span class="row-meta">No activity yet.</span></span></div>
+  {% endfor %}
+  </div>
+</section>
 {% endblock %}

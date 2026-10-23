@@ -1,20 +1,42 @@
 {% extends "hub/base.html" %}
+{% from "hub/_ui.html" import paid_time with context %}
 {% block title %}To read{% endblock %}
+{% block head %}{% include "hub/_style.html" %}
+<style>
+.prog-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 14px; font-size: 0.875rem; color: var(--text-muted); }
+.prog-line b { color: var(--ok); font-variant-numeric: tabular-nums; }
+.hero .bar { height: 8px; margin-top: 8px; }
+.rows-read .row { padding-left: 14px; }
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">To read</h1>
-<div class="sub">Required pages you haven't confirmed yet — or that changed since you did.</div>
+{% set done, total = progress %}
+<section class="hero compact">
+  <p class="eyebrow">To read</p>
+  {% if pages %}
+  <h1 class="headline">{{ pages|length }} page{{ '' if pages|length == 1 else 's' }} to read</h1>
+  <p class="triage">Required pages you haven't confirmed yet, or that changed since you did.</p>
+  {% elif viewer.is_operator %}
+  <h1 class="headline">Nothing for you to confirm.</h1>
+  <p class="triage">The Operator doesn't confirm pages — see who has under each page's Who's read it.</p>
+  {% else %}
+  <h1 class="headline">You're all caught up.</h1>
+  <p class="triage">{% if total %}You've confirmed every required page. New ones show up here.{% else %}Nothing's required yet. New required pages show up here.{% endif %}</p>
+  {% endif %}
+  {% if total %}
+  <p class="prog-line"><span>Required reading</span><b>{{ done }} of {{ total }} done</b></p>
+  <span class="bar green" role="img" aria-label="{{ done }} of {{ total }} required pages read"><span style="width:{{ (100 * done / total)|round|int }}%"></span></span>
+  {% endif %}
+</section>
 {% if pages %}
-<div class="callout">Required reading counts as paid work time — read it on shift, or tell a leader
-  how long it took you.</div>
-<div class="pagelist">
+<div class="card list rows-read">
 {% for p in pages %}
-  <a class="card" href="{{ url_for('hub.page', page_id=p.id) }}">
-    <div class="title">{{ p.title }} {% if p.last_ack %}<span class="badge warn">Updated</span>{% endif %}</div>
-    <div class="summary">{{ p.category_icon }} {{ p.category_name }}{% if p.summary %} · {{ p.summary }}{% endif %}</div>
-  </a>
+  <a class="row" href="{{ url_for('hub.page', page_id=p.id) }}"><span class="tick off"></span><span class="row-main"><span class="row-title">{{ p.title }}</span>
+    <span class="row-meta tags"><span>{{ p.category_name }}{% if p.section %} · {{ p.section }}{% endif %}</span>
+      {%- if loop.first %}<span class="badge b-red">Up next</span>{% endif %}
+      {%- if p.last_ack %}<span class="badge b-tan">Updated {{ day(p.published_at) }}</span>{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
 {% endfor %}
 </div>
-{% else %}
-<div class="empty">✓ You're all caught up.</div>
+{{ paid_time() }}
 {% endif %}
 {% endblock %}

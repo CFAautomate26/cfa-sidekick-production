@@ -1,33 +1,50 @@
 {% extends "hub/base.html" %}
+{% from "hub/_ui.html" import crumbs, privacy_rule with context %}
 {% block title %}{{ 'Edit' if page else 'New page' }}{% endblock %}
+{% block head %}{% include "hub/_style.html" %}
+<style>
+.edit-form { margin-top: 12px; }
+.edit-form textarea#body { min-height: 320px; }
+.edit-form details.more { margin-top: 8px; }
+.edit-form details.more > summary { font-size: 0.875rem; }
+.edit-form .checks { margin-top: 18px; padding-top: 6px; border-top: 1px solid var(--rule); }
+.preview-card .preview-title { font-size: 1.5rem; line-height: 1.15; font-weight: 700; color: var(--accent); letter-spacing: -0.025em; margin: 0 0 12px; }
+.save-row .btn-primary { flex: 1 1 12rem; }
+</style>
+{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="{{ url_for('hub.home') }}">Home</a>
-  {% if page %}› <a href="{{ url_for('hub.page', page_id=page.id) }}">{{ page.title }}</a>{% endif %}</div>
-<h1 class="page">{{ 'Edit page' if page else 'New page' }}</h1>
-<div class="sub">{% if page and page.version %}Published pages: saving a change to the words publishes it as version {{ page.version + 1 }}.
-  {% else %}Saved as a draft — only editors see it until it's published.{% endif %}</div>
+{% if page %}
+{{ crumbs([('Procedures', url_for('hub.library')), (page.category_name, url_for('hub.category', category_id=page.category_id)), (page.title, url_for('hub.page', page_id=page.id))]) }}
+{% else %}
+{{ crumbs([('Procedures', url_for('hub.library')), ('Manage pages', url_for('hub.manage'))]) }}
+{% endif %}
+<section class="hero compact">
+  <p class="eyebrow">Editor tools</p>
+  <h1 class="headline">{{ 'Edit page' if page else 'New page' }}</h1>
+  <p class="triage">{% if page and page.version %}Saving a change to the words publishes it as version {{ page.version + 1 }}.{% else %}Saved as a draft — only editors see it until it's published.{% endif %}</p>
+</section>
 
-{% if error %}<div class="callout red">{{ error }}</div>{% endif %}
+{% if error %}<p class="callout warm">{{ icon('alert') }}<span>{{ error }}</span></p>{% endif %}
 
-<div class="callout">🔒 <strong>How we do things — never records about a person.</strong> No discipline,
-  wages, medical or accommodation details, availability, contact info, SINs or clock-in numbers,
-  and no photos of people or of paperwork with personal info.</div>
+{{ privacy_rule() }}
 
 {% if preview is defined and preview is not none %}
-<div class="section-label">Preview</div>
-<div class="card doc"><h2 style="margin-top:0;">{{ f.title }}</h2>{{ preview }}</div>
+<section class="sec">
+  <div class="sec-head"><h2>Preview</h2></div>
+  <article class="card doc preview-card"><h2 class="preview-title">{{ f.title }}</h2>{{ preview }}</article>
+</section>
 {% endif %}
 
-<form method="post" action="{{ url_for('hub.edit_page', page_id=page.id) if page else url_for('hub.new_page') }}" class="card">
+<form method="post" action="{{ url_for('hub.edit_page', page_id=page.id) if page else url_for('hub.new_page') }}" class="card edit-form">
   {% if page %}<input type="hidden" name="rev" value="{{ form_rev }}">{% endif %}
   <label class="field" for="category_id">Category</label>
   <select id="category_id" name="category_id" required>
     {% for c in categories %}
-    <option value="{{ c.id }}" {{ 'selected' if c.id == f.category_id }}>{{ c.icon }} {{ c.name }}{{ ' (hidden)' if not c.active }}{{ ' — Operator publishes' if c.policy }}</option>
+    <option value="{{ c.id }}" {{ 'selected' if c.id == f.category_id }}>{{ c.name }}{{ ' (hidden)' if not c.active }}{{ ' — Operator publishes' if c.policy }}</option>
     {% endfor %}
   </select>
 
-  <label class="field" for="section">Section <span class="muted">— e.g. Training, Procedures, Food safety</span></label>
+  <label class="field" for="section">Section <small>— e.g. Training, Procedures, Food safety</small></label>
   <input type="text" id="section" name="section" value="{{ f.section }}" maxlength="60" list="sections">
   <datalist id="sections">{% for s in sections %}<option value="{{ s }}">{% endfor %}</datalist>
 
@@ -40,8 +57,8 @@
          placeholder="What this page covers, in a sentence">
 
   <label class="field" for="body">Page text</label>
-  <textarea id="body" name="body" rows="18" style="min-height:320px;">{{ f.body }}</textarea>
-  <details class="more" style="margin-top:6px;">
+  <textarea id="body" name="body" rows="18">{{ f.body }}</textarea>
+  <details class="more">
     <summary>Formatting help</summary>
 <pre class="help"># Big heading        ## Smaller heading
 - a bullet point      1. a numbered step
@@ -51,23 +68,25 @@
 Leave a blank line between paragraphs.</pre>
   </details>
 
-  <label class="field" for="keywords">Also called <span class="muted">— words people might search for</span></label>
+  <label class="field" for="keywords">Also called <small>— words people might search for</small></label>
   <input type="text" id="keywords" name="keywords" value="{{ f.keywords }}" maxlength="300"
          placeholder="e.g. DT, window, headset">
 
+  <div class="checks">
   <label class="checkline"><input type="checkbox" name="leaders_only" value="1" {{ 'checked' if f.leaders_only }}>
-    Leaders only</label>
+    <span>Leaders only</span></label>
   <label class="checkline"><input type="checkbox" name="required" value="1" {{ 'checked' if f.required }}>
-    Required reading — everyone confirms they've read it</label>
+    <span>Required reading — everyone confirms they've read it</span></label>
   <label class="checkline"><input type="checkbox" name="annual_review" value="1" {{ 'checked' if f.annual_review }}>
-    Review every year (e.g. the workplace harassment policy)</label>
+    <span>Review every year (e.g. the workplace harassment policy)</span></label>
   {% if not page %}
   <label class="checkline"><input type="checkbox" name="needs_counsel" value="1" {{ 'checked' if needs_counsel }}>
-    Needs a lawyer's review before it's published</label>
+    <span>Needs a lawyer's review before it's published</span></label>
   {% endif %}
+  </div>
 
   {% if page and page.version %}
-  <div class="section-label">If you changed the words</div>
+  <p class="subhead">If you changed the words</p>
   {% set show_reread = true %}
   {% set policy = viewer.is_operator %}
   {% set policy_label = 'Policy (HR) page, or moving it into one? Confirm each before it goes live:' %}
@@ -77,9 +96,10 @@ Leave a blank line between paragraphs.</pre>
   {% include "hub/_change_fields.html" %}
   {% endif %}
 
-  <div class="pillrow" style="margin-top:14px;">
-    <button class="pill" type="submit" name="action" value="preview">👀 Preview</button>
-    <button class="pill primary" type="submit" name="action" value="save">{{ 'Save' if page and page.version else 'Save draft' }}</button>
+  <div class="btnrow save-row">
+    <button class="btn btn-secondary sm" type="submit" name="action" value="preview">Preview</button>
+    <button class="btn btn-primary" type="submit" name="action" value="save">{{ 'Save' if page and page.version else 'Save draft' }}</button>
   </div>
 </form>
+{% if page %}<p class="fine-line"><a class="textlink" href="{{ url_for('hub.page', page_id=page.id) }}">Cancel</a> — back to the page without saving.</p>{% endif %}
 {% endblock %}
