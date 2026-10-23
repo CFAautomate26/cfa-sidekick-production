@@ -37,6 +37,12 @@ Canada.
   at `/shift/checklists/scorecard` — station cleaning sheets pinned in
   `shift_cleaning.py`; position
   lineups, goals, shift notes, announcements with read receipts,
+  a calm Today home (`/shift/`: greeting, the leader's two daily goals —
+  leadership + operational for their area of ownership, table
+  `daily_goals`, one per kind per holder per business day, NULL holder =
+  the Operator, private to that leader + the Operator like 1:1s; the
+  leader's area is `leaders.area` — then their open to-dos and section
+  tiles; triage lives on each section's own page),
   per-leader assigned to-dos under `/shift/todo` (any leader assigns),
   1:1 meeting agendas under `/shift/oneonone` (private to each leader +
   the Operator master login — not other admins; plus 1:1 threads with any
@@ -49,7 +55,7 @@ Canada.
   via `SLACK_BOT_TOKEN` + `SHIFT_SHOUTOUT_SLACK_CHANNEL`), a guest
   recovery log
   under `/shift/recovery` (guest + issue + make-it-right remedy; states
-  open → contacted/coming-back → resolved, surfaced on the Today screen
+  open → contacted/coming-back → resolved, listed on the Recovery page (count in the ☰ menu)
   until closed; guest name/contact only — never payment info), and
   per-leader
   leadership-course tracking under `/shift/development` — course

@@ -19,7 +19,7 @@ import os
 import re
 import threading
 import time
-from datetime import date
+from datetime import date, timedelta
 from functools import wraps
 from urllib.parse import urlparse
 
@@ -412,75 +412,106 @@ def logout():
 
 @shift_bp.route("/")
 def today():
-    """A leader's home: what needs them right now, then the shift at a
-    glance. Reads only what the shift already keeps — no new tables."""
+    """A leader's home, kept calm: a greeting, today's two goals (one for
+    leading people, one for their area of ownership), their open to-dos,
+    and the way into every section. What needs doing on the shift lives
+    on those sections' own pages; the tiles carry a quiet count."""
     day = shift_db.today_local()
     shift_db.ensure_runs_for_date(day)
     runs = shift_db.runs_for_date(day)
     daypart = shift_db.current_daypart()
+    now = shift_db.now_local()
     name = current_name()
-    leader_id = session.get("shift_leader_id")
+    leader_id = session.get("shift_leader_id")       # None: the Operator login
+
+    goals = shift_db.daily_goals(leader_id, day)
+    yesterday = shift_db.daily_goals(
+        leader_id, (date.fromisoformat(day) - timedelta(days=1)).isoformat())
+    if leader_id:
+        open_tasks = shift_db.tasks_for_leader(leader_id)[0]
+        team = None
+    else:
+        # The Operator has no to-do list of their own: they see what they've
+        # handed out that's still open, soonest due first.
+        open_tasks = sorted(
+            (t for t in shift_db.tasks_assigned_by(OPERATOR_NAME) if not t["completed_at"]),
+            key=lambda t: (t["due_date"] is None, t["due_date"] or "", t["id"]))
+        team = shift_db.team_daily_goals(day)
 
     due = _due_now(runs, daypart, day)
-    critical = sum(1 for row in due if row["critical"])
-    unread = [a for a in shift_db.active_announcements(reader=name) if not a["acked"]]
-    open_recs, awaiting_recs, _ = shift_db.recovery_feed(resolved_limit=0)
-    guests = len(open_recs) + len(awaiting_recs)
-    open_tasks = shift_db.tasks_for_leader(leader_id)[0] if leader_id else []
+    unread = sum(1 for a in shift_db.active_announcements(reader=name) if not a["acked"])
     active_goals = shift_db.goals_by_status("active")
-    # Leader-tagged goals are 1:1 material: Today shows store goals only,
-    # and the Goals tile counts what this viewer's Goals page lists.
-    # Goals with a number to show come first (newest first within each).
-    store_goals = sorted((g for g in active_goals if not g["leader_id"]),
-                         key=lambda g: g["progress_pct"] is None)
     goal_count = sum(1 for g in active_goals
                      if not g["leader_id"] or _can_view_oneonone(g["leader_id"]))
-    notes = shift_db.notes_for_date(day)
-    shoutouts = shift_db.recent_shoutouts(limit=1)
     if leader_id:
         modules = shift_db.course_overview(leader_id)
         course = {"done": sum(m["done"] for m in modules),
                   "total": sum(m["total"] for m in modules)}
     else:
         course = {"leaders": len(shift_db.leader_course_summary())}
-    guest_rows = _guest_rows(open_recs, awaiting_recs)
 
     return render_template(
         "shift/today.html",
-        eyebrow=_today_eyebrow(daypart, day, shift_db.now_local()),
-        # The Operator login is "Operator", not a name: its headline goes without.
+        eyebrow=_today_eyebrow(daypart, day, now),
+        greeting=_greeting(now),
+        # The Operator login is "Operator", not a name: its greeting goes without.
         first_name=(name.split() or [""])[0] if leader_id else "",
-        need_count=critical + guests + len(unread),
-        triage=[(n, word) for n, word in (
-            (critical, "critical list" if critical == 1 else "critical lists"),
-            (guests, "guest" if guests == 1 else "guests"),
-            (len(unread), "announcement" if len(unread) == 1 else "announcements"),
-        ) if n],
-        due=due,
-        announcement=_announcement_card(unread[0], day, name) if unread else None,
-        more_unread=max(len(unread) - 1, 0),
-        guest_rows=guest_rows,
-        guests_hidden=guests - len(guest_rows),
-        open_guests=len(open_recs),
-        coming_back=len(awaiting_recs),
-        tasks=open_tasks[:3],
+        goals=goals,
+        editing=request.args.get("edit") == "goals" or not goals,
+        # Today's operational goal keeps its own area (even a cleared one).
+        area=((goals["operational"]["area"] or "") if "operational" in goals
+              else shift_db.holder_area(leader_id)),
+        areas=shift_db.AREA_SUGGESTIONS,
+        goal_max=shift_db.DAILY_GOAL_MAX,
+        area_max=shift_db.AREA_MAX,
+        yesterday_set=len(yesterday),
+        yesterday_done=sum(1 for g in yesterday.values() if g["done_at"]),
+        team_set=sum(1 for t in (team or []) if t["leadership"] or t["operational"]),
+        team_total=len(team or []),
+        tasks=open_tasks[:5],
         task_total=len(open_tasks),
         my_leader_id=leader_id,
+        unread=unread,
+        due=due,
+        lineup=_lineup_grid(shift_db.active_positions(), shift_db.lineup_for(day, daypart)),
         to_read=_hub_to_read(),
         hub_on=teamhub_nav.hub_up(),
-        daypart_word=_daypart_word(daypart),
-        lineup=_lineup_grid(shift_db.active_positions(), shift_db.lineup_for(day, daypart)),
-        latest_note=notes[0] if notes else None,
-        latest_shoutout=shoutouts[0] if shoutouts else None,
-        goals=[_goal_card(g) for g in store_goals[:2]],
         goal_count=goal_count,
         course=course,
         day=day,
-        clock=_clock,
         short_date=_short_date,
-        note_label=_note_label,
-        shoutout_value=_shoutout_value,
     )
+
+
+def _greeting(now) -> str:
+    """"Good morning" until noon, "Good afternoon" until 5, then evening
+    (a close running past midnight is still the evening)."""
+    hour = now.hour
+    if 4 <= hour < 12:
+        return "Good morning"
+    if 12 <= hour < 17:
+        return "Good afternoon"
+    return "Good evening"
+
+
+@shift_bp.route("/today/goals", methods=["POST"])
+def today_goals_save():
+    """Set or change today's two goals (the signed-in leader's own, or the
+    Operator's own). A goal left blank is cleared."""
+    shift_db.save_daily_goals(
+        session.get("shift_leader_id"), shift_db.today_local(),
+        request.form.get("leadership") or "", request.form.get("operational") or "",
+        request.form.get("area") or "")
+    return redirect(url_for("shift.today") + "#goals")
+
+
+@shift_bp.route("/today/goals/<int:goal_id>/done", methods=["POST"])
+def today_goal_done(goal_id):
+    """Tick one of your own goals off for today (or back on)."""
+    done = request.form.get("done") == "1"
+    if not shift_db.set_daily_goal_done(goal_id, session.get("shift_leader_id"), done):
+        flash("That goal isn't yours to tick off.")
+    return redirect(url_for("shift.today") + "#goals")
 
 
 _DAYPART_FROM = {"breakfast": "From breakfast", "lunch": "From lunch",
@@ -603,66 +634,9 @@ def _short_date(iso: str | None) -> str:
     return f"{d.strftime('%a, %b')} {d.day}"
 
 
-def _stamp_label(stamp: str, day: str) -> str:
-    """A now_stamp() as Today reads it: the time if it's from this business
-    day, else the date."""
-    if not stamp:
-        return ""
-    if shift_db.business_date(stamp) == day:
-        return _clock(stamp)
-    try:
-        d = date.fromisoformat(stamp[:10])
-    except ValueError:
-        return stamp
-    return f"{d.strftime('%b')} {d.day}"
-
-
-# A Systems & Procedures page linked in an announcement ("…/hub/page/40").
-_HUB_PAGE_LINK = re.compile(r"(?:https?://[^\s/]+)?/hub/page/(\d+)(?:[/?#][^\s)\]]*)?")
-
-
-def _announcement_card(a: dict, day: str, reader: str = "") -> dict:
-    """The announcement on Today's feature card. A link to a Systems &
-    Procedures page in its text becomes an "Open the page" link."""
-    body, page_id = a["body"], None
-    match = _HUB_PAGE_LINK.search(body)
-    if match and teamhub_nav.hub_up():
-        page_id = int(match.group(1))
-        head, rest = body[:match.start()].rstrip(), body[match.end():]
-        rest = rest if rest[:1] in tuple(".,;:!?)]") else " " + rest.lstrip()
-        body = (head + rest).strip()
-    author = a.get("author") or ""
-    label = ("you" if reader and author == reader
-             else "the Operator" if author == OPERATOR_NAME else author)
-    return dict(a, body=body, page_id=page_id, author_label=label,
-                when=_stamp_label(a.get("created_at") or "", day))
-
-
-def _guest_rows(open_recs: list[dict], awaiting: list[dict], cap: int = 3) -> list[dict]:
-    """Guest recoveries for "Also needs you": guests nobody has reached yet
-    first (longest waiting on top), then guests coming back for what we
-    promised. Guest name and the promise only — contact details stay on
-    the recovery page."""
-    rows = []
-    for r in (open_recs + awaiting)[:cap]:
-        coming = r.get("contacted_at") is not None
-        rows.append({
-            "id": r["id"], "name": r["guest_name"], "coming": coming,
-            "call_back": bool(r.get("follow_up")) and not coming,
-            "issue": shift_db.RECOVERY_ISSUE_LABELS.get(r["issue"], r["issue"]).split(" (")[0],
-            "remedy": shift_db.RECOVERY_REMEDY_LABELS.get(
-                r["remedy"], r["remedy"]).split(" (")[0],
-            "details": (r.get("details") or "").strip(),
-            "note": (r.get("contact_note") or "").strip(),
-            "age": r.get("age_days") or 0, "stale": bool(r.get("stale")),
-            "waiting": r.get("waiting_days") or 0,
-        })
-    return rows
-
-
 def _lineup_grid(positions: list[dict], lineup: dict, cap: int = 8) -> dict:
-    """The daypart's lineup for Today: open positions (active, nobody on
-    them) first, then who's where, capped for the phone."""
+    """The daypart's lineup (Today's Lineups tile counts from it): open
+    positions (active, nobody on them) first, then who's where, capped."""
     filled = [p for p in positions if lineup.get(p["id"])]
     gaps = [p for p in positions if not lineup.get(p["id"])]
     cells = ([{"pos": p["name"], "open": True, "who": ""} for p in gaps]
@@ -671,50 +645,6 @@ def _lineup_grid(positions: list[dict], lineup: dict, cap: int = 8) -> dict:
                 for p in filled])
     return {"started": bool(filled), "cells": cells[:cap], "total": len(positions),
             "filled": len(filled), "open": len(gaps)}
-
-
-_GOAL_PERIOD_WORDS = {"daily": "today", "weekly": "this week", "monthly": "this month"}
-
-
-def _goal_card(g: dict) -> dict:
-    """A store goal as Today shows it: the latest number, a bar, one line."""
-    unit = (g.get("unit") or "").strip()
-    value, target = g.get("latest_value"), g.get("target_value")
-    card = {"id": g["id"], "title": g["title"], "pct": g.get("progress_pct"),
-            "value": None, "prefix": "", "suffix": "", "line": ""}
-    if value is not None:
-        card["value"] = fmt_num(value)
-        if unit == "$":
-            card["prefix"] = "$"
-        elif len(unit) <= 4:
-            card["suffix"] = unit
-    when = _GOAL_PERIOD_WORDS.get(g.get("period") or "", "")
-    if value is not None and target is not None:
-        gap = (value - target) if g.get("direction") == "down" else (target - value)
-        if gap <= 0:
-            card["line"] = "Target hit" + (f" {when}" if when else "")
-        else:
-            amount = fmt_num(round(gap, 2))
-            amount = (f"${amount}" if unit == "$" else f"{amount}%" if unit == "%"
-                      else f"{amount} {unit}".strip())
-            card["line"] = f"{amount} to go" + (f" {when}" if when else "")
-    else:
-        period = (g.get("period") or "").replace("-", " ")
-        card["line"] = (f"{period.capitalize()} goal" if period else "Goal") + (
-            f" · due {_short_date(g['due_date'])}" if g.get("due_date") else "") \
-            + " · tap to log progress"
-    return card
-
-
-def _note_label(category: str) -> str:
-    """"food-safety" -> "Food safety"."""
-    return (category or "general").replace("-", " ").capitalize()
-
-
-def _shoutout_value(tag: str | None) -> str:
-    """"⭐ 2nd-mile service" -> "2nd-mile service" (the feed keeps the emoji)."""
-    label = shift_db.SHOUTOUT_VALUE_LABELS.get(tag or "", "")
-    return label.split(" ", 1)[1] if " " in label else label
 
 
 def _hub_to_read() -> list[dict]:
@@ -1051,10 +981,19 @@ def goals():
                if not g["leader_id"] or _can_view_oneonone(g["leader_id"])]
     taggable = [l for l in shift_db.leaders()
                 if _is_operator() or l["id"] == session.get("shift_leader_id")]
+    # Daily goals are private to each leader + the Operator (like 1:1s): a
+    # leader sees their own week; the Operator also sees every leader today.
+    day = shift_db.today_local()
+    leader_id = session.get("shift_leader_id")
     return render_template("shift/goals.html", status=status,
                            goals=visible,
                            periods=shift_db.GOAL_PERIODS,
-                           leaders=taggable)
+                           leaders=taggable,
+                           day=day,
+                           daily_mine=shift_db.daily_goals(leader_id, day),
+                           daily_history=shift_db.daily_goal_history(leader_id, day),
+                           daily_team=shift_db.team_daily_goals(day) if _is_operator() else [],
+                           short_date=_short_date)
 
 
 @shift_bp.route("/goals", methods=["POST"])
@@ -1191,10 +1130,27 @@ def note_delete(note_id):
 
 @shift_bp.route("/announcements")
 def announcements():
-    items = shift_db.active_announcements(reader=current_name())
+    items = [_with_page_link(a) for a in shift_db.active_announcements(reader=current_name())]
     readers = {a["id"]: shift_db.announcement_readers(a["id"]) for a in items} \
         if is_admin() else {}
     return render_template("shift/announcements.html", items=items, readers=readers)
+
+
+# A Systems & Procedures page linked in an announcement ("…/hub/page/40").
+_HUB_PAGE_LINK = re.compile(r"(?:https?://[^\s/]+)?/hub/page/(\d+)(?:[/?#][^\s)\]]*)?")
+
+
+def _with_page_link(a: dict) -> dict:
+    """An announcement whose text links a Systems & Procedures page gets an
+    "Open the page" link instead of the raw address (when the Hub is up)."""
+    body, page_id = a["body"], None
+    match = _HUB_PAGE_LINK.search(body)
+    if match and teamhub_nav.hub_up():
+        page_id = int(match.group(1))
+        head, rest = body[:match.start()].rstrip(), body[match.end():]
+        rest = rest if rest[:1] in tuple(".,;:!?)]") else " " + rest.lstrip()
+        body = (head + rest).strip()
+    return dict(a, body=body, page_id=page_id)
 
 
 @shift_bp.route("/announcements", methods=["POST"])
@@ -1499,6 +1455,8 @@ def _back_to_meetings(default: str, anchor: str) -> str:
     its own access checks."""
     if request.form.get("back") == "meetings":
         return url_for("shift.oneonone") + anchor
+    if request.form.get("back") == "today":          # ticked on the Today home
+        return url_for("shift.today")
     return default
 
 

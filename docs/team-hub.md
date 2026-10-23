@@ -15,7 +15,7 @@ home-screen icons and every old link keep working.
 
 | Section | Who | What's there |
 |---|---|---|
-| **Today** (leaders) / **Home** (team members) | everyone | Leaders: what needs you now — checklists due, guests coming back, announcements, the lineup, goals. Team members: their required reading, the categories, what's new. |
+| **Today** (leaders) / **Home** (team members) | everyone | Leaders: a calm start — today's leadership goal and operational goal (private to them and the Operator), their open to-dos, and a tile into each section. Team members: their required reading, the categories, what's new. |
 | **Systems & Procedures** | everyone (filtered) | HR, FOH Operations, BOH Operations, Leadership Development (leaders only) — pages, required reading, search, editor tools. |
 | **Checklists** | leaders | Daypart lists, station cleaning sheets, scorecard, past days. |
 | **Lineups & Setups** | leaders | The position lineup per daypart. |

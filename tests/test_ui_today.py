@@ -1,6 +1,7 @@
-"""Team Hub Today (/shift/): the pure Due-now builder (_due_now) and the
-page a leader lands on — triage headline, announcement card, Due now,
-Also needs you, lineup, shift log, goals and the section tiles."""
+"""Team Hub Today (/shift/): the pure Due-now builder (_due_now, which the
+Checklists tile counts from) and the calm page a leader lands on — a
+greeting, today's two goals (leadership + operational), their to-dos, and
+the section tiles."""
 
 from datetime import datetime
 from html import escape
@@ -66,15 +67,6 @@ def section(page, head_id):
     """The HTML of one Today section, by its heading id."""
     start = page.index(f'id="{head_id}"')
     return page[start:page.index("</section>", start)]
-
-
-def due_rows(page):
-    """{title: row html} for the Due now card."""
-    rows = {}
-    for chunk in section(page, "due-head").split('<a class="row"')[1:]:
-        title = chunk.split('<span class="row-title">', 1)[1].split("</span>", 1)[0]
-        rows[title] = chunk
-    return rows
 
 
 def tick_all(run_name, day, critical_only=False):
@@ -226,21 +218,25 @@ def test_due_now_lunch_to_afternoon_at_1400(client, clock):
 def test_today_rolls_over_at_4am_not_midnight(client, clock):
     login_operator(client)
     clock["now"] = at("2026-10-24 03:59")                     # Friday's close, after midnight
-    page = today_page(client)
-    assert "Dinner is in session · Fri, Oct 23 · 3:59" in page
-    assert "FOH Closing" in due_rows(page)
+    assert "Dinner is in session · Fri, Oct 23 · 3:59" in today_page(client)
+    client.post("/shift/today/goals", data={"leadership": "Thank the closers", "operational": "",
+                                            "area": ""})
+    assert shift_db.daily_goals(None, FRI)["leadership"]["body"] == "Thank the closers"
     clock["now"] = at("2026-10-24 04:00")
     page = today_page(client)
     assert "Breakfast is in session · Sat, Oct 24 · 4:00" in page
-    rows = due_rows(page)
-    assert "FOH Closing" not in rows and "FOH Opening" in rows
-    saturday = {r["id"] for r in shift_db.runs_for_date("2026-10-24")}
-    assert any(f"/shift/checklists/run/{rid}" in rows["FOH Opening"] for rid in saturday)
+    assert "Thank the closers" not in page                    # a new day, a new set
+    assert "Set today&#39;s goals" in page or "Set today's goals" in page
 
 
 # --- the page ---------------------------------------------------------------
 
-def test_today_headline_counts_what_needs_the_leader(client, clock):
+def goals_section(page):
+    start = page.index('id="goals"')
+    return page[start:page.index("</section>", start)]
+
+
+def test_today_is_calm_greeting_goals_todos_tiles(client, clock):
     make_leader(client)
     login_operator(client)
     client.post("/shift/announcements", data={"body": "Pretzel launch Monday"})
@@ -249,149 +245,216 @@ def test_today_headline_counts_what_needs_the_leader(client, clock):
     client.post("/shift/logout")
     login_leader(client)
     page = today_page(client)
-    critical = sum(1 for r in shift_app._due_now(
-        shift_db.runs_for_date(FRI), "lunch", FRI) if r["critical"])
-    assert critical >= 2
     assert "<title>Team Hub</title>" in page
     assert "Lunch is in session · Fri, Oct 23 · 12:07" in page
-    assert f"{critical + 2} things need you, Maya." in page
-    assert f"<b>{critical}</b> critical lists · <b>1</b> guest · <b>1</b> announcement" in page
-    assert 'class="hero compact"' in page
+    assert "Good afternoon, Maya." in page
+    # No triage on the home screen: no counts of what "needs you", no
+    # checklist rows, guests, lineup grid or shift log.
+    for gone in ("need you", "needs you", "Due now", "Linda R.", "lineup-head", "log-head",
+                 'aria-label="Announcement"', 'class="ring"'):
+        assert gone not in page, gone
+    # ...just one quiet link to the unread announcement.
+    assert '<a class="textlink" href="/shift/announcements">1 new announcement</a>' in page
+    assert 'id="goals"' in page and 'id="tiles-head"' in page
 
 
-def test_today_all_caught_up(client, clock):
+def test_greeting_follows_the_clock(client, clock):
+    login_operator(client)
+    for stamp, word in (("2026-10-23 07:15", "Good morning."), ("2026-10-23 12:00", "Good afternoon."),
+                        ("2026-10-23 17:30", "Good evening."), ("2026-10-24 01:10", "Good evening.")):
+        clock["now"] = at(stamp)
+        assert word in today_page(client), stamp     # the Operator login has no name
+
+
+def test_first_visit_asks_for_two_goals(client, clock):
+    maya = make_leader(client)
+    login_leader(client)
+    goals = goals_section(today_page(client))
+    assert 'action="/shift/today/goals"' in goals
+    for field in ('name="leadership"', 'name="operational"', 'name="area"', 'list="g-areas"'):
+        assert field in goals
+    assert f'maxlength="{shift_db.DAILY_GOAL_MAX}"' in goals
+    assert "Only you and the Operator see these." in goals
+    assert "Drive-Thru" in goals                            # an area suggestion
+    resp = client.post("/shift/today/goals", data={
+        "leadership": "  Give one team member   specific praise ",
+        "operational": "Lunch drive-thru under 4:30 a car", "area": " Drive-Thru "})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/shift/#goals")
+    saved = shift_db.daily_goals(maya, FRI)
+    assert saved["leadership"]["body"] == "Give one team member specific praise"
+    assert saved["operational"]["area"] == "Drive-Thru" and saved["leadership"]["area"] is None
+    assert shift_db.get_leader(maya)["area"] == "Drive-Thru"      # remembered for next time
+    goals = goals_section(today_page(client))
+    assert "Give one team member specific praise" in goals
+    assert "Operational · Drive-Thru" in goals and 'name="leadership"' not in goals
+    assert 'href="/shift/?edit=goals#goals">Edit</a>' in goals
+
+
+def test_tick_a_goal_off_and_back(client, clock):
+    maya = make_leader(client)
+    login_leader(client)
+    client.post("/shift/today/goals", data={"leadership": "Coach Kayla on greetings",
+                                            "operational": "", "area": ""})
+    goal = shift_db.daily_goals(maya, FRI)["leadership"]
+    goals = goals_section(today_page(client))
+    assert "Add an operational goal" in goals                 # one set, one still open
+    assert f'action="/shift/today/goals/{goal["id"]}/done"' in goals
+    assert 'aria-label="Mark done: Coach Kayla on greetings"' in goals
+    client.post(f"/shift/today/goals/{goal['id']}/done", data={"done": "1"})
+    goals = goals_section(today_page(client))
+    assert ">Done</span>" in goals and 'class="tick on"' in goals
+    assert 'aria-label="Mark not done: Coach Kayla on greetings"' in goals
+    client.post(f"/shift/today/goals/{goal['id']}/done", data={"done": "0"})
+    assert shift_db.daily_goals(maya, FRI)["leadership"]["done_at"] is None
+
+
+def test_changing_a_goal_clears_its_tick_and_blank_clears_it(client, clock):
+    maya = make_leader(client)
+    login_leader(client)
+    client.post("/shift/today/goals", data={"leadership": "A", "operational": "B", "area": "BOH"})
+    lead = shift_db.daily_goals(maya, FRI)["leadership"]
+    shift_db.set_daily_goal_done(lead["id"], maya, True)
+    client.post("/shift/today/goals", data={"leadership": "A", "operational": "B2", "area": "BOH"})
+    now = shift_db.daily_goals(maya, FRI)
+    assert now["leadership"]["done_at"] is not None           # same words: still done
+    client.post("/shift/today/goals", data={"leadership": "A, but better", "operational": "B2",
+                                            "area": "BOH"})
+    assert shift_db.daily_goals(maya, FRI)["leadership"]["done_at"] is None
+    client.post("/shift/today/goals", data={"leadership": "", "operational": "B2", "area": "BOH"})
+    assert set(shift_db.daily_goals(maya, FRI)) == {"operational"}
+    page = today_page(client)
+    assert "Add a leadership goal" in page and 'name="leadership"' not in page
+
+
+def test_edit_mode_prefills_and_cancels(client, clock):
     make_leader(client)
     login_leader(client)
-    today_page(client)
-    for r in shift_db.runs_for_date(FRI):
-        tick_all(r["name"], FRI, critical_only=True)
-    page = today_page(client)
-    assert "You&#39;re all caught up, Maya." in page or "You're all caught up, Maya." in page
-    assert "Nothing critical left" in page
-    assert "critical</span>" not in section(page, "due-head")
-    for r in shift_db.runs_for_date(FRI):
-        tick_all(r["name"], FRI)
-    page = today_page(client)
-    assert "Nothing due right now" in section(page, "due-head")
+    client.post("/shift/today/goals", data={"leadership": "Lead", "operational": "Ops",
+                                            "area": "Hospitality"})
+    resp = client.get("/shift/?edit=goals")
+    goals = goals_section(resp.data.decode())
+    assert ">Lead</textarea>" in goals and ">Ops</textarea>" in goals
+    assert 'value="Hospitality"' in goals and "Save goals" in goals
+    assert 'href="/shift/#goals">Cancel</a>' in goals
 
 
-def test_today_operator_headline_has_no_name(client, clock):
-    login_operator(client)
-    page = today_page(client)
-    assert "things need you." in page and "need you, Operator" not in page
-
-
-def test_due_now_rows_link_and_ring(client, clock):
-    login_operator(client)
-    page = today_page(client)
-    rows = due_rows(page)
-    sheets = rows["Station cleaning sheets"]
-    assert 'href="/shift/checklists#allday"' in sheets
-    assert "all-day lists" in sheets
-    transition = rows["Breakfast → Lunch Transition"]
-    run_id = next(r["id"] for r in shift_db.runs_for_date(FRI)
-                  if r["name"] == "Breakfast → Lunch Transition")
-    assert f'href="/shift/checklists/run/{run_id}"' in transition
-    assert 'class="ring"' in transition and "1 critical" in transition
-    assert "From breakfast" in rows["BOH Opening"]
-    # Critical lists come first: no critical row after a calm one
-    flags = ["critical</span>" in html for html in rows.values()]
-    assert flags == sorted(flags, reverse=True)
-    assert 'href="/shift/checklists">All checklists' in page
-
-
-def test_announcement_card_got_it_and_page_link(client, clock):
-    make_leader(client)
-    login_operator(client)
-    category = next(c["id"] for c in hub_db.categories() if c["name"] == "FOH Operations")
-    op = hub_db.Viewer("operator", None, "Operator", "admin")
-    pid = hub_db.create_page(op, {"category_id": category, "section": "Training",
-                                  "title": "Building the Pretzel Sandwich", "summary": "",
-                                  "keywords": "", "body": "# Build", "leaders_only": 0,
-                                  "required": 1, "annual_review": 0})
-    assert hub_db.publish(op, pid, hub_db.get_page(pid)["rev"], "First", True) is None
-    client.post("/shift/announcements", data={"body": "Older news"})
-    clock["now"] = at("2026-10-23 09:02")
-    client.post("/shift/announcements", data={
-        "body": f"Pretzel Sandwich launches Monday. Read https://x.onrender.com/hub/page/{pid}."})
-    clock["now"] = at("2026-10-23 12:07")
-    page = today_page(client)
-    assert "From you · 9:02" in page                         # the Operator's own post
+def test_goals_are_private_to_their_leader_and_the_operator(client, clock):
+    maya = make_leader(client)
+    make_leader(client, "Daniel", "1111", role="admin")
+    login_leader(client)
+    client.post("/shift/today/goals", data={"leadership": "Maya's private growth goal",
+                                            "operational": "Ops", "area": "Drive-Thru"})
+    goal = shift_db.daily_goals(maya, FRI)["leadership"]
     client.post("/shift/logout")
-    login_leader(client)
-    page = today_page(client)
-    card = page[page.index('aria-label="Announcement"'):]
-    card = card[:card.index("</article>")]
-    newest = shift_db.active_announcements()[0]
-    assert "From the Operator · 9:02" in card
-    assert "Pretzel Sandwich launches Monday. Read." in card and "onrender" not in card
-    assert f'href="/hub/page/{pid}">Open&nbsp;the&nbsp;page' in card
-    assert f'action="/shift/announcements/{newest["id"]}/ack"' in card
-    assert 'name="next" value="/shift/"' in card
-    assert "1 more announcement to read" in card
-    resp = client.post(f"/shift/announcements/{newest['id']}/ack", data={"next": "/shift/"})
-    assert resp.headers["Location"].endswith("/shift/")
-    page = today_page(client)
-    assert "Older news" in page and "more announcement" not in page
-    client.post(f"/shift/announcements/{shift_db.active_announcements()[1]['id']}/ack",
-                data={"next": "/shift/"})
-    assert 'aria-label="Announcement"' not in today_page(client)
+    login_leader(client, "Daniel", "1111")                  # an admin-role leader
+    assert "private growth goal" not in today_page(client)
+    goals_page = client.get("/shift/goals").data.decode()
+    assert "private growth goal" not in goals_page and "Your leaders today" not in goals_page
+    client.post(f"/shift/today/goals/{goal['id']}/done", data={"done": "1"})
+    assert shift_db.daily_goals(maya, FRI)["leadership"]["done_at"] is None
+    client.post("/shift/logout")
+    login_operator(client)
+    assert "private growth goal" not in today_page(client)   # the Operator's home stays theirs
+    client.post(f"/shift/today/goals/{goal['id']}/done", data={"done": "1"})
+    assert shift_db.daily_goals(maya, FRI)["leadership"]["done_at"] is None   # only its holder
+    goals_page = client.get("/shift/goals").data.decode()
+    daily = goals_page[goals_page.index('id="daily"'):goals_page.index("Store goals")]
+    assert "Your leaders today" in daily and "private growth goal" in daily
+    assert "Drive-Thru" in daily and "Daniel" in daily and "Not set yet today" in daily
 
 
-def test_also_needs_you_guests_todos_and_reading(client, clock):
+def test_operator_home_shows_team_line_and_handed_out_todos(client, clock):
     maya = make_leader(client)
     daniel = make_leader(client, "Daniel", "1111")
-    shift_db.add_recovery("Marcus T.", "519-555-0199", "", "wait-time", "free-dessert-drink",
-                          "", follow_up=False, by="Priya")
-    shift_db.add_recovery("Linda R.", "519-555-0142", "linda@example.com", "order-error",
-                          "free-entree-card", "Missing 8-ct nuggets", follow_up=True, by="Daniel")
-    rid = shift_db.add_recovery("Sam K.", "", "", "order-error", "free-entree-card", "",
-                                follow_up=False, by="Daniel")
-    shift_db.set_recovery_contacted(rid, True, "coming in after work", "Daniel")
-    shift_db.add_recovery("Jo P.", "", "", "service", "free-dessert-drink", "", False,
-                          "Daniel", contacted_now=True)
+    shift_db.save_daily_goals(maya, FRI, "Lead", "Ops", "BOH")
     shift_db.add_task(maya, "Order DT headset batteries", "", FRI, "Operator")
+    shift_db.add_task(daniel, "Fix the ice machine filter", "", "2026-10-20", "Operator")
+    shift_db.add_task(daniel, "Daniel's own reminder", "", "", "Daniel")
+    login_operator(client)
+    page = today_page(client)
+    assert "1 of 2 leaders set today&#39;s goals" in page or "1 of 2 leaders set today's goals" in page
+    assert 'href="/shift/goals#daily"' in page
+    todos = page[page.index('id="todo-head"'):]
+    todos = todos[:todos.index("</section>")]
+    assert "To-dos you handed out" in todos
+    # soonest due first, with whose it is
+    assert todos.index("Fix the ice machine filter") < todos.index("Order DT headset batteries")
+    assert "Daniel · " in todos and "Overdue · was due Tue, Oct 20" in todos
+    assert "Maya · " in todos and "Due today" in todos
+    assert "own reminder" not in todos                      # not handed out by the Operator
+    assert 'href="/shift/oneonone#todos">All 2</a>' in todos
+
+
+def test_leader_todos_tick_back_to_today(client, clock):
+    maya = make_leader(client)
+    daniel = make_leader(client, "Daniel", "1111")
+    shift_db.add_task(maya, "Order DT headset batteries", "", FRI, "Operator")
+    for n in range(6):
+        shift_db.add_task(maya, f"Extra {n}", "", "", "Daniel")
     shift_db.add_task(daniel, "Daniel's own to-do", "", "", "Operator")
-    category = next(c["id"] for c in hub_db.categories() if c["name"] == "HR")
-    op = hub_db.Viewer("operator", None, "Operator", "admin")
-    pid = hub_db.create_page(op, {"category_id": category, "section": "Policies",
-                                  "title": "Workplace harassment policy", "summary": "",
-                                  "keywords": "", "body": "Respect", "leaders_only": 0,
-                                  "required": 1, "annual_review": 0})
-    assert hub_db.publish(op, pid, hub_db.get_page(pid)["rev"], "First", True) is None
     login_leader(client)
-    also = section(today_page(client), "also-head")
-    assert "Follow up with Marcus T." in also
-    assert "Call Linda R. back" in also and "Missing 8-ct nuggets" in also
-    assert "Sam K. is coming back" in also and "Hand over what was promised" in also
-    assert "Jo P." not in also                                  # capped at 3 rows...
-    assert "+1 more · 2 guests waiting, 2 coming back" in also  # ...and still counted
-    for contact in ("519-555", "linda@example.com"):           # contact stays on Recovery
-        assert contact not in also
+    page = today_page(client)
+    todos = page[page.index('id="todo-head"'):]
+    todos = todos[:todos.index("</section>")]
+    assert todos.count('class="row todo-row"') == 5            # top five
+    assert "Your to-dos" in todos and f'href="/shift/todo/{maya}">All 7</a>' in todos
+    assert "Order DT headset batteries" in todos and "Due today" in todos
+    assert "from the Operator" in todos and "from Daniel" in todos
+    assert "Daniel&#39;s own to-do" not in page and "Daniel's own to-do" not in page
     task = shift_db.tasks_for_leader(maya)[0][0]
-    assert f'action="/shift/todo/task/{task["id"]}/toggle"' in also
-    assert 'name="done" value="1"' in also and "Due today" in also
-    assert "from the Operator" in also
-    assert "Daniel&#39;s own to-do" not in also and "Daniel's own to-do" not in also
-    assert "1 page to read" in also and "Workplace harassment policy" in also
-    assert 'href="/hub/to-read"' in also
-    resp = client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1"})
-    assert resp.status_code == 302
+    assert 'name="back" value="today"' in todos
+    resp = client.post(f"/shift/todo/task/{task['id']}/toggle", data={"done": "1", "back": "today"})
+    assert resp.headers["Location"].endswith("/shift/")
     assert "Order DT headset batteries" not in today_page(client)
+
+
+def test_no_todos_no_todo_section(client, clock):
+    make_leader(client)
+    login_leader(client)
+    page = today_page(client)
+    assert 'id="todo-head"' not in page and "team-head" not in page
+
+
+def test_yesterday_line(client, clock):
+    maya = make_leader(client)
+    shift_db.save_daily_goals(maya, "2026-10-22", "Lead", "Ops", "BOH")
+    lead = shift_db.daily_goals(maya, "2026-10-22")["leadership"]
+    shift_db.set_daily_goal_done(lead["id"], maya, True)
+    shift_db.save_daily_goals(maya, FRI, "Today lead", "Today ops", "BOH")
+    login_leader(client)
+    assert "Yesterday you hit <b>1 of 2</b>." in today_page(client)
+    history = client.get("/shift/goals").data.decode()
+    daily = history[history.index('id="daily"'):history.index("Store goals")]
+    assert "Today lead" in daily and "Thu, Oct 22" in daily and "Lead" in daily
+
+
+def test_tiles_link_every_section_and_count_quietly(client, clock):
+    maya = make_leader(client)
+    make_leader(client, "Daniel", "1111")
+    shift_db.create_goal("OSAT 80%", "", "OSAT", "%", 80, "up", "monthly", "", "Operator")
+    shift_db.create_goal("Catering accounts", "", "", "", None, "up", "monthly", "", "Operator")
+    shift_db.create_goal("Maya's personal goal", "", "", "", None, "up", "monthly", "",
+                         "Operator", leader_id=maya)
+    login_leader(client, "Daniel", "1111")
+    tiles = section(today_page(client), "tiles-head")
+    for href in ("/hub/library", "/shift/checklists", "/shift/lineup", "/shift/goals",
+                 "/shift/oneonone", "/shift/development"):
+        assert f'href="{href}"' in tiles
+    assert "2 active" in tiles                                  # Daniel can't see Maya's
+    assert "due now" in tiles and "critical" not in tiles       # a count, not an alarm
+    assert "0 of " in tiles and "lessons" in tiles
+    client.post("/shift/logout")
+    login_leader(client)
+    assert "3 active" in section(today_page(client), "tiles-head")  # her own counts
 
 
 def test_today_without_the_hub(client, clock, monkeypatch):
     import teamhub_nav
     make_leader(client)
-    login_operator(client)
-    client.post("/shift/announcements", data={"body": "See /hub/page/1 before Monday"})
-    client.post("/shift/logout")
     monkeypatch.setattr(teamhub_nav, "hub_up", lambda: False)
     monkeypatch.setattr(hub_db, "to_read", lambda viewer: 1 / 0)   # never asked
     login_leader(client)
     page = today_page(client)
-    assert "/hub/" not in page.replace("/hub/page/1", "")
-    assert "Open&nbsp;the&nbsp;page" not in page
     assert "Systems &amp; Procedures" not in section(page, "tiles-head")
     assert "Checklists" in section(page, "tiles-head")
 
@@ -401,61 +464,95 @@ def test_to_read_failure_never_breaks_today(client, clock, monkeypatch):
     monkeypatch.setattr(hub_db, "to_read", lambda viewer: 1 / 0)
     login_leader(client)
     page = today_page(client)
-    assert "to read" not in page.split('id="tiles-head"')[0]     # no reading row
     assert "Up to date" in section(page, "tiles-head")
 
 
-def test_lineup_open_positions_first_capped(client, clock):
-    login_operator(client)
-    page = today_page(client)
-    lineup = section(page, "lineup-head")
-    assert "No lunch lineup yet" in lineup and 'href="/shift/lineup"' in lineup
-    positions = shift_db.active_positions()
-    for p in positions[:-2]:
-        shift_db.assign_position(FRI, "lunch", p["id"], "Kayla")
-    shift_db.assign_position(FRI, "breakfast", positions[-1]["id"], "Noah")  # other daypart
-    lineup = section(today_page(client), "lineup-head")
-    assert "Lunch lineup" in lineup and ">2 open</span>" in lineup
-    cells = lineup.split('<div class="lineup">', 1)[1].split('<div class="row compact">')[0]
-    assert cells.count("<div class=\"pos\">") == 8
-    assert cells.count('class="open"') == 2
-    first_two = cells.split('<div class="pos">')[1:3]
-    assert escape(positions[-2]["name"]) in first_two[0] + first_two[1]
-    assert escape(positions[-1]["name"]) in first_two[0] + first_two[1]
-    assert "Open — fill" in cells
-    assert f"All {len(positions)} positions · {len(positions) - 2} filled" in lineup
-
-
-def test_shift_log_goals_and_tiles(client, clock):
+def test_goal_text_is_capped_and_escaped(client, clock):
     maya = make_leader(client)
-    make_leader(client, "Daniel", "1111")
-    shift_db.add_note(FRI, "lunch", "equipment", "Fryer 3 slow to recover", "Daniel")
-    shift_db.add_shoutout("Kayla", "2nd-mile-service", "Walked an umbrella out", "Operator")
-    g1 = shift_db.create_goal("Drive-thru OTAT under 4:30", "", "OTAT", "sec", 270, "down",
-                              "weekly", "", "Operator")
-    shift_db.add_goal_update(g1, 282, "", "Maya")
-    shift_db.create_goal("OSAT 80%", "", "OSAT", "%", 80, "up", "monthly", "", "Operator")
-    shift_db.create_goal("Catering accounts", "", "", "", None, "up", "monthly", "",
-                         "Operator")
-    shift_db.create_goal("Maya's personal goal", "", "", "", None, "up", "monthly", "",
-                         "Operator", leader_id=maya)
-    login_leader(client, "Daniel", "1111")
+    login_leader(client)
+    client.post("/shift/today/goals", data={
+        "leadership": "<script>alert(1)</script>" + "x" * 500, "operational": "ok",
+        "area": "y" * 100})
+    saved = shift_db.daily_goals(maya, FRI)
+    assert len(saved["leadership"]["body"]) == shift_db.DAILY_GOAL_MAX
+    assert len(saved["operational"]["area"]) == shift_db.AREA_MAX
     page = today_page(client)
-    log = section(page, "log-head")
-    assert "Fryer 3 slow to recover" in log and "Equipment · Daniel · 12:07" in log
-    assert "Kayla · 2nd-mile service" in log and "from the Operator" in log
-    assert 'href="/shift/notes#n-body"' in log and 'href="/shift/recovery#r-name"' in log
-    assert 'href="/shift/shoutouts#s-name"' in log
-    goals = section(page, "goals-head")
-    assert goals.count('class="row goal-row"') == 2               # capped at 2
-    assert "Drive-thru OTAT under 4:30" in goals and "12 sec to go this week" in goals
-    assert "Maya&#39;s personal goal" not in page and "Maya's personal goal" not in page
-    tiles = section(page, "tiles-head")
-    for href in ("/hub/library", "/shift/checklists", "/shift/lineup", "/shift/goals",
-                 "/shift/oneonone", "/shift/development"):
-        assert f'href="{href}"' in tiles
-    assert "3 active" in tiles                                   # Daniel can't see Maya's
-    assert "0 of " in tiles and "lessons" in tiles
+    assert "<script>alert(1)</script>" not in page and "&lt;script&gt;" in page
+
+
+def test_team_members_cannot_set_goals(client, clock):
+    shift_db.add_member("Sam Patel")
+    member = next(m for m in shift_db.roster() if m["name"] == "Sam Patel")
+    assert hub_db.grant(member["id"], "1042", "Operator") is None
+    client.post("/hub/login", data={"name": "Sam", "code": "1042"})
+    resp = client.post("/shift/today/goals", data={"leadership": "x", "operational": "y",
+                                                   "area": "z"})
+    assert resp.status_code == 302 and "/shift/" not in resp.headers["Location"]
+    with shift_db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM daily_goals").fetchone()[0] == 0
+
+
+def test_double_tapped_first_save_never_errors(client, clock):
+    """Two saves racing for an empty day both succeed (no unique-index 500)."""
+    import threading
+    maya = make_leader(client)
+    errors, barrier = [], threading.Barrier(2)
+
+    def save(text):
+        barrier.wait()
+        try:
+            shift_db.save_daily_goals(maya, FRI, text, "Ops", "BOH")
+        except Exception as e:          # pragma: no cover - the failure being tested
+            errors.append(e)
+    for _ in range(10):
+        shift_db.save_daily_goals(maya, FRI, "", "", "")
+        threads = [threading.Thread(target=save, args=(t,)) for t in ("A", "B")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    assert errors == []
+    assert shift_db.daily_goals(maya, FRI)["leadership"]["body"] in ("A", "B")
+
+
+def test_cleared_area_stays_cleared(client, clock):
+    maya = make_leader(client)
+    login_leader(client)
+    client.post("/shift/today/goals", data={"leadership": "L", "operational": "O",
+                                            "area": "Back of House"})
+    client.post("/shift/today/goals", data={"leadership": "L", "operational": "O", "area": ""})
+    assert shift_db.get_leader(maya)["area"] is None
+    goals = goals_section(client.get("/shift/?edit=goals").data.decode())
+    assert 'id="g-area" name="area"' in goals and 'value=""' in goals
+    assert "Back of House" not in goals.split("<datalist")[0]
+    # ...and tomorrow starts blank too (no old goal's area comes back)
+    clock["now"] = at("2026-10-24 09:00")
+    goals = goals_section(today_page(client))
+    assert 'value=""' in goals
+
+
+def test_goals_tile_counts_todays_goals(client, clock):
+    make_leader(client)
+    login_leader(client)
+    assert "None yet" in section(today_page(client), "tiles-head")
+    client.post("/shift/today/goals", data={"leadership": "L", "operational": "", "area": ""})
+    assert "1 of 2 set today" in section(today_page(client), "tiles-head")
+
+
+def test_announcement_page_link_opens_the_hub_page(client, clock):
+    make_leader(client)
+    login_operator(client)
+    category = next(c["id"] for c in hub_db.categories() if c["name"] == "FOH Operations")
+    op = hub_db.Viewer("operator", None, "Operator", "admin")
+    pid = hub_db.create_page(op, {"category_id": category, "section": "Training",
+                                  "title": "Building the Pretzel Sandwich", "summary": "",
+                                  "keywords": "", "body": "# Build", "leaders_only": 0,
+                                  "required": 1, "annual_review": 0})
+    assert hub_db.publish(op, pid, hub_db.get_page(pid)["rev"], "First", True) is None
+    client.post("/shift/announcements", data={
+        "body": f"Pretzel Sandwich launches Monday. Read https://x.onrender.com/hub/page/{pid}."})
     client.post("/shift/logout")
     login_leader(client)
-    assert "4 active" in section(today_page(client), "tiles-head")  # her own counts
+    page = client.get("/shift/announcements").data.decode()
+    assert "Pretzel Sandwich launches Monday. Read." in page and "onrender" not in page
+    assert f'href="/hub/page/{pid}">Open&nbsp;the&nbsp;page' in page

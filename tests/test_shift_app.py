@@ -242,13 +242,11 @@ def _today_run(name):
                 if r["name"] == name)
 
 
-def test_today_shows_all_day_cleaning_lists(client):
+def test_checklists_show_all_day_cleaning_lists(client):
     login_operator(client)
-    page = client.get("/shift/").data.decode()
-    current = page[page.index("Due now"):]
-    # Sheets with no critical items left fold into one row (Team Hub Today)
-    assert "Station cleaning sheets" in current
-    assert "/shift/checklists#allday" in current
+    page = client.get("/shift/checklists").data.decode()
+    # The all-day station sheets have their own section on Checklists
+    assert 'id="allday"' in page and "Station cleaning" in page
 
 
 def test_due_period_runs_rules():
@@ -569,12 +567,13 @@ def test_announcement_flow(client):
     make_leader(client)
     login_leader(client)
     resp = client.get("/shift/")
-    assert b"New SOP" in resp.data  # unacked shows on Today
+    assert b"1 new announcement" in resp.data   # Today keeps it to one quiet link
+    assert b"New SOP" in client.get("/shift/announcements").data
 
     a = shift_db.active_announcements()[0]
     client.post(f"/shift/announcements/{a['id']}/ack")
     resp = client.get("/shift/")
-    assert b"New SOP" not in resp.data  # acked disappears from Today
+    assert b"new announcement" not in resp.data  # acked: the link goes away
     assert shift_db.announcement_readers(a["id"])[0]["reader"] == "Maya"
     assert client.get("/shift/announcements").status_code == 200
 
@@ -905,9 +904,9 @@ def test_goal_leader_tag_via_route(client):
                                       "leader_id": "not-a-number"})
     tagged = shift_db.goals_by_status("active", leader_id=maya["id"])
     assert [g["title"] for g in tagged] == ["Solo breakfast open"]
-    # Tagged goals stay off the Today dashboard but show on the 1:1 page
+    # Tagged goals ride on the 1:1 page; store goals are on Goals for everyone
     assert b"Solo breakfast open" not in client.get("/shift/").data
-    assert b"Store goal" in client.get("/shift/").data
+    assert b"Store goal" in client.get("/shift/goals").data
     assert b"Solo breakfast open" in client.get(f"/shift/oneonone/{maya['id']}").data
 
 
@@ -1578,9 +1577,8 @@ def test_shoutout_posts_and_crossposts(client, slack_shares):
     assert shout["shared_at"] and shout["author"] == "Maya"
     # The roster learned the new name for next time's autosuggest
     assert any(m["name"] == "Avery P" for m in shift_db.roster())
-    # Feed + Today strip render it
+    # The feed renders it (Today stays calm: no shout-out strip)
     assert b"Flew through the lunch rush" in client.get("/shift/shoutouts").data
-    assert b"Avery P" in client.get("/shift/").data
 
 
 def test_shoutout_without_checkbox_stays_in_app(client, slack_shares):
@@ -1727,15 +1725,16 @@ def test_recovery_create_resolve_flow(client):
     assert rec["issue"] == "other"            # coerced, not stored raw
     assert rec["logged_by"] == "Maya"
 
-    # Shows on the Today dashboard until resolved
-    assert b"Jordan Lee" in client.get("/shift/").data
+    # Open until resolved (Today stays calm: guests live on Recovery)
+    assert shift_db.open_recovery_count() == 1
+    assert b"Jordan Lee" not in client.get("/shift/").data
 
     resp = client.post(f"/shift/recovery/{rec['id']}/resolve",
                        data={"resolved": "1", "note": "called, cards mailed"})
     assert resp.headers["Location"].endswith(f"#rec-{rec['id']}")
     done = shift_db.get_recovery(rec["id"])
     assert done["resolved_by"] == "Maya" and done["resolution_note"]
-    assert b"Jordan Lee" not in client.get("/shift/").data
+    assert shift_db.open_recovery_count() == 0
 
     # Reopen puts it back in the queue
     client.post(f"/shift/recovery/{rec['id']}/resolve", data={"resolved": "0"})
@@ -1798,9 +1797,7 @@ def test_recovery_contact_route_flow(client):
     page = client.get("/shift/recovery").data
     assert b"Waiting to come back (1)" in page and b"coming Saturday" in page
 
-    today_page = client.get("/shift/").data
-    assert b"Jordan is coming back" in today_page
-    assert b"Jordan" in today_page
+    assert b"Jordan" not in client.get("/shift/").data  # Today stays calm
 
     # Second contact from a stale page: told, first stamp kept
     resp = client.post(f"/shift/recovery/{rec['id']}/contact",
@@ -1833,10 +1830,6 @@ def test_recovery_contacted_now_checkbox(client):
     # The open list's empty-state must not celebrate while a guest waits
     assert b"every guest taken care of" not in page
     assert b"Nobody left to contact" in page
-    # Today card renders in its calm (non-red) awaiting-only form
-    today_page = client.get("/shift/").data
-    assert b"Sam is coming back" in today_page
-    assert b"Hand over what was promised" in today_page
     # More badge must agree: no red "open" badge, a calm coming-back note
     more_page = client.get("/shift/more").data
     assert b"open</span>" not in more_page
@@ -1873,20 +1866,6 @@ def test_recovery_double_resolve_route_flashes(client):
     kept = shift_db.get_recovery(rec["id"])
     assert kept["resolved_by"] == "Operator"
     assert kept["resolution_note"] == "mailed cards"
-
-
-def test_recovery_today_card_truncates(client):
-    make_leader(client)
-    login_leader(client)
-    for n in range(5):
-        client.post("/shift/recovery", data={"guest_name": f"Guest{n}",
-                                             "issue": "service", "remedy": "refund"})
-    page = client.get("/shift/").data
-    for n in range(3):
-        assert f"Guest{n}".encode() in page
-    assert b"Guest3" not in page and b"Guest4" not in page
-    assert b"+2 more" in page
-    assert b"5 guests waiting" in page
 
 
 def test_recovery_more_badge_counts_open(client):
