@@ -1,67 +1,281 @@
-{# Shared 1:1 agenda + history markup for leader and team-member pages.
-   Import WITH CONTEXT — shift_is_operator / shift_name come from the
-   context processor and are undefined inside a context-less macro. #}
+{# Meetings (1:1s and to-dos): the shared pieces. Import WITH CONTEXT —
+   shift_is_operator / shift_name come from the context processor, and the
+   date helpers day / due / when from the Meetings views, so they are
+   undefined inside a context-less macro. No new scripts: every control is
+   a plain link or form. #}
 
-{% macro agenda_list(agenda, toggle_ep, delete_ep, delete_any=False) %}
-<div class="section-label" id="agenda">Agenda · {{ agenda | length }}</div>
-{% if agenda %}
-<div class="card" style="padding: 4px 14px;">
+{% macro styles() %}
+<style>
+/* Meetings: agenda card, topic rows, to-do rows */
+.crumbs + .hero { padding-top: 10px; }
+.agenda { margin-top: 22px; padding: 0; scroll-margin-top: 12px; }
+.agenda .top { padding: 18px 18px 4px; }
+.agenda .f-title { margin-top: 8px; }
+.agenda .meta { font-size: 0.875rem; color: var(--text-muted); margin-top: 4px; }
+.agenda .lockline { margin: 0; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.stat-chip { background: #fff; border-radius: var(--r-xl); padding: 10px 12px; min-width: 0; display: block; }
+.stat-chip b { display: block; font-size: 1.375rem; line-height: 1; color: var(--text-strong); letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums; }
+.stat-chip b small { font-size: 0.875rem; color: var(--text-muted); letter-spacing: 0; }
+.stat-chip span { display: block; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; font-weight: 700; }
+.topics { background: #fff; margin: 14px 10px 0; border-radius: var(--r-2xl); }
+.topics .none { padding: 16px; font-size: 0.9375rem; color: var(--text-muted); }
+.topic { display: flex; align-items: flex-start; gap: 12px; padding: 13px 14px; scroll-margin-top: 12px; }
+.topic + .topic { border-top: 1px solid var(--rule); }
+.topic > form { margin: 0; flex: 0 0 auto; }
+/* 26px circle, 44px tap target */
+.tick { position: relative; display: block; width: 44px; height: 44px; margin: -9px; padding: 0; border: 0; background: none;
+  cursor: pointer; flex: 0 0 auto; }
+.tick::before { content: ""; position: absolute; inset: 9px; border-radius: 50%; border: 2px solid var(--gray-400); background: #fff; }
+.tick:hover::before, .tick:focus-visible::before { border-color: var(--ok); }
+.topic .t { flex: 1; min-width: 0; }
+.topic .t > summary { list-style: none; cursor: pointer; display: block; }
+.topic .t > summary::-webkit-details-marker { display: none; }
+.topic .t b { display: block; color: var(--text-strong); font-size: 1rem; letter-spacing: -0.015em; line-height: 1.3; }
+.topic .t .m { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 0.8125rem; color: var(--text-muted); margin-top: 2px; }
+.topic .t .m .i { width: 14px; height: 14px; color: var(--nav); stroke-width: 2.4; transform: rotate(90deg); transition: transform .15s; }
+.topic .t[open] .m .i { transform: rotate(-90deg); }
+/* The open panel spans the whole row: back under the tick and the to-do button */
+.topic-more { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 2px -38px; }
+.topic.has-todo .topic-more { margin-right: -66px; }
+.topic-more form { display: contents; }
+.topic-more input[type=text] { flex: 1 1 100%; min-height: 44px; padding: 9px 12px; }
+.topic-more .btn { min-width: 0; }
+.todo { font-size: 0.8125rem; font-weight: 700; color: var(--accent); white-space: nowrap; background: none; border: 0; cursor: pointer;
+  padding: 12px 0 12px 10px; margin: -9px 0 -12px -10px; min-height: 44px; }
+.add { display: flex; gap: 8px; padding: 12px 10px 14px; margin: 0; }
+.add .input { height: 46px; min-height: 46px; font-size: 1rem; border-radius: var(--r-full); padding: 0 16px; flex: 1; min-width: 0; }
+.add .btn { min-width: 0; min-height: 46px; padding: 0 20px; }
+.agenda .foot-links { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 14px;
+  padding: 0 18px 16px; font-size: 0.8125rem; color: var(--text-muted); }
+.agenda .foot-links a { color: var(--nav); font-weight: 700; font-size: 0.9375rem; display: inline-flex; align-items: center; gap: 2px; }
+.agenda .foot-links .i { width: 16px; height: 16px; stroke-width: 2.4; }
+.pick { display: flex; gap: 8px; margin: 0 0 12px; }
+.pick select { flex: 1; min-width: 0; height: 48px; border: 1px solid var(--gray-400); border-radius: var(--r-full); padding: 0 16px;
+  font-size: 1rem; color: var(--text-strong); background: #fff; -webkit-appearance: none; appearance: none; }
+.pick .btn { min-width: 0; min-height: 48px; padding: 0 22px; }
+.sync { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin: -2px 0 14px; font-size: 0.8125rem; color: var(--text-muted); }
+.sync form { margin: 0; }
+.sync a { color: var(--nav); font-weight: 700; }
+.sub-eyebrow { margin: 0 0 10px; }
+.sub-eyebrow + .card, .sub-eyebrow + .lockline + .card { margin-bottom: 18px; }
+.sec > .lockline { margin: -2px 0 12px; }
+.sub-eyebrow + .lockline { margin: -4px 0 10px; }
+.rule-note { margin-top: 28px; }
+.sub-eyebrow.leader-team { margin-top: 26px; }
+.done-title { color: var(--text-muted) !important; text-decoration: line-through; }
+.av.done { background: var(--ok); color: #fff; }
+.row-main:hover .row-title { color: var(--nav); }
+/* The design's badge colours (the shared sheet's later plain .badge rule
+   would otherwise turn them gray) */
+.badge.b-red { background: var(--red-100); color: var(--red-700); }
+.badge.b-tan { background: var(--tan-300); color: var(--tan-ink); }
+.badge.b-navy { background: var(--cool-white); color: var(--info); }
+.badge.b-green { background: var(--ok-bg); color: var(--ok); }
+.task { align-items: flex-start; }
+.task .row-main { padding-top: 2px; }
+.task .details { display: block; font-size: 0.875rem; color: var(--text); white-space: pre-line; margin-top: 3px; }
+.task form { margin: 0; }
+.linkbtn { background: none; border: 0; padding: 8px 0 0; font: inherit; font-size: 0.8125rem; font-weight: 700; color: var(--gray-700); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.task.overdue { background: var(--red-050); }
+.row .btn.sm { min-height: 36px; padding: 6px 14px; font-size: 0.8125rem; }
+.muted-line { font-size: 0.9375rem; color: var(--text-muted); padding: 16px; }
+details.list-more { margin: 0 0 12px; }
+details.list-more > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; min-height: 44px;
+  font-weight: 700; font-size: 0.9375rem; color: var(--nav); }
+details.list-more > summary::-webkit-details-marker { display: none; }
+details.list-more > summary .i { width: 16px; height: 16px; stroke-width: 2.4; transform: rotate(90deg); }
+details.list-more[open] > summary .i { transform: rotate(-90deg); }
+details.list-more .letter { padding: 10px 16px 4px; font-size: 0.75rem; font-weight: 700; letter-spacing: var(--track-eyebrow);
+  color: var(--text-muted); background: var(--gray-050); }
+.card > .letter + .row { border-top: 0; }
+.past { margin-bottom: 10px; }
+.past > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 14px 16px; min-height: 56px; }
+.past > summary::-webkit-details-marker { display: none; }
+.past > summary b { color: var(--text-strong); font-size: var(--fs-h3); letter-spacing: -0.015em; }
+.past > summary span { color: var(--text-muted); font-size: var(--fs-small); }
+.past > summary .i { color: var(--nav); width: 20px; height: 20px; transform: rotate(90deg); }
+.past[open] > summary .i { transform: rotate(-90deg); }
+.past .row { align-items: flex-start; border-top: 1px solid var(--rule); }
+.past .row .lead-ico { width: 30px; height: 30px; }
+.past .outcome { display: block; font-size: 0.9375rem; color: var(--text); margin-top: 3px; }
+.compose-form .btn { margin-top: 14px; }
+.compose-form .fine { margin-top: 10px; }
+/* Office desktop: two columns on the Meetings and agenda pages; the
+   single-list pages keep a readable width */
+@media (min-width: 960px) {
+  .meet-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+  .meet-col { min-width: 0; }
+  .meet-col > :first-child { margin-top: 22px; }
+  /* Operator: leaders then to-dos on the left, the long team list right */
+  .meet-grid.op, .meet-grid.agenda-page { grid-template-rows: auto 1fr; column-gap: 40px; row-gap: 0; }
+  .meet-grid.op > #leaders { grid-column: 1; grid-row: 1; margin-top: 22px; }
+  .meet-grid.op > #team { grid-column: 2; grid-row: 1 / span 2; margin-top: 22px; }
+  .meet-grid.op > #todos { grid-column: 1; grid-row: 2; }
+  /* A leader's agenda: agenda then past 1:1s left; goals, course, to-dos right */
+  .meet-grid.agenda-page > .agenda { grid-column: 1; grid-row: 1; }
+  .meet-grid.agenda-page > .side { grid-column: 2; grid-row: 1 / span 2; }
+  .meet-grid.agenda-page > .past-col { grid-column: 1; grid-row: 2; }
+  .meet-grid.agenda-page > .past-col > .sec { margin-top: 32px; }
+  .meet-narrow { max-width: 760px; }
+}
+</style>
+{% endmacro %}
+
+{# "you", "the Operator" or the name — who added or assigned something. #}
+{% macro by(name) -%}
+{%- if name == shift_name -%}you{%- elif name == 'Operator' -%}the Operator{%- else -%}{{ name }}{%- endif -%}
+{%- endmacro %}
+
+{% macro talk_badge(n) -%}
+{% if n %}<span class="badge b-red">{{ n }} to talk about</span>{% endif %}
+{%- endmacro %}
+
+{# The repo rule, at the foot of every Meetings page. Leaders take these
+   matters to the Operator; the Operator keeps them out of the app. #}
+{% macro rule_note() %}
+<p class="callout tan rule-note">{{ icon('info') }}<span><b>Keep 1:1 notes about the work.</b>
+{% if shift_is_operator %}Pay, discipline, medical or personal matters never go in this app.
+{% else %}Pay, discipline, medical or personal matters go to the Operator directly, never into Team Hub.{% endif %}</span></p>
+{% endmacro %}
+
+{# Stats chips on an agenda card: course lessons, open to-dos, goals. #}
+{% macro stats(leader_id, course_done, course_total, todo_count, goal_count, todos_href, goals_href, own) %}
+<div class="stats">
+  <a class="stat-chip" href="{{ url_for('shift.development_leader', leader_id=leader_id) }}"><b>{{ course_done }}{% if course_total %}<small>/{{ course_total }}</small>{% endif %}</b><span>Course lessons</span></a>
+  <a class="stat-chip" href="{{ todos_href }}"><b>{{ todo_count }}</b><span>Open to-dos</span></a>
+  <a class="stat-chip" href="{{ goals_href }}"><b>{{ goal_count }}</b><span>{{ 'Your goals' if own else 'Goals' }}</span></a>
+</div>
+{% endmacro %}
+
+{# Topic rows: the round tick marks a topic talked about (the existing
+   toggle form); tapping the topic opens "what we decided" + Remove; and,
+   on a leader's agenda, To-do + makes the topic a to-do (the existing
+   /oneonone/<leader>/action form, prefilled with the topic). back=True
+   adds back=meetings so the Meetings page's own forms land back there. #}
+{% macro topic_rows(agenda, toggle_ep, delete_ep, action_url=None, back=False, empty="Nothing on the agenda yet. Add topics as they come up.") %}
+<div class="topics">
   {% for t in agenda %}
-  <details id="topic-{{ t.id }}" style="padding: 10px 0; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <summary style="list-style:none; cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
-      <span class="checkmark">✓</span>
-      <span style="flex:1; font-size:15px;">{{ t.topic }}
-        {% if t.carried %}<span class="note-cat">carried</span>{% endif %}
-        <span class="meta" style="display:block; font-size:12px; color:var(--soft);">
-          added by {{ t.added_by }} · {{ t.created_at[:10] }}</span>
-      </span>
-    </summary>
-    <div style="padding: 10px 0 4px 36px;">
-      <form method="post" action="{{ url_for(toggle_ep, topic_id=t.id) }}">
-        <input type="hidden" name="discussed" value="1">
-        <input type="text" name="note" placeholder="Outcome — what we decided…">
-        <div class="pillrow" style="margin-top:8px;">
-          <button class="pill small primary" type="submit">✓ Discussed</button>
-        </div>
-      </form>
-      {% if delete_any or shift_is_operator or t.added_by == shift_name %}
-      <form method="post" action="{{ url_for(delete_ep, topic_id=t.id) }}"
-            onsubmit="return confirm('Remove this talking point?');" style="margin-top:8px;">
-        <button class="pill small ghost" type="submit">Remove</button>
-      </form>
-      {% endif %}
-    </div>
-  </details>
+  <div class="topic{{ ' has-todo' if action_url }}" id="topic-{{ t.id }}">
+    <form method="post" action="{{ url_for(toggle_ep, topic_id=t.id) }}">
+      <input type="hidden" name="discussed" value="1">
+      {% if back %}<input type="hidden" name="back" value="meetings">{% endif %}
+      <button class="tick" type="submit" title="Talked about it" aria-label="Talked about it: {{ t.topic }}"></button>
+    </form>
+    <details class="t">
+      <summary><b>{{ t.topic }}</b>
+        <span class="m"><span>added by {{ by(t.added_by) }} · {{ day(t.created_at) }}</span>{% if t.carried %}<span class="badge b-tan">Carried over</span>{% endif %}{{ icon('chev') }}</span></summary>
+      <div class="topic-more">
+        <form method="post" action="{{ url_for(toggle_ep, topic_id=t.id) }}">
+          <input type="hidden" name="discussed" value="1">
+          {% if back %}<input type="hidden" name="back" value="meetings">{% endif %}
+          <label class="sr" for="note-{{ t.id }}">What you decided</label>
+          <input type="text" id="note-{{ t.id }}" name="note" placeholder="What you decided (optional)">
+          <button class="btn btn-primary sm" type="submit">Talked about it</button>
+        </form>
+        {% if shift_is_operator or t.added_by == shift_name %}
+        <form method="post" action="{{ url_for(delete_ep, topic_id=t.id) }}"
+              onsubmit="return confirm('Remove this talking point?');">
+          {% if back %}<input type="hidden" name="back" value="meetings">{% endif %}
+          <button class="btn btn-secondary sm" type="submit">Remove</button>
+        </form>
+        {% endif %}
+      </div>
+    </details>
+    {% if action_url %}
+    <form method="post" action="{{ action_url }}">
+      <input type="hidden" name="title" value="{{ t.topic }}">
+      {% if back %}<input type="hidden" name="back" value="meetings">{% endif %}
+      <button class="todo" type="submit" title="Make this a to-do">To-do +</button>
+    </form>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="none">{{ empty }}</p>
   {% endfor %}
 </div>
-{% else %}
-<div class="empty">Nothing on the agenda — add talking points as they come up
-between meetings.</div>
+{% endmacro %}
+
+{% macro add_topic(url, placeholder, back=False) %}
+<form class="add" method="post" action="{{ url }}">
+  {% if back %}<input type="hidden" name="back" value="meetings">{% endif %}
+  <label class="sr" for="add-topic">Add a topic</label>
+  <input class="input" type="text" id="add-topic" name="topic" required placeholder="{{ placeholder }}">
+  <button class="btn btn-primary" type="submit">Add</button>
+</form>
+{% endmacro %}
+
+{# Past 1:1s: one card per meeting date, topics with what was decided;
+   Reopen puts a topic back on the agenda (the existing toggle form). #}
+{% macro history_list(history, toggle_ep) %}
+{% if history %}
+<section class="sec" id="past">
+  <div class="sec-head"><h2>Past 1:1s</h2></div>
+  {% for m in history %}
+  <details class="card list past">
+    <summary><span><b>{{ day(m.date, weekday=True) }}</b><br><span>{{ m.topics | length }} topic{{ 's' if m.topics | length != 1 }}</span></span>{{ icon('chev') }}</summary>
+    {% for t in m.topics %}
+    <div class="row">
+      <span class="lead-ico green">{{ icon('check', 'sm') }}</span>
+      <span class="row-main">
+        <span class="row-title">{{ t.topic }}</span>
+        {% if t.outcome_note %}<span class="outcome">{{ t.outcome_note }}</span>{% endif %}
+        <span class="row-meta">added by {{ by(t.added_by) }} · checked off by {{ by(t.discussed_by) }}</span>
+      </span>
+      <form method="post" action="{{ url_for(toggle_ep, topic_id=t.id) }}">
+        <input type="hidden" name="discussed" value="0">
+        <button class="btn btn-secondary sm" type="submit">Reopen</button>
+      </form>
+    </div>
+    {% endfor %}
+  </details>
+  {% endfor %}
+</section>
 {% endif %}
 {% endmacro %}
 
-{% macro history_list(history, toggle_ep) %}
-{% if history %}
-<div class="section-label">🗓 Past 1:1s</div>
-{% for m in history %}
-<details class="card" style="margin-bottom:10px;">
-  <summary style="cursor:pointer; font-weight:700; font-size:15px;">{{ m.date }}
-    <span style="font-weight:400; color:var(--soft);">· {{ m.topics | length }} topic{{ 's' if m.topics | length != 1 }}</span></summary>
-  {% for t in m.topics %}
-  <div style="display:flex; gap:10px; padding:8px 0; align-items:flex-start; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <span class="checkmark" style="background:var(--good); border-color:var(--good); color:#fff; flex:none;">✓</span>
-    <div style="flex:1;">
-      <div style="font-size:14px;">{{ t.topic }}</div>
-      {% if t.outcome_note %}<div style="font-size:13px; color:var(--soft);">📝 {{ t.outcome_note }}</div>{% endif %}
-      <div class="progress-note">added by {{ t.added_by }} · discussed by {{ t.discussed_by }} {{ t.discussed_at[11:] }}</div>
-    </div>
-    <form method="post" action="{{ url_for(toggle_ep, topic_id=t.id) }}">
-      <input type="hidden" name="discussed" value="0">
-      <button class="pill small ghost" type="submit">Reopen</button>
-    </form>
-  </div>
-  {% endfor %}
-</details>
-{% endfor %}
-{% endif %}
+{# Where a to-do came from: "added by you", "added by Maya" (her own),
+   or "from Daniel" / "from the Operator". #}
+{% macro task_source(t, owner_name='') -%}
+{%- if t.assigned_by == shift_name -%}added by you
+{%- elif owner_name and t.assigned_by == owner_name -%}added by {{ owner_name }}
+{%- else -%}from {{ by(t.assigned_by) }}{%- endif -%}
+{%- endmacro %}
+
+{# A team-member 1:1 thread row. #}
+{% macro thread_row(href, name, last_met, open, extra='') %}
+<a class="row" href="{{ href }}"><span class="av">{{ name[:1] | upper }}</span>
+  <span class="row-main"><span class="row-title">{{ name }}</span>
+    <span class="row-meta tags"><span>{% if extra %}{{ extra }} · {% endif %}{% if last_met %}Last 1:1 {{ day(last_met) }}{% else %}No 1:1 yet{% endif %}</span>{{ talk_badge(open) }}</span></span>
+  {{ icon('chev', 'chev') }}</a>
+{% endmacro %}
+
+{# One of your own open to-dos: tick to mark it done (the existing toggle
+   form), tap for the full list. #}
+{% macro my_task(t, back=False) %}
+{% set d = due(t.due_date) %}
+<div class="row task" id="task-{{ t.id }}">
+  <form method="post" action="{{ url_for('shift.todo_toggle', task_id=t.id) }}">
+    <input type="hidden" name="done" value="1">
+    {% if back %}<input type="hidden" name="back" value="meetings">{% endif %}
+    <button class="tick" type="submit" title="Mark done" aria-label="Mark done: {{ t.title }}"></button>
+  </form>
+  <a class="row-main" href="{{ url_for('shift.todo_leader', leader_id=t.leader_id) }}#task-{{ t.id }}">
+    <span class="row-title">{{ t.title }}</span>
+    <span class="row-meta"><span{% if d[1] %} class="due-red"{% endif %}>{{ d[0] }}</span> · {{ task_source(t) }}</span>
+  </a>
+</div>
+{% endmacro %}
+
+{# A to-do you handed to another leader: open, or done lately. #}
+{% macro assigned_row(t) %}
+{% set d = due(t.due_date) %}
+<a class="row" href="{{ url_for('shift.todo_leader', leader_id=t.leader_id) }}#task-{{ t.id }}">
+  {% if t.completed_at %}<span class="av done" aria-label="Done">{{ icon('check', 'sm') }}</span>
+  {% else %}<span class="av">{{ t.leader_name[:1] | upper }}</span>{% endif %}
+  <span class="row-main"><span class="row-title{{ ' done-title' if t.completed_at }}">{{ t.title }}</span>
+    <span class="row-meta">{{ t.leader_name }} · {% if t.completed_at %}done {{ when(t.completed_at) }}{% else %}<span{% if d[1] %} class="due-red"{% endif %}>{{ d[0][:1] | lower }}{{ d[0][1:] }}</span>{% endif %}</span></span>
+  {{ icon('chev', 'chev') }}</a>
 {% endmacro %}

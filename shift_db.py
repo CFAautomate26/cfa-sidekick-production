@@ -2010,6 +2010,35 @@ def tasks_for_leader(leader_id: int) -> tuple[list[dict], list[dict]]:
     return open_tasks, done_tasks
 
 
+def tasks_assigned_by(name: str, days: int = 7) -> list[dict]:
+    """To-dos this person handed to active leaders (assigned_by holds the
+    assigner's sign-in name), for Meetings › You assigned: every open one,
+    newest first, then those done in the last `days` days, most recently
+    done first. Each carries the assignee's leader_name. Read-only."""
+    name = " ".join((name or "").split())
+    if not name:
+        return []
+    since = (now_local() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+    with closing(connect()) as conn:
+        rows = [dict(r) for r in conn.execute(
+            """
+            SELECT t.*, ld.name AS leader_name
+            FROM leader_tasks t
+            JOIN leaders ld ON ld.id = t.leader_id
+            WHERE ld.active = 1 AND t.assigned_by = ?
+              AND (t.completed_at IS NULL OR t.completed_at >= ?)
+            ORDER BY t.completed_at IS NOT NULL,
+                     COALESCE(t.completed_at, t.created_at) DESC, t.id DESC
+            """,
+            (name, since),
+        ).fetchall()]
+    today = today_local()
+    for t in rows:
+        t["overdue"] = bool(not t["completed_at"] and t["due_date"]
+                            and t["due_date"] < today)
+    return rows
+
+
 def open_tasks_for_leader(leader_id: int, limit: int = 5) -> list[dict]:
     """The leader's open to-dos for the Today dashboard."""
     open_tasks, _ = tasks_for_leader(leader_id)

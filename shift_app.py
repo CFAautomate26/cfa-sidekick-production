@@ -955,6 +955,78 @@ def development_update(leader_id, lesson_id):
 # Leader to-dos
 # ---------------------------------------------------------------------------
 
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+           "Oct", "Nov", "Dec")
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _meetings_day(value: str | None, weekday: bool = False) -> str:
+    """How a date reads on the Meetings pages: 'Oct 13', or 'Mon, Oct 26'
+    with weekday; the year only when it isn't this one. Takes a YYYY-MM-DD
+    date or a now_stamp() (its 4am-rollover business date)."""
+    if not value:
+        return ""
+    try:
+        d = date.fromisoformat(shift_db.business_date(value) if len(value) > 10
+                               else value)
+    except ValueError:
+        return value
+    text = f"{_MONTHS[d.month - 1]}\u00a0{d.day}"     # "Oct 13" never splits
+    if d.year != date.fromisoformat(shift_db.today_local()).year:
+        text += f", {d.year}"
+    return f"{_WEEKDAYS[d.weekday()]}, {text}" if weekday else text
+
+
+def _meetings_due(due: str | None) -> tuple[str, bool]:
+    """(label, urgent) for a to-do's due date: urgent (red) when it is due
+    today or overdue."""
+    if not due:
+        return "No due date", False
+    today = date.fromisoformat(shift_db.today_local())
+    try:
+        d = date.fromisoformat(due)
+    except ValueError:
+        return f"Due {due}", False
+    if d < today:
+        return f"Overdue · was due {_meetings_day(due)}", True
+    if d == today:
+        return "Due today", True
+    if (d - today).days == 1:
+        return "Due tomorrow", False
+    return f"Due {_meetings_day(due, weekday=True)}", False
+
+
+def _meetings_when(stamp: str | None) -> str:
+    """'today 4:12 pm', 'yesterday 4:12 pm' or 'Oct 20' for a now_stamp()."""
+    if not stamp:
+        return ""
+    day = shift_db.business_date(stamp)
+    today = date.fromisoformat(shift_db.today_local())
+    try:
+        ago = (today - date.fromisoformat(day)).days
+        hour, minute = int(stamp[11:13]), stamp[14:16]
+    except ValueError:
+        return stamp
+    if ago in (0, 1):
+        clock = f"{hour % 12 or 12}:{minute} {'am' if hour < 12 else 'pm'}"
+        return f"{'today' if ago == 0 else 'yesterday'} {clock}"
+    return _meetings_day(stamp)
+
+
+# Date wording shared by every Meetings template (1:1s and to-dos).
+_MEETINGS_FMT = {"day": _meetings_day, "due": _meetings_due, "when": _meetings_when}
+
+
+def _back_to_meetings(default: str, anchor: str) -> str:
+    """Forms on a leader's Meetings page (their agenda and to-dos inline)
+    post back=meetings so the leader lands back where they tapped; without
+    it a route keeps its usual page. Only ever /shift/oneonone, which runs
+    its own access checks."""
+    if request.form.get("back") == "meetings":
+        return url_for("shift.oneonone") + anchor
+    return default
+
+
 # Any leader can assign to-dos and browse the per-leader lists (the
 # Operator opened this up from admin-only); completing a task stays with
 # its assignee or an admin, and delete stays admin-only.
@@ -962,7 +1034,8 @@ def development_update(leader_id, lesson_id):
 def todo():
     return render_template("shift/todo.html",
                            leaders=shift_db.leader_task_summary(),
-                           my_leader_id=session.get("shift_leader_id"))
+                           my_leader_id=session.get("shift_leader_id"),
+                           **_MEETINGS_FMT)
 
 
 @shift_bp.route("/todo/<int:leader_id>")
@@ -973,7 +1046,10 @@ def todo_leader(leader_id):
         return redirect(url_for("shift.todo"))
     open_tasks, done_tasks = shift_db.tasks_for_leader(leader_id)
     return render_template("shift/todo_leader.html", leader=leader,
-                           open_tasks=open_tasks, done_tasks=done_tasks)
+                           open_tasks=open_tasks, done_tasks=done_tasks,
+                           own=session.get("shift_leader_id") == leader_id,
+                           can_check=_can_view_development(leader_id),
+                           **_MEETINGS_FMT)
 
 
 @shift_bp.route("/todo/<int:leader_id>/assign", methods=["POST"])
@@ -1100,8 +1176,9 @@ def todo_toggle(task_id):
     # Operator marks it done themself during a review.
     if done and session.get("shift_leader_id"):
         _notify_completion(task_id)
-    return redirect(url_for("shift.todo_leader", leader_id=task["leader_id"])
-                    + f"#task-{task_id}")
+    return redirect(_back_to_meetings(
+        url_for("shift.todo_leader", leader_id=task["leader_id"]) + f"#task-{task_id}",
+        "#todos"))
 
 
 @shift_bp.route("/todo/task/<int:task_id>/delete", methods=["POST"])
@@ -1327,7 +1404,9 @@ def oneonone():
                                team=shift_db.member_oneonone_index(),
                                people=shift_db.oneonone_people(),
                                leader_threads=shift_db.leader_member_threads(),
-                               slack_synced_at=shift_db.slack_roster_synced_at())
+                               slack_synced_at=shift_db.slack_roster_synced_at(),
+                               assigned=shift_db.tasks_assigned_by(current_name()),
+                               **_MEETINGS_FMT)
     leader_id = session.get("shift_leader_id")
     if not leader_id:
         flash("Your login isn't linked to a leader profile — ask the Operator.")
@@ -1339,14 +1418,24 @@ def oneonone():
         return redirect(url_for("shift.oneonone_member", member_id=choice[1]))
     if choice:
         return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
-    _, history = shift_db.oneonone_for_leader(leader_id)
+    agenda, history = shift_db.oneonone_for_leader(leader_id, meetings=1)
+    modules = shift_db.course_overview(leader_id)
     return render_template(
         "shift/oneonone_mine.html",
         me=shift_db.get_leader(leader_id),
-        my_open=shift_db.open_topic_count(leader_id),
+        agenda=agenda,
+        my_open=len(agenda),
         my_last_met=history[0]["date"] if history else None,
+        course_done=sum(m["done"] for m in modules),
+        course_total=sum(m["total"] for m in modules),
+        goal_count=len(shift_db.goals_by_status("active", leader_id=leader_id)),
+        open_tasks=shift_db.tasks_for_leader(leader_id)[0],
+        # Your own to-dos already show under Yours.
+        assigned=[t for t in shift_db.tasks_assigned_by(current_name())
+                  if t["leader_id"] != leader_id],
         team=shift_db.member_oneonone_index(holder_id=leader_id),
         people=[p for p in shift_db.oneonone_people() if p["kind"] == "member"],
+        **_MEETINGS_FMT,
     )
 
 
@@ -1368,6 +1457,8 @@ def oneonone_leader(leader_id):
         course_done=sum(m["done"] for m in modules),
         course_total=sum(m["total"] for m in modules),
         open_tasks=shift_db.tasks_for_leader(leader_id)[0],
+        own=session.get("shift_leader_id") == leader_id,
+        **_MEETINGS_FMT,
     )
 
 
@@ -1379,9 +1470,10 @@ def oneonone_topic_add(leader_id):
     if not shift_db.add_oneonone_topic(leader_id, request.form.get("topic", ""),
                                        current_name()):
         flash("A talking point needs some words.")
-        return redirect(url_for("shift.oneonone_leader", leader_id=leader_id))
-    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id)
-                    + "#agenda")
+        return redirect(_back_to_meetings(
+            url_for("shift.oneonone_leader", leader_id=leader_id), "#mine"))
+    return redirect(_back_to_meetings(
+        url_for("shift.oneonone_leader", leader_id=leader_id) + "#agenda", "#mine"))
 
 
 @shift_bp.route("/oneonone/topic/<int:topic_id>/toggle", methods=["POST"])
@@ -1408,8 +1500,9 @@ def oneonone_topic_toggle(topic_id):
     # there), so land on the agenda to keep the meeting flowing; a reopened
     # topic is back on the agenda where its anchor exists.
     anchor = "#agenda" if discussed else f"#topic-{topic_id}"
-    return redirect(url_for("shift.oneonone_leader",
-                            leader_id=topic["leader_id"]) + anchor)
+    return redirect(_back_to_meetings(
+        url_for("shift.oneonone_leader", leader_id=topic["leader_id"]) + anchor,
+        "#mine"))
 
 
 @shift_bp.route("/oneonone/topic/<int:topic_id>/delete", methods=["POST"])
@@ -1422,8 +1515,8 @@ def oneonone_topic_delete(topic_id):
         flash("Only whoever added a topic (or the Operator) can remove it.")
     elif not shift_db.delete_topic(topic_id):
         flash("That topic was already discussed — it's part of meeting history now.")
-    return redirect(url_for("shift.oneonone_leader",
-                            leader_id=topic["leader_id"]))
+    return redirect(_back_to_meetings(
+        url_for("shift.oneonone_leader", leader_id=topic["leader_id"]), "#mine"))
 
 
 @shift_bp.route("/oneonone/<int:leader_id>/action", methods=["POST"])
@@ -1440,8 +1533,8 @@ def oneonone_action(leader_id):
     )
     if not ok:
         flash("A to-do needs a title (and a leader who still exists).")
-    return redirect(url_for("shift.oneonone_leader", leader_id=leader_id)
-                    + "#actions")
+    return redirect(_back_to_meetings(
+        url_for("shift.oneonone_leader", leader_id=leader_id) + "#actions", "#todos"))
 
 
 # Team-member 1:1s. Each thread is (member, holder): the Operator master
@@ -1521,7 +1614,8 @@ def oneonone_member(member_id, holder_id):
         "shift/oneonone_member.html", member=member, agenda=agenda,
         history=history, leader=leader, holder=holder_leader,
         topics_url=_member_thread_url(member_id, holder,
-                                      "shift.oneonone_member_topic_add"))
+                                      "shift.oneonone_member_topic_add"),
+        **_MEETINGS_FMT)
 
 
 @shift_bp.route("/oneonone/member/<int:member_id>/topics", methods=["POST"],
