@@ -1,0 +1,128 @@
+{# Shared bits for the leader pages (Lineups, Goals, Leadership Development,
+   the logbooks and Admin): date labels, the Leadership Development
+   Library list and the few styles those pages share on top of
+   shared/cfa_style.html. Import with context:
+   {% from "shift/_leader_ui.html" import ui_styles, day_label, short_stamp with context %} #}
+
+{% set _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] %}
+{% set _WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] %}
+
+{# "2026-10-23" -> "Oct 23" #}
+{% macro month_day(d) %}{% if d and d|length >= 10 %}{{ _MONTHS[d[5:7]|int - 1] }} {{ d[8:10]|int }}{% else %}{{ d }}{% endif %}{% endmacro %}
+
+{# "2026-10-23" -> "Fri, Oct 23" (Sakamoto's weekday rule, so no filter needed) #}
+{% macro day_label(d) %}{% if d and d|length >= 10 -%}
+{%- set y = d[0:4]|int -%}{%- set m = d[5:7]|int -%}{%- set dd = d[8:10]|int -%}
+{%- set t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4] -%}
+{%- set yy = y - 1 if m < 3 else y -%}
+{%- set dow = (yy + yy // 4 - yy // 100 + yy // 400 + t[m - 1] + dd) % 7 -%}
+{{ _WEEKDAYS[dow] }}, {{ _MONTHS[m - 1] }} {{ dd }}
+{%- else %}{{ d }}{% endif %}{% endmacro %}
+
+{# "2026-10-23 11:52" -> "Oct 23 · 11:52" #}
+{% macro short_stamp(s) %}{% if s and s|length >= 16 %}{{ month_day(s[0:10]) }} · {{ s[11:16] }}{% else %}{{ s }}{% endif %}{% endmacro %}
+
+{# The Leadership Development category's pages in Systems & Procedures,
+   already filtered by hub_db's visibility rules in the view. #}
+{% macro library_section(library) %}
+<section class="sec" id="library">
+  <div class="sec-head"><h2>Library</h2>{% if library.new_url %}<a class="more" href="{{ library.new_url }}">Add a page</a>{% endif %}</div>
+  <p class="lockline">{{ icon('lock') }}Leadership Development pages in Systems &amp; Procedures — leaders only.</p>
+  {% for section, pages in library.groups %}
+  <h3 class="eyebrow grp">{{ section }}</h3>
+  <div class="card list">
+    {% for p in pages %}
+    <a class="row" href="{{ p.url }}">
+      <span class="lead-ico navy">{{ icon('book') }}</span>
+      <span class="row-main">
+        <span class="row-title">{{ p.title }}</span>
+        {% if p.summary %}<span class="row-meta">{{ p.summary }}</span>{% endif %}
+        <span class="row-meta tags">{% if p.to_read %}<span class="badge b-red">To read</span>{% endif %}{% if p.published_at %}<span>Updated {{ month_day(p.published_at[0:10]) }}</span>{% endif %}</span>
+      </span>{{ icon('chev', 'chev') }}
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">No Leadership Development pages yet.{% if library.new_url %} <a class="textlink" href="{{ library.new_url }}">Write the first one</a>.{% endif %}</div>
+  {% endfor %}
+</section>
+{% endmacro %}
+
+{% macro ui_styles() %}
+<style>
+/* b-* badges: the shared sheet's later bare-.badge default (gray) outranks
+   them by source order, so scope them up to show the design colours. */
+.badge.b-red { background: var(--red-100); color: var(--red-700); }
+.badge.b-green { background: var(--ok-bg); color: var(--ok); }
+.badge.b-navy { background: var(--cool-white); color: var(--info); box-shadow: inset 0 0 0 1px #CFE0E7; }
+.badge.b-tan { background: var(--tan-300); color: var(--tan-ink); }
+.badge.b-yellow { background: var(--yellow); color: var(--black-c); }
+.badge .i { width: 12px; height: 12px; stroke-width: 2.6; }
+.sec-head h2 .badge { font-size: var(--fs-xs); letter-spacing: 0; }
+
+.hero .seg { margin-top: 18px; }
+.seg.filters { margin-top: 22px; }
+@media (min-width: 960px) { .hero .seg.fit { max-width: 480px; } }
+.hero + .flash { margin-top: 18px; }
+.crumbs + .hero { padding-top: 8px; }
+.crumbs .back { display: inline-flex; align-items: center; gap: 2px; margin-left: -4px; }
+.crumbs .back .i { width: 18px; height: 18px; stroke-width: 2.4; }
+.grp { margin: 20px 0 10px; }
+.sec-head + .grp, .lockline + .grp { margin-top: 4px; }
+.sec > .lockline { margin: -4px 0 12px; }
+
+/* A cream "feature" card that opens into a form — plain <details>, no JS */
+details.composer { margin-top: 22px; padding: 0; }
+details.composer > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; min-height: 64px; font-weight: 700; font-size: var(--fs-h3); color: var(--nav); letter-spacing: -0.015em; }
+details.composer > summary::-webkit-details-marker { display: none; }
+details.composer > summary .plus { width: 36px; height: 36px; border-radius: 50%; background: var(--red-grad); color: #fff;
+  display: grid; place-items: center; flex: 0 0 auto; }
+details.composer > summary .plus .i { width: 20px; height: 20px; stroke-width: 2.6; }
+details.composer > summary .grow { flex: 1; min-width: 0; }
+details.composer > summary .chev { color: var(--nav); width: 22px; height: 22px; stroke-width: 2.2; transition: transform .15s; }
+details.composer[open] > summary .chev { transform: rotate(90deg); }
+details.composer > form, details.composer > .body { padding: 0 16px 18px; }
+details.composer .field:first-child { margin-top: 2px; }
+.composer .btn, .card .btn.submit { margin-top: 18px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.two > div { min-width: 0; }
+.hint { font-size: 0.8125rem; color: var(--text-muted); margin-top: 8px; line-height: 1.4; }
+.check input { margin-top: 2px; flex: 0 0 auto; }
+
+/* Office desktop: the list on the left, the "new …" form beside it */
+@media (min-width: 960px) {
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 0 40px; align-items: start; }
+  .split > .composer { grid-column: 2; grid-row: 1; margin-top: 32px; }
+  .split > .feed { grid-column: 1; grid-row: 1; min-width: 0; }
+  .split > .feed > :first-child { margin-top: 32px; }
+}
+
+/* Rows that carry text and small actions */
+.row.top { align-items: flex-start; }
+.row-body { display: block; font-size: 1rem; color: var(--text-strong); line-height: 1.45; white-space: pre-line; margin-top: 6px; }
+.acts { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; align-items: center; }
+.acts form { margin: 0; }
+.linkbtn { background: none; border: 0; padding: 4px 0; font: inherit; font-size: 0.875rem; font-weight: 700;
+  color: var(--gray-700); cursor: pointer; letter-spacing: 0; display: inline-flex; align-items: center; gap: 5px; min-height: 32px; }
+.linkbtn.red { color: var(--accent); }
+.linkbtn.nav { color: var(--nav); }
+.linkbtn .i { width: 16px; height: 16px; }
+.inline-form .btn { flex: 0 0 auto; }
+.btn .i { width: 18px; height: 18px; }
+
+/* Fold-away sections (<details> with a section-head summary) */
+details.fold { margin-top: 32px; }
+details.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+  font-size: var(--fs-h2); font-weight: 700; color: var(--text-strong); letter-spacing: -0.025em; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary .chev { color: var(--nav); width: 22px; height: 22px; stroke-width: 2.2; transition: transform .15s; }
+details.fold[open] > summary .chev { transform: rotate(90deg); }
+details.fold > summary .grow { flex: 1; }
+
+/* Little stat bars (issue radar, recognition) */
+.stat { padding: 6px 0; }
+.stat .row-between { font-size: 0.9375rem; color: var(--text); }
+.stat .bar { margin-top: 6px; }
+</style>
+{% endmacro %}
