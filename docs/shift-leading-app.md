@@ -6,8 +6,15 @@ into the CFA Sidekick Flask service, at **`/shift`** on the Render
 deployment. Team Hub's look, navigation and sign-in are described in
 [docs/team-hub.md](team-hub.md). It gives the leadership team:
 
-- **Today dashboard** — the current daypart's checklists, lineup, goals,
-  unread announcements, and today's notes in one glance.
+- **Today** — a calm home: a greeting, **today's two goals** (a
+  leadership goal and an operational goal for the leader's area of
+  ownership, set when they sign in and ticked off as they hit them), their
+  open to-dos, and a tile into every section. Checklists, guests, the
+  lineup, notes and announcements live on their own pages; Today only
+  carries a quiet count on each tile and one link when an announcement is
+  unread. Daily goals are private to each leader and the Operator (like
+  1:1s); the Operator sees every leader's on Goals › Daily goals, and each
+  leader sees their own last week there.
 - **Shift checklists** — FOH/BOH opening, breakfast→lunch transition,
   afternoon reset, and closing lists generated fresh every day. Tapping an
   item stamps *who* checked it and *when*. Items marked **critical**
@@ -28,9 +35,10 @@ deployment. Team Hub's look, navigation and sign-in are described in
   (daily, weekly, and monthly each), with the food-safety controls
   (temperatures, sanitizer strength, raw/ready-to-eat separation, hold and
   shelf-life limits) flagged red. Lists can be **daily, weekly (Mon–Sun, with an optional
-  assigned day), or monthly**; all-day lists show on Today all day, and a
-  weekly/monthly list appears on Today when it's due (from its assigned
-  day — the weekend if none — or the month's last week) until it's done.
+  assigned day), or monthly**; all-day lists show on Checklists all day, and a
+  weekly/monthly list counts as due (on Checklists and Today's Checklists
+  tile) from its assigned day — the weekend if none — or the month's last
+  week, until it's done.
   Each list carries the paper sheet's **Owner** (roster name) and
   **Manager check** (a leader taps "I checked this station" — stamped).
   A list **locks when its day/week/month ends** so the numbers reflect
@@ -85,7 +93,8 @@ deployment. Team Hub's look, navigation and sign-in are described in
   quality, wait, service…), and the make-it-right remedy being provided
   (remade on the spot, refund, free entrée card, dessert/drink, catering
   credit…), plus whether the guest expects a call-back. Open recoveries
-  sit on everyone's Today screen until someone resolves them (stamped
+  stay on the Recovery page (with a count in the ☰ menu) until someone
+  resolves them (stamped
   who/when, with a note on how it was closed); every leader sees the
   28-day what-keeps-going-wrong breakdown. A middle state covers the common case
   of reaching the guest before they've been made whole: mark it
@@ -101,8 +110,8 @@ deployment. Team Hub's look, navigation and sign-in are described in
   past meetings form a browsable thread. Action items drop straight onto
   the leader's to-do list, and the page gathers their personal goals
   (goals can be tagged to a leader; a tagged goal is private to that
-  leader + the Operator everywhere — the Goals tab, its detail page, and
-  the Today dashboard all hide it from everyone else) and course
+  leader + the Operator everywhere — the Goals tab and its detail page
+  hide it from everyone else) and course
   progress — a one-screen sit-down. **Privacy:
   each agenda is visible to that leader and the Operator master login
   only — not to other leaders, and not to admin-role leaders either.**
@@ -130,8 +139,7 @@ deployment. Team Hub's look, navigation and sign-in are described in
 - **Shout-outs** — any leader recognizes a team member in ~20 seconds:
   name (roster autosuggest), an optional value tag (2nd-mile service,
   speed, food safety, teamwork, hospitality, cleanliness), and what
-  happened. Fresh shout-outs show on everyone's Today screen for a week,
-  and by default cross-post to the team Slack channel through the same
+  happened. Shout-outs show on the Shout-outs feed, and by default cross-post to the team Slack channel through the same
   bot as the coverage flow (uncheck the box to keep one in-app; delivery
   is best-effort). Admins get a 28-day recognition radar — most
   recognized and top recognizers.

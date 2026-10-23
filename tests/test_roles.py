@@ -90,7 +90,8 @@ def table(w):
         (f"/hub/page/{w['page']}/v/1", EDITORS), (f"/hub/file/{w['file']}/remove", EDITORS),
         ("/hub/people", OPERATOR),
         # Leader tools — never a team member
-        ("/shift/", LEADERS), ("/shift/more", LEADERS), ("/shift/checklists", LEADERS),
+        ("/shift/", LEADERS), ("/shift/?edit=goals", LEADERS), ("/shift/more", LEADERS),
+        ("/shift/checklists", LEADERS),
         (f"/shift/checklists/run/{w['run']}", LEADERS), ("/shift/checklists/scorecard", LEADERS),
         ("/shift/history", LEADERS), ("/shift/lineup", LEADERS), ("/shift/goals", LEADERS),
         (f"/shift/goals/{w['goal']}", LEADERS), ("/shift/notes", LEADERS),

@@ -8,6 +8,16 @@
 .goal-row .num { font-size: 1.5rem; line-height: 1; text-align: right; }
 .goal-row .num .pct { font-size: 0.875rem; color: var(--text-muted); margin-left: 1px; letter-spacing: 0; }
 .goal-row .num small { display: block; font-size: 0.75rem; color: var(--text-muted); letter-spacing: 0; margin-top: 3px; font-weight: 700; }
+.daily-row { display: block; padding: 13px 16px; }
+.daily-row + .daily-row { border-top: 1px solid var(--rule); }
+.daily-who { font-weight: 700; color: var(--text-strong); font-size: 1rem; }
+.daily-who small { font-weight: 400; color: var(--text-muted); font-size: 0.8125rem; margin-left: 4px; }
+.daily-line { display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; font-size: 0.9375rem; line-height: 1.4; color: var(--text); }
+.daily-line .k { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; border: 2px solid var(--gray-400); }
+.daily-line .k.on { background: var(--ok); border-color: var(--ok); }
+.daily-line .t { min-width: 0; overflow-wrap: anywhere; }
+.daily-line .t b { font-size: 0.75rem; text-transform: uppercase; letter-spacing: var(--track-eyebrow); color: var(--text-muted); margin-right: 4px; }
+.daily-line.unset { color: var(--text-muted); }
 </style>
 {% endblock %}
 
@@ -25,6 +35,14 @@
   {% if g.latest_value is not none %}<span class="num">{{ g.latest_value | num }}{% if g.unit == '%' %}<span class="pct">%</span>{% endif %}{% if g.unit != '%' %}<small>{{ g.unit or 'latest' }}</small>{% endif %}</span>{% endif %}
   {{ icon('chev', 'chev') }}
 </a>
+{% endmacro %}
+
+{% macro daily_lines(lead, ops, area='') %}
+{% for kind, g in (('leadership', lead), ('operational', ops)) %}
+{% if g %}
+<span class="daily-line"><span class="k{{ ' on' if g.done_at }}" role="img" aria-label="{{ 'Done' if g.done_at else 'Not done yet' }}"></span><span class="t"><b>{{ 'Leadership' if kind == 'leadership' else 'Operational' }}{% if kind == 'operational' and (g.area or area) %} · {{ g.area or area }}{% endif %}</b>{{ g.body }}</span></span>
+{% endif %}
+{% endfor %}
 {% endmacro %}
 
 {% block content %}
@@ -95,6 +113,37 @@
 </details>
 
 <div class="feed">
+{% if status == 'active' %}
+<section class="sec" id="daily" aria-labelledby="daily-head">
+  <div class="sec-head"><h2 id="daily-head">Daily goals</h2><a class="more" href="{{ url_for('shift.today', edit='goals') }}#goals">{{ 'Edit yours' if daily_mine else 'Set yours' }}</a></div>
+  <p class="lockline">{{ icon('lock') }}{% if shift_is_operator %}Each leader's are between them and you.{% else %}Only you and the Operator see these.{% endif %}</p>
+  {% if shift_is_operator and daily_team %}
+  <h3 class="eyebrow" style="margin: 14px 0 8px;">Your leaders today</h3>
+  <div class="card list">
+    {% for t in daily_team %}
+    <div class="daily-row">
+      <span class="daily-who">{{ t.name }}{% if t.area %}<small>{{ t.area }}</small>{% endif %}</span>
+      {% if t.leadership or t.operational %}{{ daily_lines(t.leadership, t.operational, t.area) }}{% else %}<span class="daily-line unset">Not set yet today</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <h3 class="eyebrow" style="margin: 18px 0 8px;">{{ 'Your own' if shift_is_operator else 'Yours' }}</h3>
+  <div class="card list">
+    <div class="daily-row">
+      <span class="daily-who">Today<small>{{ short_date(day) }}</small></span>
+      {% if daily_mine %}{{ daily_lines(daily_mine.get('leadership'), daily_mine.get('operational')) }}{% else %}<span class="daily-line unset">Not set yet. <a class="textlink" href="{{ url_for('shift.today') }}#goals">Set them on Today</a></span>{% endif %}
+    </div>
+    {% for d in daily_history %}
+    <div class="daily-row">
+      <span class="daily-who">{{ short_date(d.day) }}</span>
+      {{ daily_lines(d.get('leadership'), d.get('operational')) }}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <section class="sec">
   <div class="sec-head"><h2>Store goals</h2></div>
   {% if store %}

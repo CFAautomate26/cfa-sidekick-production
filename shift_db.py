@@ -56,6 +56,14 @@ CLOSED_WEEKDAYS = (6,)
 NOTE_CATEGORIES = ["general", "win", "issue", "equipment", "staffing", "guest", "food-safety"]
 
 GOAL_PERIODS = ["daily", "weekly", "monthly", "one-time"]
+# Daily goals: the two a leader sets each business day, in this order.
+DAILY_GOAL_KINDS = ("leadership", "operational")
+DAILY_GOAL_MAX = 200                            # characters per goal
+AREA_MAX = 40                                   # an area of ownership's name
+# Suggestions for a leader's area of ownership (they can type their own).
+AREA_SUGGESTIONS = ["Front of House", "Back of House", "Drive-Thru", "Hospitality",
+                    "Catering", "Food Safety", "Training", "Talent", "Marketing",
+                    "Facilities"]
 
 RECOVERY_ISSUES = ["order-error", "food-quality", "wait-time", "service",
                    "cleanliness", "spill-accident", "catering", "other"]
@@ -407,6 +415,27 @@ CREATE TABLE IF NOT EXISTS oneonone_member_topics (
 );
 CREATE INDEX IF NOT EXISTS idx_oneonone_member_topics
     ON oneonone_member_topics(member_id, discussed_at);
+
+-- Daily goals: when a leader signs in they set two goals for the business
+-- day, a leadership goal and an operational goal for their area of
+-- ownership, and tick them off as they hit them. Private to that leader +
+-- the Operator master login, like 1:1 agendas. Work goals only: never
+-- HR/discipline/wage/medical content. CASCADE: a deleted leader's goals
+-- go with them (import_json re-inserts them from the backup).
+CREATE TABLE IF NOT EXISTS daily_goals (
+    id INTEGER PRIMARY KEY,
+    holder_leader_id INTEGER REFERENCES leaders(id) ON DELETE CASCADE,
+                                                -- NULL = the Operator's own
+    day TEXT NOT NULL,                          -- YYYY-MM-DD business date (4am rollover)
+    kind TEXT NOT NULL,                         -- leadership | operational
+    body TEXT NOT NULL,
+    area TEXT,                                  -- operational: the area of ownership
+    done_at TEXT,                               -- NULL = not ticked off
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_goals_slot
+    ON daily_goals(COALESCE(holder_leader_id, 0), day, kind);
 
 -- Recognition / shout-outs, posted by any leader, optionally cross-posted
 -- to the team Slack channel (best-effort; shared_at records the REQUEST,
@@ -811,6 +840,10 @@ def _migrate(conn) -> None:
         conn.execute("ALTER TABLE leaders ADD COLUMN slack_id TEXT")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_leaders_slack "
                  "ON leaders(slack_id) WHERE slack_id IS NOT NULL")
+    # Daily goals: each leader's area of ownership, remembered for their
+    # operational goal (NULL until they or the Operator set one).
+    if "area" not in cols:
+        conn.execute("ALTER TABLE leaders ADD COLUMN area TEXT")
     # Checklists gained weekly/monthly lists, the paper sheets' Owner and
     # Manager check, and run-level frequency snapshots. Existing templates
     # and runs are daily, exactly as before.
@@ -1797,7 +1830,7 @@ def recent_lineup_names(days: int = 14) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def leaders(include_inactive: bool = False) -> list[dict]:
-    q = "SELECT id, name, role, active, created_at, slack_id FROM leaders "
+    q = "SELECT id, name, role, active, created_at, slack_id, area FROM leaders "
     if not include_inactive:
         q += "WHERE active=1 "
     q += "ORDER BY name COLLATE NOCASE"
@@ -1863,7 +1896,7 @@ def leader_is_active(leader_id: int) -> bool:
 def get_leader(leader_id: int) -> dict | None:
     with closing(connect()) as conn:
         row = conn.execute(
-            "SELECT id, name, role, active FROM leaders WHERE id=?", (leader_id,)
+            "SELECT id, name, role, active, area FROM leaders WHERE id=?", (leader_id,)
         ).fetchone()
     return dict(row) if row else None
 
@@ -2093,6 +2126,113 @@ def set_task_done(task_id: int, done: bool, by: str) -> bool:
 def delete_task(task_id: int) -> None:
     with closing(connect()) as conn, conn:
         conn.execute("DELETE FROM leader_tasks WHERE id=?", (task_id,))
+
+
+# ---------------------------------------------------------------------------
+# Daily goals (a leader's leadership + operational goal for the business day)
+# ---------------------------------------------------------------------------
+
+def _goal_text(text: str | None, cap: int) -> str:
+    return " ".join((text or "").split())[:cap]
+
+
+def daily_goals(holder_leader_id: int | None, day: str) -> dict[str, dict]:
+    """{kind: row} for one holder's day (holder None = the Operator's own)."""
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM daily_goals WHERE holder_leader_id IS ? AND day=?",
+            (holder_leader_id, day)).fetchall()
+    return {r["kind"]: dict(r) for r in rows}
+
+
+def save_daily_goals(holder_leader_id: int | None, day: str, leadership: str,
+                     operational: str, area: str) -> None:
+    """Set (or change) one holder's two goals for `day`. A goal left blank
+    is cleared; a goal whose words change is no longer ticked off. A
+    leader's area is remembered on their login for next time."""
+    stamp = now_stamp()
+    area = _goal_text(area, AREA_MAX)
+    texts = {"leadership": _goal_text(leadership, DAILY_GOAL_MAX),
+             "operational": _goal_text(operational, DAILY_GOAL_MAX)}
+    with closing(connect()) as conn, conn:
+        for kind, body in texts.items():
+            row = conn.execute(
+                "SELECT id, body FROM daily_goals WHERE holder_leader_id IS ? AND day=? "
+                "AND kind=?", (holder_leader_id, day, kind)).fetchone()
+            row_area = (area or None) if kind == "operational" else None
+            if not body:
+                if row:
+                    conn.execute("DELETE FROM daily_goals WHERE id=?", (row["id"],))
+            elif row:
+                conn.execute(
+                    "UPDATE daily_goals SET body=?, area=?, updated_at=?, "
+                    "done_at=CASE WHEN body=? THEN done_at ELSE NULL END WHERE id=?",
+                    (body, row_area, stamp, body, row["id"]))
+            else:
+                conn.execute(
+                    "INSERT INTO daily_goals (holder_leader_id, day, kind, body, area, "
+                    "created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                    (holder_leader_id, day, kind, body, row_area, stamp, stamp))
+        if holder_leader_id is not None and area:
+            conn.execute("UPDATE leaders SET area=? WHERE id=?", (area, holder_leader_id))
+
+
+def set_daily_goal_done(goal_id: int, holder_leader_id: int | None, done: bool) -> bool:
+    """Tick a goal off (or back on). Only its holder can: False otherwise."""
+    with closing(connect()) as conn, conn:
+        return conn.execute(
+            "UPDATE daily_goals SET done_at=? WHERE id=? AND holder_leader_id IS ?",
+            (now_stamp() if done else None, goal_id, holder_leader_id)).rowcount == 1
+
+
+def holder_area(holder_leader_id: int | None) -> str:
+    """The area to suggest for an operational goal: a leader's saved area,
+    else the area on their (or the Operator's) latest operational goal."""
+    with closing(connect()) as conn:
+        if holder_leader_id is not None:
+            row = conn.execute("SELECT area FROM leaders WHERE id=?",
+                               (holder_leader_id,)).fetchone()
+            if row and row["area"]:
+                return row["area"]
+        row = conn.execute(
+            "SELECT area FROM daily_goals WHERE holder_leader_id IS ? AND kind='operational' "
+            "AND area IS NOT NULL AND area != '' ORDER BY day DESC, id DESC LIMIT 1",
+            (holder_leader_id,)).fetchone()
+    return row["area"] if row else ""
+
+
+def daily_goal_history(holder_leader_id: int | None, before: str,
+                       days: int = 7) -> list[dict]:
+    """One holder's goals on the `days` business days before `before`, newest
+    first, one entry per day that has any: {day, leadership, operational}."""
+    start = (date.fromisoformat(before) - timedelta(days=days)).isoformat()
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM daily_goals WHERE holder_leader_id IS ? AND day >= ? AND day < ? "
+            "ORDER BY day DESC", (holder_leader_id, start, before)).fetchall()
+    by_day: dict[str, dict] = {}
+    for r in rows:
+        by_day.setdefault(r["day"], {"day": r["day"]})[r["kind"]] = dict(r)
+    return list(by_day.values())
+
+
+def team_daily_goals(day: str) -> list[dict]:
+    """Every active leader's goals for `day` (for the Operator), by name:
+    {leader_id, name, area, leadership, operational} with None where unset."""
+    with closing(connect()) as conn:
+        leaders_ = conn.execute(
+            "SELECT id, name, area FROM leaders WHERE active=1 "
+            "ORDER BY name COLLATE NOCASE").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM daily_goals WHERE day=? AND holder_leader_id IS NOT NULL",
+            (day,)).fetchall()
+    goals: dict[int, dict] = {}
+    for r in rows:
+        goals.setdefault(r["holder_leader_id"], {})[r["kind"]] = dict(r)
+    return [{"leader_id": l["id"], "name": l["name"], "area": l["area"] or "",
+             "leadership": goals.get(l["id"], {}).get("leadership"),
+             "operational": goals.get(l["id"], {}).get("operational")}
+            for l in leaders_]
 
 
 def leader_task_summary() -> list[dict]:
@@ -3280,7 +3420,7 @@ EXPORT_TABLES = [
     "announcement_reads", "course_lessons", "lesson_progress", "leader_tasks",
     "guest_recoveries", "oneonone_topics", "oneonone_member_topics", "shoutouts",
     "hub_categories", "hub_pages", "hub_page_versions", "hub_attachments", "hub_acks",
-    "hub_reviews", "hub_audit",
+    "hub_reviews", "hub_audit", "daily_goals",
 ]
 # A backup from before the Team Hub existed leaves the Hub as it is.
 HUB_TABLES = [t for t in EXPORT_TABLES if t.startswith("hub_")]
@@ -3319,7 +3459,7 @@ def export_json() -> str:
         for table in EXPORT_TABLES:
             payload[table] = [dict(r) for r in conn.execute(f"SELECT * FROM {table}")]
         payload["leaders"] = [dict(r) for r in conn.execute(
-            "SELECT id, name, role, active, created_at, slack_id FROM leaders"
+            "SELECT id, name, role, active, created_at, slack_id, area FROM leaders"
         )]
         conn.commit()
     return json.dumps(payload, ensure_ascii=False, indent=1)
@@ -3419,11 +3559,11 @@ def import_json(raw: str) -> str | None:
                     for row in payload.get("leaders", []):
                         conn.execute(
                             "INSERT INTO leaders (id, name, pin_hash, role, active, "
-                            "created_at, slack_id) VALUES (?,?,?,?,?,?,?)",
+                            "created_at, slack_id, area) VALUES (?,?,?,?,?,?,?,?)",
                             (row.get("id"), row.get("name", ""), locked_hash,
                              row.get("role", "lead"), row.get("active", 1),
                              row.get("created_at", now_stamp()),
-                             row.get("slack_id")),
+                             row.get("slack_id"), row.get("area")),
                         )
                     for table in EXPORT_TABLES:
                         if table in HUB_TABLES and table not in payload:

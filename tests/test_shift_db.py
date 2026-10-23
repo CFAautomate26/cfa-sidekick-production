@@ -2559,3 +2559,102 @@ def test_recent_dates_shape(isolated_db):
 
 def test_current_daypart_is_valid(isolated_db):
     assert shift_db.current_daypart() in shift_db.DAYPARTS
+
+
+# --- daily goals --------------------------------------------------------------
+
+def test_daily_goals_one_per_kind_per_holder_per_day(isolated_db):
+    import sqlite3
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]["id"]
+    day = "2026-10-23"
+    shift_db.save_daily_goals(maya, day, "Lead", "Ops", "Drive-Thru")
+    shift_db.save_daily_goals(maya, day, "Lead again", "Ops again", "Drive-Thru")
+    shift_db.save_daily_goals(None, day, "Operator lead", "", "")      # the Operator's own
+    shift_db.save_daily_goals(None, day, "Operator lead 2", "", "")
+    mine = shift_db.daily_goals(maya, day)
+    assert {k: g["body"] for k, g in mine.items()} == {"leadership": "Lead again",
+                                                       "operational": "Ops again"}
+    assert list(shift_db.daily_goals(None, day)) == ["leadership"]
+    assert shift_db.daily_goals(None, day)["leadership"]["body"] == "Operator lead 2"
+    # The slot index holds even for the Operator's NULL holder
+    with shift_db.connect() as conn:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO daily_goals (holder_leader_id, day, kind, body, created_at, "
+                         "updated_at) VALUES (NULL, ?, 'leadership', 'dup', 'x', 'x')", (day,))
+
+
+def test_daily_goal_tick_only_by_its_holder(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    shift_db.add_leader("Devon", "8888")
+    maya = next(l["id"] for l in shift_db.leaders() if l["name"] == "Maya")
+    devon = next(l["id"] for l in shift_db.leaders() if l["name"] == "Devon")
+    shift_db.save_daily_goals(maya, "2026-10-23", "Lead", "", "")
+    gid = shift_db.daily_goals(maya, "2026-10-23")["leadership"]["id"]
+    assert shift_db.set_daily_goal_done(gid, devon, True) is False
+    assert shift_db.set_daily_goal_done(gid, None, True) is False      # not even the Operator
+    assert shift_db.set_daily_goal_done(gid, maya, True) is True
+    assert shift_db.daily_goals(maya, "2026-10-23")["leadership"]["done_at"]
+
+
+def test_holder_area_and_team_view(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    shift_db.add_leader("Devon", "8888")
+    maya = next(l["id"] for l in shift_db.leaders() if l["name"] == "Maya")
+    assert shift_db.holder_area(maya) == ""
+    shift_db.save_daily_goals(maya, "2026-10-22", "", "Ops", "Back of House")
+    assert shift_db.holder_area(maya) == "Back of House"
+    shift_db.save_daily_goals(None, "2026-10-22", "", "Store ops", "Whole store")
+    assert shift_db.holder_area(None) == "Whole store"
+    team = shift_db.team_daily_goals("2026-10-22")
+    assert [t["name"] for t in team] == ["Devon", "Maya"]
+    assert team[0]["leadership"] is None and team[1]["operational"]["body"] == "Ops"
+    assert team[1]["area"] == "Back of House"
+    history = shift_db.daily_goal_history(maya, "2026-10-23")
+    assert [h["day"] for h in history] == ["2026-10-22"]
+    assert shift_db.daily_goal_history(maya, "2026-10-23", days=0) == []
+
+
+def test_daily_goals_and_areas_survive_export_import(isolated_db):
+    shift_db.add_leader("Maya", "4721")
+    maya = shift_db.leaders()[0]["id"]
+    shift_db.save_daily_goals(maya, "2026-10-23", "Lead", "Ops", "Drive-Thru")
+    shift_db.save_daily_goals(None, "2026-10-23", "Op lead", "Op ops", "Whole store")
+    gid = shift_db.daily_goals(maya, "2026-10-23")["leadership"]["id"]
+    shift_db.set_daily_goal_done(gid, maya, True)
+    raw = shift_db.export_json()
+    shift_db.save_daily_goals(maya, "2026-10-23", "", "", "")
+    shift_db.save_daily_goals(None, "2026-10-23", "", "", "")
+    assert shift_db.import_json(raw) is None
+    restored = shift_db.daily_goals(maya, "2026-10-23")
+    assert restored["leadership"]["body"] == "Lead" and restored["leadership"]["done_at"]
+    assert shift_db.daily_goals(None, "2026-10-23")["operational"]["area"] == "Whole store"
+    assert shift_db.get_leader(maya)["area"] == "Drive-Thru"
+    # A backup from before daily goals restores cleanly (no daily goals in it)
+    old = json.loads(raw)
+    old.pop("daily_goals")
+    for row in old["leaders"]:
+        row.pop("area", None)
+    assert shift_db.import_json(json.dumps(old)) is None
+    assert shift_db.daily_goals(maya, "2026-10-23") == {}
+
+
+def test_migration_adds_leader_area(tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "old.db"))
+    conn = sqlite3.connect(shift_db.DB_PATH)
+    conn.executescript("""
+        CREATE TABLE leaders (
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            pin_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'lead',
+            active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+        INSERT INTO leaders (name, pin_hash, created_at) VALUES ('Maya', 'x', '2026-10-01 09:00');
+    """)
+    conn.commit()
+    conn.close()
+    shift_db.init_db()
+    shift_db.init_db()   # idempotent
+    maya = shift_db.leaders()[0]
+    assert maya["name"] == "Maya" and maya["area"] is None
+    shift_db.save_daily_goals(maya["id"], "2026-10-23", "Lead", "Ops", "BOH")
+    assert shift_db.get_leader(maya["id"])["area"] == "BOH"
