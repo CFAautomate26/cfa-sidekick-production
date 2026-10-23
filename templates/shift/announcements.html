@@ -43,7 +43,7 @@
 {% macro ann_card(a) %}
 <article class="feature cream ann {{ 'seen' if a.acked }}" id="ann-{{ a.id }}">
   <p class="f-eyebrow">{{ icon('mega') }}From {{ 'the Operator' if a.author == 'Operator' else a.author }} · {{ short_stamp(a.created_at) }}{% if a.pinned %} <span class="badge b-tan">{{ icon('pin') }}Pinned</span>{% endif %}{% if a.expires_on %} <span class="badge b-navy">Until {{ month_day(a.expires_on) }}</span>{% endif %}</p>
-  <p class="f-body">{{ a.body }}</p>
+  <p class="f-body">{{ a.body }}{% if a.page_id %} <a class="textlink" href="{{ url_for('hub.page', page_id=a.page_id) }}">Open&nbsp;the&nbsp;page</a>{% endif %}</p>
   <div class="acts">
     {% if a.acked %}
     <span class="badge b-green">{{ icon('check') }}Got it</span>

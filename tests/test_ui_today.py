@@ -490,3 +490,69 @@ def test_team_members_cannot_set_goals(client, clock):
     assert resp.status_code == 302 and "/shift/" not in resp.headers["Location"]
     with shift_db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM daily_goals").fetchone()[0] == 0
+
+
+def test_double_tapped_first_save_never_errors(client, clock):
+    """Two saves racing for an empty day both succeed (no unique-index 500)."""
+    import threading
+    maya = make_leader(client)
+    errors, barrier = [], threading.Barrier(2)
+
+    def save(text):
+        barrier.wait()
+        try:
+            shift_db.save_daily_goals(maya, FRI, text, "Ops", "BOH")
+        except Exception as e:          # pragma: no cover - the failure being tested
+            errors.append(e)
+    for _ in range(10):
+        shift_db.save_daily_goals(maya, FRI, "", "", "")
+        threads = [threading.Thread(target=save, args=(t,)) for t in ("A", "B")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    assert errors == []
+    assert shift_db.daily_goals(maya, FRI)["leadership"]["body"] in ("A", "B")
+
+
+def test_cleared_area_stays_cleared(client, clock):
+    maya = make_leader(client)
+    login_leader(client)
+    client.post("/shift/today/goals", data={"leadership": "L", "operational": "O",
+                                            "area": "Back of House"})
+    client.post("/shift/today/goals", data={"leadership": "L", "operational": "O", "area": ""})
+    assert shift_db.get_leader(maya)["area"] is None
+    goals = goals_section(client.get("/shift/?edit=goals").data.decode())
+    assert 'id="g-area" name="area"' in goals and 'value=""' in goals
+    assert "Back of House" not in goals.split("<datalist")[0]
+    # ...and tomorrow starts blank too (no old goal's area comes back)
+    clock["now"] = at("2026-10-24 09:00")
+    goals = goals_section(today_page(client))
+    assert 'value=""' in goals
+
+
+def test_goals_tile_counts_todays_goals(client, clock):
+    make_leader(client)
+    login_leader(client)
+    assert "None yet" in section(today_page(client), "tiles-head")
+    client.post("/shift/today/goals", data={"leadership": "L", "operational": "", "area": ""})
+    assert "1 of 2 set today" in section(today_page(client), "tiles-head")
+
+
+def test_announcement_page_link_opens_the_hub_page(client, clock):
+    make_leader(client)
+    login_operator(client)
+    category = next(c["id"] for c in hub_db.categories() if c["name"] == "FOH Operations")
+    op = hub_db.Viewer("operator", None, "Operator", "admin")
+    pid = hub_db.create_page(op, {"category_id": category, "section": "Training",
+                                  "title": "Building the Pretzel Sandwich", "summary": "",
+                                  "keywords": "", "body": "# Build", "leaders_only": 0,
+                                  "required": 1, "annual_review": 0})
+    assert hub_db.publish(op, pid, hub_db.get_page(pid)["rev"], "First", True) is None
+    client.post("/shift/announcements", data={
+        "body": f"Pretzel Sandwich launches Monday. Read https://x.onrender.com/hub/page/{pid}."})
+    client.post("/shift/logout")
+    login_leader(client)
+    page = client.get("/shift/announcements").data.decode()
+    assert "Pretzel Sandwich launches Monday. Read." in page and "onrender" not in page
+    assert f'href="/hub/page/{pid}">Open&nbsp;the&nbsp;page' in page

@@ -2155,6 +2155,9 @@ def save_daily_goals(holder_leader_id: int | None, day: str, leadership: str,
     texts = {"leadership": _goal_text(leadership, DAILY_GOAL_MAX),
              "operational": _goal_text(operational, DAILY_GOAL_MAX)}
     with closing(connect()) as conn, conn:
+        # The read and the writes under one write lock: two quick saves
+        # (a double tap, two phones) queue up instead of both inserting.
+        conn.execute("BEGIN IMMEDIATE")
         for kind, body in texts.items():
             row = conn.execute(
                 "SELECT id, body FROM daily_goals WHERE holder_leader_id IS ? AND day=? "
@@ -2173,8 +2176,8 @@ def save_daily_goals(holder_leader_id: int | None, day: str, leadership: str,
                     "INSERT INTO daily_goals (holder_leader_id, day, kind, body, area, "
                     "created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
                     (holder_leader_id, day, kind, body, row_area, stamp, stamp))
-        if holder_leader_id is not None and area:
-            conn.execute("UPDATE leaders SET area=? WHERE id=?", (area, holder_leader_id))
+        if holder_leader_id is not None:
+            conn.execute("UPDATE leaders SET area=? WHERE id=?", (area or None, holder_leader_id))
 
 
 def set_daily_goal_done(goal_id: int, holder_leader_id: int | None, done: bool) -> bool:
@@ -2186,14 +2189,14 @@ def set_daily_goal_done(goal_id: int, holder_leader_id: int | None, done: bool) 
 
 
 def holder_area(holder_leader_id: int | None) -> str:
-    """The area to suggest for an operational goal: a leader's saved area,
-    else the area on their (or the Operator's) latest operational goal."""
+    """The area to suggest for an operational goal: a leader's saved area
+    (blank if they cleared it); for the Operator, the area on their latest
+    operational goal."""
     with closing(connect()) as conn:
         if holder_leader_id is not None:
             row = conn.execute("SELECT area FROM leaders WHERE id=?",
                                (holder_leader_id,)).fetchone()
-            if row and row["area"]:
-                return row["area"]
+            return (row["area"] or "") if row else ""
         row = conn.execute(
             "SELECT area FROM daily_goals WHERE holder_leader_id IS ? AND kind='operational' "
             "AND area IS NOT NULL AND area != '' ORDER BY day DESC, id DESC LIMIT 1",

@@ -55,7 +55,7 @@ Canada.
   via `SLACK_BOT_TOKEN` + `SHIFT_SHOUTOUT_SLACK_CHANNEL`), a guest
   recovery log
   under `/shift/recovery` (guest + issue + make-it-right remedy; states
-  open → contacted/coming-back → resolved, surfaced on the Today screen
+  open → contacted/coming-back → resolved, listed on the Recovery page (count in the ☰ menu)
   until closed; guest name/contact only — never payment info), and
   per-leader
   leadership-course tracking under `/shift/development` — course

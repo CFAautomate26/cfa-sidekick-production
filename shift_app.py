@@ -458,7 +458,9 @@ def today():
         first_name=(name.split() or [""])[0] if leader_id else "",
         goals=goals,
         editing=request.args.get("edit") == "goals" or not goals,
-        area=(goals.get("operational") or {}).get("area") or shift_db.holder_area(leader_id),
+        # Today's operational goal keeps its own area (even a cleared one).
+        area=((goals["operational"]["area"] or "") if "operational" in goals
+              else shift_db.holder_area(leader_id)),
         areas=shift_db.AREA_SUGGESTIONS,
         goal_max=shift_db.DAILY_GOAL_MAX,
         area_max=shift_db.AREA_MAX,
@@ -1128,10 +1130,27 @@ def note_delete(note_id):
 
 @shift_bp.route("/announcements")
 def announcements():
-    items = shift_db.active_announcements(reader=current_name())
+    items = [_with_page_link(a) for a in shift_db.active_announcements(reader=current_name())]
     readers = {a["id"]: shift_db.announcement_readers(a["id"]) for a in items} \
         if is_admin() else {}
     return render_template("shift/announcements.html", items=items, readers=readers)
+
+
+# A Systems & Procedures page linked in an announcement ("…/hub/page/40").
+_HUB_PAGE_LINK = re.compile(r"(?:https?://[^\s/]+)?/hub/page/(\d+)(?:[/?#][^\s)\]]*)?")
+
+
+def _with_page_link(a: dict) -> dict:
+    """An announcement whose text links a Systems & Procedures page gets an
+    "Open the page" link instead of the raw address (when the Hub is up)."""
+    body, page_id = a["body"], None
+    match = _HUB_PAGE_LINK.search(body)
+    if match and teamhub_nav.hub_up():
+        page_id = int(match.group(1))
+        head, rest = body[:match.start()].rstrip(), body[match.end():]
+        rest = rest if rest[:1] in tuple(".,;:!?)]") else " " + rest.lstrip()
+        body = (head + rest).strip()
+    return dict(a, body=body, page_id=page_id)
 
 
 @shift_bp.route("/announcements", methods=["POST"])

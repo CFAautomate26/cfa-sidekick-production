@@ -153,7 +153,7 @@
   <div class="tiles small">
     <a class="tile" href="{{ url_for('shift.checklists') }}"><span class="tile-art">{{ art('checklists') }}</span><span class="tile-name">Checklists</span><span class="tile-meta">{% if due %}{{ due | length }} due now{% else %}All done for now{% endif %}</span></a>
     <a class="tile" href="{{ url_for('shift.lineup') }}"><span class="tile-art">{{ art('lineup') }}</span><span class="tile-name">Lineups &amp; Setups</span><span class="tile-meta">{% if not lineup.started %}Not set yet{% elif lineup.open %}{{ lineup.open }} open{% else %}All filled{% endif %}</span></a>
-    <a class="tile" href="{{ url_for('shift.goals') }}"><span class="tile-art">{{ art('goals') }}</span><span class="tile-name">Goals</span><span class="tile-meta">{% if goal_count %}{{ goal_count }} active{% else %}None yet{% endif %}</span></a>
+    <a class="tile" href="{{ url_for('shift.goals') }}"><span class="tile-art">{{ art('goals') }}</span><span class="tile-name">Goals</span><span class="tile-meta">{% if goal_count %}{{ goal_count }} active{% elif goals %}{{ goals | length }} of 2 set today{% else %}None yet{% endif %}</span></a>
     {% if hub_on %}
     <a class="tile" href="{{ url_for('hub.library') }}"><span class="tile-art">{{ art('procedures') }}</span><span class="tile-name">Systems &amp; Procedures</span><span class="tile-meta">{% if to_read %}{{ to_read | length }} to read{% else %}Up to date{% endif %}</span></a>
     {% endif %}
