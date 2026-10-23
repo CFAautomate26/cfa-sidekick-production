@@ -136,8 +136,9 @@ from the Shift Lead app.
   in file order; a title already in its category is skipped, so importing
   the same bundle twice is safe; pages for a policy category (HR) always
   arrive as drafts for the Operator's review checks. On a phone use the
-  one-file `.txt` form: phones unzip a downloaded `.zip` and then won't
-  let you pick the folder. This is
+  one-file `.txt` form, or paste the whole text into the box under the
+  file picker: phones unzip a downloaded `.zip` and then won't let you
+  pick the folder. This is
   how the Chick-fil-A Operational Requirements Guide was loaded: that text
   is confidential to the Chick-fil-A system, so it travels as a bundle the
   Operator uploads, never through the (public) code repository.

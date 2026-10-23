@@ -75,7 +75,9 @@
   <div class="sec-head"><h2>Import a library bundle</h2></div>
   <form method="post" action="{{ url_for('hub.import_bundle') }}" enctype="multipart/form-data" class="card">
     <label class="field" for="bundle-file">Bundle file <small>(.txt or .md of pages, a .zip of them, or several .md files picked together)</small></label>
-    <input type="file" id="bundle-file" name="file" accept=".txt,.md,.zip,text/plain,text/markdown,application/zip" multiple required>
+    <input type="file" id="bundle-file" name="file" accept=".txt,.md,.zip,text/plain,text/markdown,application/zip" multiple>
+    <label class="field" for="bundle-text">…or paste the bundle text here <small>(if the file won't pick on your phone)</small></label>
+    <textarea id="bundle-text" name="text" rows="4" placeholder="Paste the whole library text, then tap Import bundle"></textarea>
     <p class="fine-line">Many pages at once, each with its category, section and title in its header. Pages marked
       to publish go live now (except in a policy category, where they wait as drafts for your review checks);
       a title that's already in its category is left alone, so importing the same bundle twice is safe.

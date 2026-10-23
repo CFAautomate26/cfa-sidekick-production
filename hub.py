@@ -820,21 +820,27 @@ def import_word():
 @operator_required
 def import_bundle():
     """Many pages at once: a zip of .md pages, one text file of pages
-    separated by ===== lines, or several .md files picked together (see
-    hub_text.bundle_entries for the page format)."""
+    separated by ===== lines, several .md files picked together, or the
+    same text pasted into the box (see hub_text.bundle_entries for the
+    page format)."""
     request.max_content_length = _UPLOAD_LIMIT
     uploads = [u for u in request.files.getlist("file") if u and u.filename]
-    entries, notes = [], []
+    sources = []                                  # (shown name, bytes)
     for upload in uploads[:hub_text.BUNDLE_MAX_FILES]:
-        data = upload.read(hub_db.MAX_FILE_BYTES + 1)
+        sources.append((_shown_name(upload.filename), upload.read(hub_db.MAX_FILE_BYTES + 1)))
+    pasted = (request.form.get("text") or "").strip()
+    if pasted:
+        sources.append(("pasted text", pasted.encode("utf-8")))
+    entries, notes = [], []
+    for name, data in sources:
         if not data or len(data) > hub_db.MAX_FILE_BYTES:
-            notes.append(f"{_shown_name(upload.filename)}: empty or over 15 MB")
+            notes.append(f"{name}: empty or over 15 MB")
             continue
-        got, why = hub_text.bundle_entries(data, _shown_name(upload.filename))
+        got, why = hub_text.bundle_entries(data, name)
         entries += got
         notes += why
-    if not uploads:
-        flash("Pick the bundle file first (a .zip, or the .txt/.md version).")
+    if not sources:
+        flash("Pick the bundle file first (a .zip, or the .txt/.md version), or paste its text.")
         return redirect(url_for("hub.manage"))
     if not entries:
         flash("Nothing could be imported from that file"
