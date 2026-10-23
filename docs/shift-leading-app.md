@@ -1,8 +1,10 @@
-# Shift Leading App — setup & guide
+# Leader tools (Team Hub `/shift`) — setup & guide
 
-A phone-first shift leadership tool (in the spirit of Huddle) built into the
-CFA Sidekick Flask service, at **`/shift`** on the Render deployment. It gives
-the leadership team:
+These are the leader sections of **Team Hub** (formerly the "Shift Lead"
+app): a phone-first shift leadership tool (in the spirit of Huddle) built
+into the CFA Sidekick Flask service, at **`/shift`** on the Render
+deployment. Team Hub's look, navigation and sign-in are described in
+[docs/team-hub.md](team-hub.md). It gives the leadership team:
 
 - **Today dashboard** — the current daypart's checklists, lineup, goals,
   unread announcements, and today's notes in one glance.

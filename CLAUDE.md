@@ -19,7 +19,19 @@ Canada.
 
 - `app.py` — Flask webhook for GroupMe; OpenAI-backed responses. Team members
   invoke the bot with the `cow:` keyword.
-- `shift_app.py` + `shift_db.py` — the shift leading app at `/shift`
+- **Team Hub** — the one app for the whole team: the leader tools (`/shift`)
+  and Systems & Procedures (`/hub`) under one name, one sign-in
+  (`templates/shared/front_door.html`: team members first name + clock-in
+  number, leaders their PIN; optional "shared phone or computer" session)
+  and one look styled from chick-fil-a.ca's tokens
+  (`templates/shared/cfa_style.html`, `_chrome.html`, `menu.html`; the
+  round logo in `assets/cfa-round-logo.png` is used as supplied, icons in
+  `static/teamhub/`). `teamhub_nav.py` builds each role's tabs and ☰ menu
+  (links only where that role may go — routes stay the gate;
+  `tests/test_roles.py` checks every page × role). The app's front page is
+  `/hub/` (one manifest, scope `/`); a leader's home is Today (`/shift/`).
+  Guide: [docs/team-hub.md](docs/team-hub.md).
+- `shift_app.py` + `shift_db.py` — the leader tools at `/shift` (formerly "Shift Lead")
   (Huddle-style: daily/weekly/monthly checklists with who-did-what stamps,
   Owner + Manager check, lock-at-period-end, and a consistency scorecard
   at `/shift/checklists/scorecard` — station cleaning sheets pinned in
@@ -62,7 +74,7 @@ Canada.
   `assets/shift-qr/` points at the live `/shift` URL;
   `scripts/generate_shift_qr.py` regenerates it (pass a different URL as
   an argument if the service ever moves).
-- `hub.py` + `hub_db.py` + `hub_text.py` — the Team Hub at `/hub`: the
+- `hub.py` + `hub_db.py` + `hub_text.py` — Systems & Procedures at `/hub`: the
   store's "here's how we do it" library (categories HR / FOH Operations /
   BOH Operations / Leadership Development, with sections inside; drafts →
   versioned publishing; required reading with append-only "I've received

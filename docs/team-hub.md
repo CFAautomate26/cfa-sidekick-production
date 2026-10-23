@@ -1,8 +1,52 @@
 # Team Hub — setup & guide
 
-The store's "here's how we do it" library, at **`/hub`** on the same Render
-service as the Shift Lead app. Systems, processes, training and policies for
-Chick-fil-A Wharncliffe & Wonderland, on everyone's phone.
+**Team Hub** is the one app for Chick-fil-A Wharncliffe & Wonderland: the
+leader tools that used to be "Shift Lead" and the store's "here's how we do
+it" library, under one name, one sign-in and one look (styled from
+chick-fil-a.ca's own design: white masthead, the round logo on a hairline, a
+red ☰ menu of big navy section words, red headlines). Same Render service,
+same database, same backups.
+
+**The app is `/hub/`** — that's what the home-screen icon, the crew-room
+poster and new installs open. The office `/shift` poster, old "Shift Lead"
+home-screen icons and every old link keep working.
+
+## The sections
+
+| Section | Who | What's there |
+|---|---|---|
+| **Today** (leaders) / **Home** (team members) | everyone | Leaders: what needs you now — checklists due, guests coming back, announcements, the lineup, goals. Team members: their required reading, the categories, what's new. |
+| **Systems & Procedures** | everyone (filtered) | HR, FOH Operations, BOH Operations, Leadership Development (leaders only) — pages, required reading, search, editor tools. |
+| **Checklists** | leaders | Daypart lists, station cleaning sheets, scorecard, past days. |
+| **Lineups & Setups** | leaders | The position lineup per daypart. |
+| **Goals** | leaders | Store goals and updates. |
+| **Meetings** | leaders | Your 1:1 agenda with the Operator, 1:1s with your team, to-dos. Private to each leader and the Operator. |
+| **Leadership Development** | leaders | The 48-lesson course, plus the leadership library pages. |
+
+Shift notes, guest recovery, announcements, shout-outs, the roster and
+history are in the ☰ menu; admin leaders also see Manage pages and Leader
+logins & checklist templates; the Operator also sees Backups, Team Hub
+access (clock-in numbers) and Categories.
+
+Bottom tabs — leaders: Today · Checklists · Lineups · Procedures · Meetings;
+team members: Home · Procedures · To read · Me. On the office computer the
+tabs become a row under the logo.
+
+## Signing in (one front door)
+
+- **Team members:** first name + clock-in number (given by the Operator — see
+  *Giving the team access* below). A clock-in sign-in only ever opens team
+  member content; trying a leader page lands back on their Home.
+- **Leaders:** tap **Shift leader**, pick your name, enter your PIN. The
+  Operator signs in as **Operator** with the `SHIFT_ADMIN_PIN` (kept in
+  Render → Environment; changing it signs every Operator session out).
+- **Shared phone or computer:** tick it at sign-in (do this on the office
+  PC). The sign-in then ends when the browser closes or after 30 minutes
+  away, instead of lasting 30 days.
+- If the Systems & Procedures part ever failed to load, leaders can still
+  sign in at `/shift/login` and run the shift.
+
+## Systems & Procedures
 
 - **Categories** (seeded on first boot, editable under Manage): **HR**,
   **FOH Operations**, **BOH Operations**, **Leadership Development**
@@ -28,19 +72,19 @@ Chick-fil-A Wharncliffe & Wonderland, on everyone's phone.
 - **Lawyer review flag** — any editor can flag a page; it can't be
   published until the Operator clears the flag with a note.
 
-## Who can do what
+### Who can do what
 
 | | Team member | Leader | Admin leader | Operator |
 |---|---|---|---|---|
-| Sign in | first name + clock-in number | Shift Lead PIN | Shift Lead PIN | master PIN |
+| Sign in | first name + clock-in number | PIN | PIN | master PIN |
 | Read published pages | ✓ (not leaders-only) | ✓ all | ✓ all | ✓ all |
 | Drafts, write, publish | | | ✓ | ✓ |
 | Publish / change **HR** (policy) pages | | | drafts only | ✓ after the review checks |
 | Clear a lawyer-review flag | | | | ✓ |
 | Give / remove clock-in access, categories | | | | ✓ |
 
-Leaders who are already signed in to Shift Lead are signed in to the Hub
-too (it's the same login), and the Shift Lead **More** page links to it.
+Leaders reach Systems & Procedures from the Procedures tab or the ☰ menu
+— it's the same sign-in as the rest of Team Hub.
 
 ## Giving the team access
 
@@ -139,10 +183,13 @@ and `FLASK_SECRET_KEY` like the Shift Lead app. Optional:
 `SHIFT_HUB_FILES_DIR` to put files elsewhere. Changing `SHIFT_ADMIN_PIN`
 now signs every Operator session out.
 
-## QR poster
+## QR poster and app icon
 
 `assets/hub-qr/` has a branded QR code and an 8.5×11 poster (PNG + PDF)
-pointing at the live `/hub` URL — print it for the crew room.
+pointing at the live `/hub` URL — print it for the crew room. The
+home-screen icon and the masthead logo are the round logo Josh supplied
+(`assets/cfa-round-logo.png`, used as-is); `scripts/generate_app_icons.py`
+rebuilds `static/teamhub/` from it.
 `scripts/generate_hub_qr.py` regenerates it (pass a different URL if the
 service ever moves).
 
@@ -162,6 +209,13 @@ service ever moves).
 
 ## Development
 
-`hub.py` (routes), `hub_db.py` (data), `hub_text.py` (formatting + Word
-import), templates in `templates/hub/`, tests in `tests/test_hub.py` and
-`tests/test_hub_text.py` (`python -m pytest tests/`).
+- Shared look and navigation: `templates/shared/` (`cfa_style.html` design
+  tokens + components, `_chrome.html` masthead/tab bar, `menu.html`,
+  `front_door.html`), `teamhub_nav.py` (each role's tabs and menu — links
+  only where that role may go), `teamhub_ui.py` (icons, section art,
+  progress rings).
+- Leader tools: `shift_app.py`, `shift_db.py`, `templates/shift/`.
+- Systems & Procedures: `hub.py` (routes), `hub_db.py` (data), `hub_text.py`
+  (formatting + Word import), `templates/hub/`.
+- Tests: `python -m pytest tests/` — `tests/test_roles.py` checks every page
+  against every role.
