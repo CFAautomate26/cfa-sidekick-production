@@ -282,7 +282,7 @@ def test_past_lists_lock_for_leaders_not_the_operator(client):
     _, items = shift_db.run_with_items(past["id"])
     login_leader(client)
     page = client.get(f"/shift/checklists/run/{past['id']}").data
-    assert "🔒".encode() in page and b'class="item"' not in page
+    assert b"This list closed when its" in page and b'class="item"' not in page
     resp = client.post(f"/shift/item/{items[0]['id']}/toggle", data={"done": "1"},
                        follow_redirects=True)
     assert b"closed" in resp.data
@@ -324,7 +324,7 @@ def test_scorecard_page(client):
     page = client.get("/shift/checklists/scorecard").data.decode()
     assert "Checklist scorecard" in page
     for area in ["Dining Room", "Drive Thru", "Food Safety"]:
-        assert f'<div class="section-label">{area}</div>' in page
+        assert f'<h2>{area}</h2>' in page
     assert "fully done" in page and "Most often missed" in page
     assert b"/shift/checklists/scorecard" in client.get("/shift/checklists").data
 

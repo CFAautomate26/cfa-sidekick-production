@@ -1,64 +1,127 @@
 {% extends "shift/base.html" %}
 {% block title %}History{% endblock %}
+{% block head %}
+<style>
+/* The shared legacy .badge colours come after the b-* ones, so restate them */
+.badge.b-red { background: var(--red-100); color: var(--red-700); }
+.badge.b-green { background: var(--ok-bg); color: var(--ok); }
+.badge.b-tan { background: var(--tan-300); color: var(--tan-ink); }
+.ring circle[stroke-dasharray^="0.0 "] { stroke: none; }
+.days { margin-top: 18px; }
+.pick { margin-top: 12px; max-width: 380px; }
+.pick input[type=date] { min-height: 44px; }
+.pick .btn { min-width: 0; }
+.runs details + details { border-top: 1px solid var(--rule); }
+.runs summary { list-style: none; cursor: pointer; }
+.runs summary::-webkit-details-marker { display: none; }
+.runs summary .chev { transition: transform .15s; }
+.runs details[open] > summary .chev { transform: rotate(90deg); }
+.checked { margin: 0; padding: 2px 16px 10px; background: var(--gray-050); border-top: 1px solid var(--rule); }
+.checked li { list-style: none; display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; font-size: var(--fs-small);
+  line-height: 1.35; color: var(--text-strong); }
+.checked li + li { border-top: 1px solid var(--gray-100); }
+.checked .i { width: 18px; height: 18px; color: var(--gray-400); margin-top: 0; }
+.checked .yes .i { color: var(--ok); }
+.checked .what { flex: 1; min-width: 0; }
+.checked .who { display: block; color: var(--text-muted); font-size: 0.8125rem; margin-top: 1px; }
+.checked .crit { color: var(--red-700); font-weight: 700; }
+.lineup-card { padding: 4px 16px 8px; }
+.lineup-card h3 { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: var(--track-eyebrow);
+  color: var(--text-muted); padding: 10px 0 4px; }
+.pos { display: flex; gap: 10px; padding: 7px 0; font-size: var(--fs-small); border-top: 1px solid var(--gray-100); }
+.pos span { color: var(--text-muted); flex: 0 0 42%; }
+.pos b { color: var(--text-strong); }
+.note .badge { text-transform: capitalize; }
+.note .body { font-size: 0.9375rem; color: var(--text-strong); margin-top: 8px; white-space: pre-line; }
+.note .by { font-size: 0.8125rem; color: var(--text-muted); margin-top: 6px; }
+@media (min-width: 960px) {
+  .cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0 32px; align-items: start; }
+}
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">History</h1>
-<div class="sub">What happened on {{ day }}{{ ' (today)' if day == shift_today }}</div>
-
-<div class="chiprow">
-  {% for d in recent %}
-  <a class="pill small {{ 'on' if d == day }}" href="{{ url_for('shift.history', date=d) }}">{{ 'Today' if d == shift_today else d[5:] }}</a>
-  {% endfor %}
-</div>
-<form method="get" action="{{ url_for('shift.history') }}" class="inline-form" style="margin-bottom:14px;">
-  <input type="date" name="date" value="{{ day }}" max="{{ shift_today }}">
-  <button class="pill" type="submit">Go</button>
-</form>
-
-<div class="section-label">Checklists</div>
-{% for run, items in runs %}
-<div class="card">
-  {% if run.frequency == 'daily' and run.run_date == day %}
-  <h2>{{ run.name }} <span class="progress-note" style="display:inline; margin:0;">{{ run.done }}/{{ run.total }}</span></h2>
-  {% else %}
-  <h2>{{ run.name }} <span class="progress-note" style="display:inline; margin:0;">{{ items | length }} checked this day · {{ run.period_label }}: {{ run.done }}/{{ run.total }}</span></h2>
-  {% endif %}
-  <table class="plain">
-    {% for i in items %}
-    <tr>
-      <td style="width:24px;">{{ '✅' if i.done else '▢' }}</td>
-      <td>{% if i.critical %}<span class="critical-flag">●</span> {% endif %}{{ i.label }}</td>
-      <td style="color:var(--soft); white-space:nowrap;">{% if i.done %}{{ i.done_by }} · {{ check_stamp(i.done_at, day) }}{% endif %}</td>
-    </tr>
+{% set months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] %}
+{% macro short_day(d) %}{{ months[d[5:7] | int - 1] }} {{ d[8:] | int }}{% endmacro %}
+{% set label = 'today' if day == shift_today else ('yesterday' if recent | length > 1 and day == recent[1] else short_day(day)) %}
+<section class="hero compact">
+  <p class="eyebrow">History · {{ short_day(day) }}, {{ day[:4] }}</p>
+  <h1 class="headline">What happened {{ label }}</h1>
+  <p class="triage"><b>{{ runs | length }}</b> checklist{{ 's' if runs | length != 1 }} · <b>{{ notes | length }}</b> note{{ 's' if notes | length != 1 }}{% if lineups %} · lineups for <b>{{ lineups | length }}</b> daypart{{ 's' if lineups | length != 1 }}{% endif %}</p>
+  <nav class="seg days" aria-label="Recent days">
+    {% for d in recent %}
+    <a href="{{ url_for('shift.history', date=d) }}"{% if d == day %} class="on" aria-current="page"{% endif %}>{{ 'Today' if d == shift_today else ('Yesterday' if loop.index0 == 1 else short_day(d)) }}</a>
     {% endfor %}
-  </table>
-</div>
-{% else %}
-<div class="empty">No checklist runs on {{ day }} — nobody opened the app that day.</div>
-{% endfor %}
+  </nav>
+  <form method="get" action="{{ url_for('shift.history') }}" class="inline-form pick">
+    <input type="date" name="date" value="{{ day }}" max="{{ shift_today }}" aria-label="Another day">
+    <button class="btn btn-secondary sm" type="submit">Go</button>
+  </form>
+</section>
 
+<div class="cols">
+<section class="sec">
+  <div class="sec-head"><h2>Checklists</h2></div>
+  {% if runs %}
+  <p class="sec-note">Tap a list to see who checked what.</p>
+  <div class="card list runs">
+    {% for run, items in runs %}
+    {% set crit = items | selectattr('critical') | rejectattr('done') | list | length if run.frequency == 'daily' and run.run_date == day else 0 %}
+    <details>
+      <summary class="row">
+        {{ ring(run.total - run.done, run.total, crit > 0) }}
+        <span class="row-main"><span class="row-title">{{ run.name }}</span>
+          {% if run.frequency == 'daily' and run.run_date == day %}
+          <span class="row-meta">{{ run.done }}/{{ run.total }}{% if run.owner %} · owner {{ run.owner }}{% endif %}{% if run.verified_by %} · ✓ checked by {{ run.verified_by }}{% endif %}</span>
+          {% else %}
+          <span class="row-meta">{{ items | length }} checked this day · {{ run.period_label }}: {{ run.done }}/{{ run.total }}</span>
+          {% endif %}
+        </span>
+        {{ icon('chev', 'chev') }}
+      </summary>
+      <ul class="checked">
+        {% for i in items %}
+        <li class="{{ 'yes' if i.done }}">{{ icon('checkcircle' if i.done else 'circle') }}
+          <span class="what">{% if i.critical %}<span class="crit">● </span>{% endif %}{{ i.label }}
+            {% if i.done %}<span class="who">{{ i.done_by }} · {{ check_stamp(i.done_at, day) }}</span>{% endif %}</span></li>
+        {% endfor %}
+      </ul>
+      <a class="row compact" href="{{ url_for('shift.run_detail', run_id=run.id) }}"><span class="row-main"><span class="row-title">Open the list</span></span>{{ icon('chev', 'chev') }}</a>
+    </details>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">No checklists on {{ short_day(day) }}: nobody opened the app that day.</div>
+  {% endif %}
+</section>
+
+<div class="col">
 {% if lineups %}
-<div class="section-label">Lineups</div>
-{% for dp, lineup in lineups.items() %}
-<div class="card">
-  <h2>{{ DAYPART_LABELS[dp] }}</h2>
-  {% for pid, assignments in lineup.items() %}
-  <div style="display:flex; gap:8px; padding:3px 0; font-size:14px;">
-    <span style="color:var(--soft); flex:0 0 46%;">{{ positions[pid].name if pid in positions else 'Position #' ~ pid }}</span>
-    <strong>{{ assignments | map(attribute='member_name') | join(', ') }}</strong>
+<section class="sec">
+  <div class="sec-head"><h2>Lineups</h2></div>
+  {% for dp, lineup in lineups.items() %}
+  <div class="card lineup-card">
+    <h3>{{ DAYPART_LABELS[dp] }}</h3>
+    {% for pid, assignments in lineup.items() %}
+    <div class="pos"><span>{{ positions[pid].name if pid in positions else 'Position #' ~ pid }}</span>
+      <b>{{ assignments | map(attribute='member_name') | join(', ') }}</b></div>
+    {% endfor %}
   </div>
   {% endfor %}
-</div>
-{% endfor %}
+</section>
 {% endif %}
 
-<div class="section-label">Notes</div>
-{% for n in notes %}
-<div class="card">
-  <span class="note-cat cat-{{ n.category }}">{{ n.category }}</span>
-  <div style="font-size:14px; margin-top:6px; white-space:pre-line;">{{ n.body }}</div>
-  <div class="progress-note">{{ n.author }} · {{ n.created_at }}</div>
+<section class="sec">
+  <div class="sec-head"><h2>Notes</h2></div>
+  {% for n in notes %}
+  <div class="card note">
+    <span class="badge {{ 'b-green' if n.category == 'win' else ('b-red' if n.category in ['issue', 'equipment', 'food-safety'] else 'b-tan') }}">{{ n.category | replace('-', ' ') }}</span>
+    <div class="body">{{ n.body }}</div>
+    <div class="by">{{ n.author }} · {{ n.created_at }}</div>
+  </div>
+  {% else %}
+  <div class="empty">No shift notes that day.</div>
+  {% endfor %}
+</section>
 </div>
-{% else %}
-<div class="empty">No notes on {{ day }}.</div>
-{% endfor %}
+</div>
 {% endblock %}

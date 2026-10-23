@@ -1,88 +1,130 @@
 {% extends "shift/base.html" %}
 {% block title %}{{ run.name }}{% endblock %}
+{% block head %}
+<style>
+/* One checklist. The script in shift/base.html drives this page through
+   its hooks — form.item, .itemrow, .checkmark, .meta, [data-progress],
+   .bar span, [data-progress-text], [data-critical] — so keep those names. */
+.prog { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 18px; }
+.prog b { font-size: 1.125rem; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.run-hero .bar { height: 8px; margin-top: 8px; }
+.run-hero .callout { margin-top: 14px; }
+.lock { margin-top: 18px; }
+.run-meta { margin-top: 22px; }
+.run-meta .row { align-items: center; flex-wrap: wrap; }
+.run-meta .row-main { min-width: 150px; }
+.run-meta .lead-ico.green { background: var(--ok-bg); color: var(--ok); }
+.owner-form { margin-top: 8px; }
+.owner-form input[type=text] { min-height: 44px; }
+.owner-form .btn { min-width: 0; }
+.run-meta form.verify { margin: 0; }
+.run-meta form.verify .btn { min-width: 0; }
+.items { padding: 0 16px; margin-top: 12px; }
+.items .checkmark .i { width: 16px; height: 16px; stroke-width: 2.6; }
+div.itemrow { display: flex; align-items: flex-start; gap: 12px; padding: 14px 2px; min-height: 58px;
+  border-bottom: 1px solid var(--rule); }
+div.itemrow:last-child { border-bottom: 0; }
+.itemrow .label { line-height: 1.35; padding-top: 3px; }
+/* The stamp sits inside .label (the script fills it in), so keep the done
+   line-through off it: an inline-block never inherits the decoration. */
+.itemrow .meta { display: inline-block; width: 100%; margin-top: 3px; }
+.itemrow .meta:empty { display: none; }
+.itemrow .meta .miss { color: var(--red-700); }
+.hint { font-size: var(--fs-small); color: var(--text-muted); margin: 4px 2px 0; }
+.more-links { margin-top: 28px; }
+/* Office desktop: a list reads best in a column, not across 1120px */
+@media (min-width: 960px) { .run-hero, .lock, .run-meta, .items, .hint, .more-links { max-width: 760px; } }
+@media print { .more-links, .hint, .owner-form .btn, form.verify { display: none !important; } }
+</style>
+{% endblock %}
 {% block content %}
 {% set done_count = items | selectattr('done') | list | length %}
 {% set crit_left = items | selectattr('critical') | rejectattr('done') | list | length %}
-<div data-progress data-stamp-from="{{ 11 if run.frequency == 'daily' and run.is_current else 5 }}">
-  <h1 class="page">{{ run.name }}</h1>
-  <div class="sub">{{ run.period_label if run.frequency != 'daily' else run.run_date }}
-    · {{ FREQUENCY_LABELS[run.frequency] }}{% if run.frequency == 'daily' %} · {{ DAYPART_LABELS[run.daypart] }}{% endif %}
-    · {{ run.area }}</div>
-  <div class="bar {{ 'full' if done_count == items|length and items }}">
-    <span style="width: {{ (done_count / items|length * 100) | round if items else 0 }}%"></span>
+{% set months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] %}
+{% set part = DAYPART_LABELS[run.daypart].split(' (')[0] if run.daypart in DAYPART_LABELS else run.daypart %}
+<section class="hero compact run-hero" data-progress data-stamp-from="{{ 11 if run.frequency == 'daily' and run.is_current else 5 }}">
+  <p class="eyebrow">Checklists · {% if run.frequency != 'daily' %}{{ run.period_label }}{% elif run.run_date == shift_today %}Today{% else %}{{ months[run.run_date[5:7] | int - 1] }} {{ run.run_date[8:] | int }}, {{ run.run_date[:4] }}{% endif %}</p>
+  <h1 class="headline">{{ run.name }}</h1>
+  <p class="triage">{{ FREQUENCY_LABELS[run.frequency] }} · {{ part }} · {{ 'All areas' if run.area == 'All' else run.area }}</p>
+  <div class="prog">
+    <b data-progress-text>{{ done_count }} of {{ items | length }} done</b>
   </div>
-  <div class="progress-note" style="margin-bottom:4px;"><span data-progress-text>{{ done_count }} of {{ items | length }} done</span></div>
-  <div class="critical-flag" data-critical {% if not crit_left %}style="display:none"{% endif %}>
-    ● Red-dot items are food-safety / cash critical — don't skip them.
-  </div>
-</div>
+  <span class="bar {{ 'full' if done_count == items | length and items }}"><span style="width: {{ (done_count / items | length * 100) | round if items else 0 }}%"></span></span>
+  <p class="callout warm" data-critical {% if not crit_left %}style="display:none"{% endif %}>{{ icon('alert') }}<span>Red-dot items are food-safety or cash critical — don't skip them.</span></p>
+</section>
 
 {% if not can_edit %}
-<div class="flash">🔒 This list closed when its {{ 'day' if run.frequency == 'daily' else ('week' if run.frequency == 'weekly' else 'month') }}
-ended, so the scorecard shows what was actually done. Only the Operator can correct it.</div>
+<p class="callout tan lock">{{ icon('lock') }}<span>This list closed when its {{ 'day' if run.frequency == 'daily' else ('week' if run.frequency == 'weekly' else 'month') }}
+ended, so the scorecard shows what was actually done. Only the Operator can correct it.</span></p>
 {% elif not run.is_current %}
-<div class="flash">This list's period has ended — you're correcting it as the Operator.</div>
+<p class="callout lock">{{ icon('info') }}<span>This list's period has ended — you're correcting it as the Operator.</span></p>
 {% endif %}
 
-<div class="card" style="margin-top:12px;">
-  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    <span style="font-weight:700; font-size:14px; flex:0 0 auto;">Owner</span>
-    {% if can_edit %}
-    <form method="post" action="{{ url_for('shift.run_owner', run_id=run.id) }}" class="inline-form" style="flex:1; min-width:200px;">
-      <input type="text" name="owner" value="{{ run.owner or '' }}" list="roster-names"
-             autocomplete="off" placeholder="Who owns this station?">
-      <button class="pill small" type="submit">Save</button>
-    </form>
-    <datalist id="roster-names">{% for n in roster %}<option value="{{ n }}">{% endfor %}</datalist>
-    {% else %}
-    <span style="font-size:14px;">{{ run.owner or '—' }}</span>
-    {% endif %}
-  </div>
-  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
-    <span style="font-weight:700; font-size:14px;">Manager check</span>
-    {% if run.verified_by %}
-      <span style="font-size:14px;">✓ {{ run.verified_by }} · {{ run.verified_at[5:] }}</span>
+<div class="card list run-meta">
+  <div class="row">
+    <span class="lead-ico">{{ icon('user') }}</span>
+    <div class="row-main">
+      <span class="row-title">Owner</span>
       {% if can_edit %}
-      <form method="post" action="{{ url_for('shift.run_verify', run_id=run.id) }}">
-        <input type="hidden" name="verified" value="0">
-        <button class="pill small ghost" type="submit">Undo</button>
+      <form method="post" action="{{ url_for('shift.run_owner', run_id=run.id) }}" class="inline-form owner-form">
+        <input type="text" name="owner" value="{{ run.owner or '' }}" list="roster-names" aria-label="Owner"
+               autocomplete="off" placeholder="Who owns this station?">
+        <button class="btn btn-secondary sm" type="submit">Save</button>
       </form>
+      <datalist id="roster-names">{% for n in roster %}<option value="{{ n }}">{% endfor %}</datalist>
+      {% else %}
+      <span class="row-meta">{{ run.owner or 'Nobody was set' }}</span>
       {% endif %}
-    {% elif can_edit %}
-      <form method="post" action="{{ url_for('shift.run_verify', run_id=run.id) }}">
-        <input type="hidden" name="verified" value="1">
-        <button class="pill small primary" type="submit">✓ I checked this station</button>
-      </form>
-    {% else %}
-      <span style="font-size:14px; color:var(--soft);">not checked</span>
+    </div>
+  </div>
+  <div class="row">
+    <span class="lead-ico{{ ' green' if run.verified_by }}">{{ icon('checkcircle') }}</span>
+    <div class="row-main">
+      <span class="row-title">Manager check</span>
+      <span class="row-meta">{% if run.verified_by %}✓ {{ run.verified_by }} · {{ run.verified_at[5:] }}{% elif can_edit %}A leader walked the station and it's right{% else %}not checked{% endif %}</span>
+    </div>
+    {% if run.verified_by and can_edit %}
+    <form method="post" action="{{ url_for('shift.run_verify', run_id=run.id) }}" class="verify">
+      <input type="hidden" name="verified" value="0">
+      <button class="btn btn-secondary sm" type="submit">Undo</button>
+    </form>
+    {% elif can_edit and not run.verified_by %}
+    <form method="post" action="{{ url_for('shift.run_verify', run_id=run.id) }}" class="verify">
+      <input type="hidden" name="verified" value="1">
+      <button class="btn btn-primary sm" type="submit">I checked this station</button>
+    </form>
     {% endif %}
   </div>
 </div>
 
-<div class="card" style="margin-top:12px; padding: 2px 14px;">
+<div class="card items">
   {% for i in items %}
   {% if can_edit %}
   <form class="item" method="post" action="{{ url_for('shift.toggle_item', item_id=i.id) }}" id="item-{{ i.id }}">
     <input type="hidden" name="done" value="{{ '0' if i.done else '1' }}">
     <button type="submit" class="itemrow {{ 'done' if i.done }}">
-      <span class="checkmark">✓</span>
+      <span class="checkmark">{{ icon('check') }}</span>
       <span class="label">{% if i.critical %}<span class="crit">● </span>{% endif %}{{ i.label }}
         <span class="meta">{% if i.done %}done by {{ i.done_by }} · {{ check_stamp(i.done_at, run.run_date if run.frequency == 'daily' else none) }}{% endif %}</span>
       </span>
     </button>
   </form>
   {% else %}
-  <div class="itemrow {{ 'done' if i.done }}" id="item-{{ i.id }}"
-       style="display:flex; align-items:flex-start; gap:12px; padding:13px 2px; {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}">
-    <span class="checkmark">✓</span>
+  <div class="itemrow {{ 'done' if i.done }}" id="item-{{ i.id }}">
+    <span class="checkmark">{{ icon('check') }}</span>
     <span class="label">{% if i.critical %}<span class="crit">● </span>{% endif %}{{ i.label }}
-      <span class="meta">{% if i.done %}done by {{ i.done_by }} · {{ check_stamp(i.done_at, run.run_date if run.frequency == 'daily' else none) }}{% else %}not done{% endif %}</span>
+      <span class="meta">{% if i.done %}done by {{ i.done_by }} · {{ check_stamp(i.done_at, run.run_date if run.frequency == 'daily' else none) }}{% else %}<b class="miss">not done</b>{% endif %}</span>
     </span>
   </div>
   {% endif %}
   {% endfor %}
 </div>
-<div class="sub">{% if can_edit %}Tap a row to check it off — tap again to undo. Every
-check is stamped with your name.{% endif %}
-<a href="{{ url_for('shift.checklist_scorecard') }}">📊 How consistently is this done?</a></div>
+{% if can_edit %}<p class="hint">Tap a row to check it off — tap again to undo. Every check is stamped with your name.</p>{% endif %}
+
+<div class="card list more-links">
+  <a class="row compact" href="{{ url_for('shift.checklists', daypart=run.daypart if run.daypart in DAYPARTS else none, date=none if run.is_current else run.run_date, _anchor='period' if run.frequency != 'daily' else (none if run.daypart in DAYPARTS else 'allday')) }}"><span class="lead-ico">{{ icon('clip') }}</span>
+    <span class="row-main"><span class="row-title">All checklists</span></span>{{ icon('chev', 'chev') }}</a>
+  <a class="row compact" href="{{ url_for('shift.checklist_scorecard') }}"><span class="lead-ico">{{ icon('target') }}</span>
+    <span class="row-main"><span class="row-title">Scorecard</span><span class="row-meta">How consistently is this done?</span></span>{{ icon('chev', 'chev') }}</a>
+</div>
 {% endblock %}

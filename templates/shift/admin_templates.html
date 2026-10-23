@@ -1,26 +1,67 @@
 {% extends "shift/base.html" %}
 {% block title %}Checklist templates{% endblock %}
+{% block head %}
+<style>
+.new { margin-top: 18px; }
+.tpl .row { padding-right: 12px; }
+.tpl .row-main { color: inherit; }
+.tpl .row-title { color: var(--nav); }
+.tpl form { margin: 0; flex: 0 0 auto; }
+.tpl .btn { min-width: 0; }
+.tpl.retired .row-title { color: var(--text-muted); }
+.more-links { margin-top: 28px; }
+/* Office desktop: two rows across, hairlines between */
+@media (min-width: 960px) {
+  .tpl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .tpl > .row { border-top: 1px solid var(--rule); }
+  .tpl > .row:nth-child(-n+2) { border-top: 0; }
+  .tpl > .row:nth-child(odd) { border-right: 1px solid var(--rule); }
+}
+.sec-head h2 .n { font-size: 1rem; font-weight: 700; color: var(--text-muted); letter-spacing: 0; }
+</style>
+{% endblock %}
 {% block content %}
-<h1 class="page">Checklist templates</h1>
-<div class="sub">These generate the checklists. Edits show on lists started
-after the change — history is never rewritten.</div>
+<section class="hero compact">
+  <p class="eyebrow">Checklists · Admin</p>
+  <h1 class="headline">Checklist templates</h1>
+  <p class="triage">Edits show on lists started after the change — history is never rewritten.</p>
+  <a class="btn btn-primary new" href="{{ url_for('shift.admin_template_new') }}">{{ icon('plus', 'sm') }} New checklist</a>
+</section>
 
-<a class="pill primary" href="{{ url_for('shift.admin_template_new') }}">+ New checklist</a>
-
-<div style="margin-top:14px;">
-{% for t in templates %}
-<div class="card" {% if not t.active %}style="opacity:0.6;"{% endif %}>
-  <div style="display:flex; align-items:center; gap:8px;">
-    <a href="{{ url_for('shift.admin_template_edit', template_id=t.id) }}" style="flex:1; font-weight:700; text-decoration:none;">{{ t.name }}</a>
-    <form method="post" action="{{ url_for('shift.admin_template_toggle', template_id=t.id) }}">
-      <input type="hidden" name="active" value="{{ '0' if t.active else '1' }}">
-      <button class="pill small ghost" type="submit">{{ 'Retire' if t.active else 'Restore' }}</button>
-    </form>
-  </div>
-  <div class="progress-note" style="margin:2px 0 0;">{{ FREQUENCY_LABELS.get(t.frequency, 'Daily') }}{% if t.frequency == 'weekly' and t.due_weekday is not none %} ({{ WEEKDAY_LABELS[t.due_weekday][:3] }}){% endif %}
-    · {{ DAYPART_LABELS.get(t.daypart, t.daypart) }} · {{ t.area }} · {{ t.item_count }} items</div>
+{% macro tpl_row(t) %}
+<div class="row">
+  <a class="row-main" href="{{ url_for('shift.admin_template_edit', template_id=t.id) }}">
+    <span class="row-title">{{ t.name }}</span>
+    <span class="row-meta">{{ FREQUENCY_LABELS.get(t.frequency, 'Daily') }}{% if t.frequency == 'weekly' and t.due_weekday is not none %} ({{ WEEKDAY_LABELS[t.due_weekday][:3] }}){% endif %}
+      · {{ DAYPART_LABELS.get(t.daypart, t.daypart) }} · {{ t.area }} · {{ t.item_count }} items</span>
+  </a>
+  <form method="post" action="{{ url_for('shift.admin_template_toggle', template_id=t.id) }}">
+    <input type="hidden" name="active" value="{{ '0' if t.active else '1' }}">
+    <button class="btn btn-secondary sm" type="submit">{{ 'Retire' if t.active else 'Restore' }}</button>
+  </form>
 </div>
+{% endmacro %}
+
+{% set active = templates | selectattr('active') | list %}
+{% set retired = templates | rejectattr('active') | list %}
+{% for heading, rows in [
+     ('Daily', active | rejectattr('frequency', 'in', ['weekly', 'monthly']) | list),
+     ('Weekly', active | selectattr('frequency', 'equalto', 'weekly') | list),
+     ('Monthly', active | selectattr('frequency', 'equalto', 'monthly') | list),
+     ('Retired', retired)] if rows %}
+<section class="sec">
+  <div class="sec-head"><h2>{{ heading }} <span class="n">{{ rows | length }}</span></h2></div>
+  {% if heading == 'Retired' %}<p class="sec-note">Not on any day's lists. Restore one to bring it back.</p>{% endif %}
+  <div class="card list tpl{{ ' retired' if heading == 'Retired' }}">{% for t in rows %}{{ tpl_row(t) }}{% endfor %}</div>
+</section>
+{% else %}
+<div class="empty" style="margin-top:22px;">No checklist templates yet.</div>
 {% endfor %}
+
+<div class="card list more-links">
+  <a class="row compact" href="{{ url_for('shift.checklists') }}"><span class="lead-ico">{{ icon('clip') }}</span>
+    <span class="row-main"><span class="row-title">All checklists</span></span>{{ icon('chev', 'chev') }}</a>
+  <a class="row compact" href="{{ url_for('shift.admin') }}"><span class="lead-ico">{{ icon('key') }}</span>
+    <span class="row-main"><span class="row-title">Leader logins</span></span>{{ icon('chev', 'chev') }}</a>
 </div>
-<a class="pill small ghost" href="{{ url_for('shift.admin') }}">← Admin</a>
 {% endblock %}

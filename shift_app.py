@@ -773,11 +773,110 @@ def _can_edit_run(run: dict) -> bool:
 
 @shift_bp.route("/checklists")
 def checklists():
+    """One daypart's checklists (?daypart=, default the one we're in) on one
+    day (?date=, default today). Live (today, the current daypart) it leads
+    with the list to open now: a read-only preview of what's left. Ticking
+    stays on the run page, so the checklist script never meets a second
+    progress block. Then the rest that's due now (critical first, with
+    earlier dayparts' lists still owing critical items and the weekly and
+    monthly lists that are due), the all-day station sheets, what's coming
+    up later today, and this week's and month's lists."""
+    today = shift_db.today_local()
     day = _valid_date(request.args.get("date"))
-    if day == shift_db.today_local():
+    is_today = day == today
+    if is_today:
         shift_db.ensure_runs_for_date(day)
-    return render_template("shift/checklists.html", day=day,
-                           runs=shift_db.runs_for_date(day))
+    runs = shift_db.runs_for_date(day)
+    parts = shift_db.DAYPARTS
+    now_part = shift_db.current_daypart()
+    daypart = _valid_checklist_daypart(request.args.get("daypart"))
+    if daypart not in parts:                    # all-day sheets show on every daypart
+        daypart = now_part
+    pos, now_pos = parts.index(daypart), parts.index(now_part)
+    live = is_today and daypart == now_part
+
+    def short(dp: str) -> str:
+        return shift_db.DAYPART_LABELS[dp].split(" (")[0]
+
+    def nice(iso: str, weekday: bool = False) -> str:
+        d = date.fromisoformat(iso)
+        return (f"{d:%a}, " if weekday else "") + f"{d:%b} {d.day}"
+
+    def critical_first(rows: list[dict]) -> list[dict]:
+        return sorted(rows, key=lambda r: not r["critical_remaining"])   # stable
+
+    weekday = date.fromisoformat(day).weekday()
+    for r in runs:
+        r["finished"] = bool(r["total"]) and r["done"] == r["total"]
+        r["daypart_name"] = short(r["daypart"]) if r["daypart"] in parts else "All day"
+        r["due_badge"] = None
+        if r["frequency"] == "monthly":
+            r["due_by"] = nice(r["period_end"])
+        if not is_today or r["frequency"] == "daily" or r["finished"]:
+            continue
+        if r["frequency"] == "weekly":
+            due_day = r["due_weekday"] if r["due_weekday"] is not None else 5
+            r["due_badge"] = (f"Due {shift_db.WEEKDAY_LABELS[due_day]}" if weekday < due_day
+                              else "Due today" if weekday == due_day or r["due_weekday"] is None
+                              else "Overdue")
+        else:
+            left = (date.fromisoformat(r["period_end"]) - date.fromisoformat(day)).days
+            r["due_badge"] = ("Due today" if left <= 0
+                              else f"{left} day{'s' if left != 1 else ''} left")
+
+    daily = [r for r in runs if r["frequency"] == "daily"]
+    allday = [r for r in daily if r["daypart"] == "allday"]
+    mine = [r for r in daily if r["daypart"] == daypart]
+    open_now, also_due, done_now, coming = None, [], [], []
+    if live:
+        current = critical_first([r for r in mine if not r["finished"]])
+        done_now = [r for r in mine if r["finished"]]
+        leftovers = [r for r in daily if r["daypart"] in parts[:pos]
+                     and r["critical_remaining"] and not r["finished"]]
+        for r in leftovers:
+            r["from_daypart"] = r["daypart_name"]
+        open_now = current[0] if current else None
+        also_due = critical_first(current[1:] + leftovers + _due_period_runs(runs, day))
+        if open_now is None and also_due:
+            open_now = also_due.pop(0)
+        coming = [r for r in daily if r["daypart"] in parts[pos + 1:]]
+
+    open_items, open_more = [], 0
+    if open_now:
+        _, items = shift_db.run_with_items(open_now["id"])
+        left = sorted((i for i in items if not i["done"]), key=lambda i: not i["critical"])
+        open_items, open_more = left[:3], max(len(left) - 3, 0)
+
+    # The scorecard's headline number: daily-list items checked off over the
+    # last 7 finished open days (lists lock when their day ends, so it's real).
+    score_done = score_total = score_days = 0
+    for card in shift_db.checklist_scorecard():
+        if card["frequency"] == "daily":
+            recent = card["history"][:7]
+            score_days = max(score_days, len(recent))
+            score_done += sum(h["done"] for h in recent)
+            score_total += sum(h["total"] for h in recent)
+
+    lists = (([open_now] if open_now else []) + also_due) if live else mine
+    return render_template(
+        "shift/checklists.html", day=day, runs=runs, is_today=is_today, live=live,
+        daypart=daypart, now_part=now_part,
+        when=("past" if day < today else "future" if day > today
+              else "now" if live else "later" if pos > now_pos else "earlier"),
+        day_label=nice(day, weekday=True), part_name=short(daypart),
+        part_hours=shift_db.DAYPART_LABELS[daypart].partition(" (")[2].rstrip(")"),
+        daypart_names={dp: short(dp) for dp in parts},
+        mine=mine, open_now=open_now, open_items=open_items, open_more=open_more,
+        also_due=also_due, done_now=done_now, allday=allday, coming=coming,
+        week=[r for r in runs if r["frequency"] == "weekly"],
+        month=[r for r in runs if r["frequency"] == "monthly"],
+        list_count=len(lists), finished_count=sum(1 for r in mine if r["finished"]),
+        critical_left=sum(r["critical_remaining"] for r in lists),
+        allday_done=sum(r["done"] for r in allday),
+        allday_total=sum(r["total"] for r in allday),
+        score_pct=round(score_done / score_total * 100) if score_total else None,
+        score_days=score_days,
+    )
 
 
 @shift_bp.route("/checklists/scorecard")
