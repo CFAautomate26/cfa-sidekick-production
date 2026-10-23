@@ -79,7 +79,11 @@ Canada.
   BOH Operations / Leadership Development, with sections inside; drafts →
   versioned publishing; required reading with append-only "I've received
   and read this version" confirmations; search; photos/files; Word import;
-  yearly-review and lawyer-review flags; activity log). Team members sign
+  Operator-only library-bundle import (a zip of `.md` pages with a
+  `---` header — how the confidential Chick-fil-A Operational Requirements
+  Guide is loaded, since this repo is public and must never hold its text);
+  yearly-review and lawyer-review flags; activity log). Page text is a
+  Markdown subset incl. `| a | b |` tables and `~~struck~~` text. Team members sign
   in with first name + clock-in number (`hub_access`, HMAC under
   `meta.hub_pepper`, Operator-granted, never exported or logged); leaders
   reuse the Shift Lead session (`shift_app.leader_session_valid`). Editors
