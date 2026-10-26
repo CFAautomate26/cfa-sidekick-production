@@ -3,6 +3,7 @@ Checklists tile counts from) and the calm page a leader lands on — a
 greeting, today's two goals (leadership + operational), their to-dos, and
 the section tiles."""
 
+import re
 from datetime import datetime
 from html import escape
 
@@ -446,6 +447,46 @@ def test_tiles_link_every_section_and_count_quietly(client, clock):
     client.post("/shift/logout")
     login_leader(client)
     assert "3 active" in section(today_page(client), "tiles-head")  # her own counts
+
+
+def recovery_tile(client):
+    page = today_page(client)
+    tile = re.search(r'<a class="tile" href="/shift/recovery">.*?</a>', page, re.S)
+    assert tile, "no Guest Recovery tile"
+    return page, tile.group(0)
+
+
+def test_guest_recovery_tile_counts_guests_still_to_reach(client, clock):
+    make_leader(client)
+    login_leader(client)
+    _, tile = recovery_tile(client)
+    assert "Guest Recovery" in tile and "Log a guest" in tile
+    assert 'class="count"' not in tile                         # nothing waiting: calm
+    linda = shift_db.add_recovery("Linda R.", "519-555-0142", "", "order-error",
+                                  "free-entree-card", "Missing 8-ct nuggets",
+                                  follow_up=True, by="Maya")
+    sam = shift_db.add_recovery("Sam P.", "", "", "food-quality", "remade-now",
+                                "Cold fries", follow_up=True, by="Maya")
+    shift_db.add_recovery("Pat D.", "", "", "order-error", "remade-now", "",
+                          follow_up=False, by="Maya", resolved_now=True)  # never counted
+    page, tile = recovery_tile(client)
+    assert '<span class="count" aria-hidden="true">2</span>' in tile and "2 open" in tile
+    assert "coming back" not in tile
+    for name in ("Linda R.", "Sam P.", "519-555-0142"):          # counts, never guests
+        assert name not in page
+    shift_db.set_recovery_contacted(sam, True, "", "Maya")
+    _, tile = recovery_tile(client)
+    assert '<span class="count" aria-hidden="true">1</span>' in tile
+    assert "1 open · 1 coming back" in tile
+    shift_db.set_recovery_contacted(linda, True, "", "Maya")
+    _, tile = recovery_tile(client)                             # reached: no red count
+    assert 'class="count"' not in tile and "2 coming back" in tile
+    shift_db.set_recovery_resolved(linda, True, "Came back", "Maya")
+    shift_db.set_recovery_resolved(sam, True, "Came back", "Maya")
+    assert "Log a guest" in recovery_tile(client)[1]
+    client.post("/shift/logout")
+    login_operator(client)                                      # the Operator has it too
+    assert "Log a guest" in recovery_tile(client)[1]
 
 
 def test_today_without_the_hub(client, clock, monkeypatch):
