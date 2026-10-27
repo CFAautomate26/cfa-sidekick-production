@@ -5,6 +5,7 @@ real data, the compact hero, privacy kept — not pixel details."""
 
 import os
 import re
+from datetime import datetime
 
 import pytest
 
@@ -388,7 +389,9 @@ def test_notes_group_by_day_with_category_badges(client):
     assert "data-draft" in page and 'name="category"' in page and 'name="daypart"' in page
 
 
-def test_announcements_split_new_and_seen(client):
+def test_announcements_split_new_and_seen(client, monkeypatch):
+    # Before the Nov 1 expiry below, whatever day the suite runs.
+    monkeypatch.setattr(shift_db, "now_local", lambda: datetime(2026, 10, 23, 12, 7))
     shift_db.add_leader("Maya", "4721", "lead")
     shift_db.add_announcement("Pretzel launch Monday", "Operator", True, "")
     shift_db.add_announcement("Schedules due Nov 1", "Operator", False, "2026-11-01")
