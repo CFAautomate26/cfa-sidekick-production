@@ -2,6 +2,7 @@
 
 import io
 import json
+from datetime import datetime
 
 import pytest
 
@@ -229,7 +230,12 @@ def test_login_redirect_next_is_sanitized(client):
 
 # --- checklists ------------------------------------------------------------
 
-def test_today_instantiates_and_lists_runs(client):
+# A Friday lunch: on a closed Sunday no weekly/monthly list starts, by design.
+OPEN_DAY = datetime(2026, 10, 23, 12, 7)
+
+
+def test_today_instantiates_and_lists_runs(client, monkeypatch):
+    monkeypatch.setattr(shift_db, "now_local", lambda: OPEN_DAY)
     login_operator(client)
     resp = client.get("/shift/")
     assert resp.status_code == 200
@@ -298,7 +304,8 @@ def test_past_lists_lock_for_leaders_not_the_operator(client):
     assert shift_db.run_with_items(past["id"])[1][0]["done"]
 
 
-def test_owner_and_manager_check_routes(client):
+def test_owner_and_manager_check_routes(client, monkeypatch):
+    monkeypatch.setattr(shift_db, "now_local", lambda: OPEN_DAY)
     make_leader(client)
     login_leader(client)
     client.get("/shift/")

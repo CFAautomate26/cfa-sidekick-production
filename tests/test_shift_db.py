@@ -1161,7 +1161,8 @@ def test_retired_stretch_is_not_counted(isolated_db):
         ("2026-09-28", 8), ("2026-09-21", 0)]
 
 
-def test_retired_period_list_drops_off_until_worked(isolated_db):
+def test_retired_period_list_drops_off_until_worked(isolated_db, monkeypatch):
+    monkeypatch.setattr(shift_db, "today_local", lambda: "2026-10-21")  # mid-week
     _do("2026-10-20", "Drive Thru — Weekly", 0)
     _do("2026-10-20", "Dining Room & Washrooms — Weekly", 1)
     for t in shift_db.all_templates():
@@ -1218,6 +1219,7 @@ def test_lists_retired_before_the_log_keep_their_missed_runs(isolated_db, monkey
 
 
 def test_off_schedule_period_runs(isolated_db, monkeypatch):
+    monkeypatch.setattr(shift_db, "today_local", lambda: "2026-10-21")  # mid-week
     _do("2026-10-06", "Drive Thru — Weekly", 0)            # a missed past week
     _do("2026-10-20", "Drive Thru — Weekly", 0)            # this week, nothing yet
     tid = next(t["id"] for t in shift_db.all_templates()

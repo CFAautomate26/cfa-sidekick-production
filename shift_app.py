@@ -449,6 +449,7 @@ def today():
                   "total": sum(m["total"] for m in modules)}
     else:
         course = {"leaders": len(shift_db.leader_course_summary())}
+    open_recs, coming_back, _ = shift_db.recovery_feed(resolved_limit=0)
 
     return render_template(
         "shift/today.html",
@@ -478,6 +479,8 @@ def today():
         hub_on=teamhub_nav.hub_up(),
         goal_count=goal_count,
         course=course,
+        recoveries_open=len(open_recs),
+        recoveries_back=len(coming_back),
         day=day,
         short_date=_short_date,
     )

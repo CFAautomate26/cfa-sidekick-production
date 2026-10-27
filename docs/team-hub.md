@@ -23,8 +23,9 @@ home-screen icons and every old link keep working.
 | **Meetings** | leaders | Your 1:1 agenda with the Operator, 1:1s with your team, to-dos. Private to each leader and the Operator. |
 | **Leadership Development** | leaders | The 48-lesson course, plus the leadership library pages. |
 
-Shift notes, guest recovery, announcements, shout-outs, the roster and
-history are in the ☰ menu; admin leaders also see Manage pages and Leader
+Guest recovery is a tile on Today (red count while a guest is waiting to
+be reached) and in the ☰ menu. Shift notes, announcements, shout-outs, the
+roster and history are in the ☰ menu; admin leaders also see Manage pages and Leader
 logins & checklist templates; the Operator also sees Backups, Team Hub
 access (clock-in numbers) and Categories.
 

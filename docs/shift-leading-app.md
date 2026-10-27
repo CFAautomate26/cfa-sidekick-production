@@ -9,10 +9,11 @@ deployment. Team Hub's look, navigation and sign-in are described in
 - **Today** — a calm home: a greeting, **today's two goals** (a
   leadership goal and an operational goal for the leader's area of
   ownership, set when they sign in and ticked off as they hit them), their
-  open to-dos, and a tile into every section. Checklists, guests, the
-  lineup, notes and announcements live on their own pages; Today only
-  carries a quiet count on each tile and one link when an announcement is
-  unread. Daily goals are private to each leader and the Operator (like
+  open to-dos, and a tile into every section (Guest Recovery's tile shows
+  a red count while a guest is still waiting to be reached). Checklists,
+  guests, the lineup, notes and announcements live on their own pages;
+  Today only carries a quiet count on each tile and one link when an
+  announcement is unread. Daily goals are private to each leader and the Operator (like
   1:1s); the Operator sees every leader's on Goals › Daily goals, and each
   leader sees their own last week there.
 - **Shift checklists** — FOH/BOH opening, breakfast→lunch transition,
@@ -93,7 +94,8 @@ deployment. Team Hub's look, navigation and sign-in are described in
   quality, wait, service…), and the make-it-right remedy being provided
   (remade on the spot, refund, free entrée card, dessert/drink, catering
   credit…), plus whether the guest expects a call-back. Open recoveries
-  stay on the Recovery page (with a count in the ☰ menu) until someone
+  stay on the Recovery page (with a count on Today's Guest Recovery tile
+  and in the ☰ menu) until someone
   resolves them (stamped
   who/when, with a note on how it was closed); every leader sees the
   28-day what-keeps-going-wrong breakdown. A middle state covers the common case

@@ -99,6 +99,11 @@ ART.update({
     "today": f'<rect x="10" y="14" width="52" height="46" rx="6" fill="{W_}" stroke="{N_}" stroke-width="3"/>'
              f'<path d="M10 26h52" stroke="{N_}" stroke-width="3"/><path d="M23 9v10M49 9v10" stroke="{N_}" stroke-width="3" stroke-linecap="round"/>'
              f'<circle cx="36" cy="43" r="9" fill="{R_}"/>',
+    # Guest recovery: a heart inside a coming-back arrow (make it right,
+    # win the guest back).
+    "recovery": f'<path d="M57.5 30A23 23 0 1 0 59 40" fill="none" stroke="{N_}" stroke-width="3.2" stroke-linecap="round"/>'
+                f'<path d="M50 29.5l8 .8 1.6-8" fill="none" stroke="{N_}" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>'
+                f'<path d="M36 46.5s-14-8.3-14-17.9a7.7 7.7 0 0 1 14-4.8 7.7 7.7 0 0 1 14 4.8c0 9.6-14 17.9-14 17.9z" fill="{R_}"/>',
 })
 
 
