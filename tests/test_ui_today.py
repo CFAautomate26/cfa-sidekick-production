@@ -383,7 +383,7 @@ def test_operator_home_shows_team_line_and_handed_out_todos(client, clock):
     assert "Daniel · " in todos and "Overdue · was due Tue, Oct 20" in todos
     assert "Maya · " in todos and "Due today" in todos
     assert "own reminder" not in todos                      # not handed out by the Operator
-    assert 'href="/shift/todo">All 2</a>' in todos
+    assert 'href="/shift/oneonone#todos">All 2</a>' in todos     # Meetings › You assigned
 
 
 def test_leader_todos_tick_back_to_today(client, clock):
@@ -490,6 +490,15 @@ def test_todos_tile_and_menu_word(client, clock):
     tile = todos_tile(client)
     assert 'href="/shift/todo"' in tile and "4 open · 2 overdue" in tile
     assert '<span class="count">4</span>' in menu_word(client, "To-dos")
+    admin = make_leader(client, "Avery", "2222", role="admin")   # an admin leader: their own
+    shift_db.add_task(admin, "Avery's one", "", None, "Operator")
+    login_leader(client, "Avery", "2222")
+    tile = todos_tile(client)
+    assert f'href="/shift/todo/{admin}"' in tile and "1 open" in tile and "overdue" not in tile
+    assert '<span class="count">1</span>' in menu_word(client, "To-dos")
+    client.post("/shift/logout")
+    login_operator(client)
+    shift_db.set_task_done(shift_db.tasks_for_leader(admin)[0][0]["id"], True, "Avery")
     shift_db.set_leader_active(daniel, False)                    # a departed leader's
     assert "3 open · 1 overdue" in todos_tile(client)            # don't count
     for t in shift_db.tasks_for_leader(maya)[0]:

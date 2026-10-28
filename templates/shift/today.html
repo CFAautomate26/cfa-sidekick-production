@@ -126,7 +126,7 @@
     {% if tasks %}
     <section class="sec purpose" aria-labelledby="todo-head">
       <div class="sec-head"><h2 id="todo-head">{{ 'Your to-dos' if my_leader_id else 'To-dos you handed out' }}</h2>
-        <a class="more" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) if my_leader_id else url_for('shift.todo') }}">All {{ task_total }}</a></div>
+        <a class="more" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) if my_leader_id else url_for('shift.oneonone') ~ '#todos' }}">All {{ task_total }}</a></div>
       <div class="card list">
         {% for t in tasks %}
         <div class="row todo-row">
