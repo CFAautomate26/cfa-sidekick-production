@@ -119,7 +119,7 @@
     </div>
   </article>
   {% else %}
-  <div class="empty">{% if waiting %}Nothing left to call in — {{ n_waiting }} awaiting repair below.{% else %}Nothing reported — everything's working.{% endif %}</div>
+  <div class="empty">{% if waiting %}Nothing left to call in — {{ n_waiting }} awaiting repair below.{% else %}Nothing to call in — everything's working.{% endif %}</div>
   {% endfor %}
 </section>
 
@@ -187,7 +187,7 @@
       <span class="bar"><span style="width: {{ (row.count / max_count * 100) | round }}%"></span></span>
     </div>
     {% endfor %}
-    <p class="hint">Problems reported per piece of equipment. The same one on here again and again? Worth asking the vendor about a replacement.</p>
+    <p class="hint">The most-reported equipment (top 8). The same one on here again and again? Worth asking the vendor about a replacement.</p>
   </div>
 </details>
 {% endif %}

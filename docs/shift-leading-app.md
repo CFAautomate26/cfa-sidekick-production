@@ -115,9 +115,9 @@ deployment. Team Hub's look, navigation and sign-in are described in
   and when (or types that straight into the report), then *Awaiting
   repair* with a waiting-days count, until **"Fixed"** with what was done;
   fixed ones can be reopened. Today's Equipment tile and the ☰ menu carry
-  a red count while anything is still to call in. The page also shows how
-  many problems each piece of equipment had in the last 90 days, so a
-  machine that keeps breaking stands out. Equipment and vendor details
+  a red count while anything is still to call in. The page also shows the
+  most-reported equipment of the last 90 days (top 8), so a machine that
+  keeps breaking stands out. Equipment and vendor details
   only; only the Operator and admin leaders can delete an entry.
 - **1:1 meetings** — a shared agenda between the Operator and each leader.
   Both add talking points between meetings ("ask about Saturday lineup");

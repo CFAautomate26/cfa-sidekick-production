@@ -2618,6 +2618,7 @@ def test_equipment_report_already_called_or_fixed(isolated_db):
     assert [e["id"] for e in waiting] == [called]
     assert waiting[0]["service_note"] == "Reiss, Monday" and waiting[0]["called_by"] == "Maya"
     assert [e["id"] for e in done] == [fixed] and done[0]["called_at"] is None
+    assert done[0]["service_note"] == "Plumber"                 # who did it is kept
 
 
 def test_equipment_order_food_safety_then_out_of_service_then_oldest(isolated_db):
@@ -2656,6 +2657,8 @@ def test_equipment_repeats_count_by_name_over_90_days(isolated_db):
     today = date.fromisoformat(shift_db.today_local())
     for name in ("Fryer 3", "fryer 3", "FRYER 3 "):
         shift_db.add_equipment_issue(name, "kitchen", "down", False, "", "M")
+    for name in ("Écran KPS", "écran kps"):                     # accents fold too
+        shift_db.add_equipment_issue(name, "kitchen", "limited", False, "", "M")
     shift_db.add_equipment_issue("Ice machine", "front-counter", "limited", False, "", "M")
     edge = shift_db.add_equipment_issue("Toaster", "kitchen", "limited", False, "", "M")
     _set_report_date(edge, (today - timedelta(days=89)).isoformat())     # in
@@ -2664,6 +2667,7 @@ def test_equipment_repeats_count_by_name_over_90_days(isolated_db):
     repeats = shift_db.equipment_repeats()
     assert repeats[0] == {"equipment": "FRYER 3", "count": 3}           # last spelling
     assert {"equipment": "Toaster", "count": 1} in repeats
+    assert {"equipment": "écran kps", "count": 2} in repeats
     assert all(r["equipment"] != "Dish machine" for r in repeats)
     assert len(shift_db.equipment_repeats(limit=2)) == 2
 

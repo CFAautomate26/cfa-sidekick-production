@@ -78,7 +78,7 @@ def test_empty_page_and_the_report_form(client):
     assert '<option value="Ice machine">' in html                # suggestions
     for value in shift_db.EQUIPMENT_AREAS + shift_db.EQUIPMENT_IMPACTS:
         assert f'value="{value}"' in html
-    assert "Nothing reported" in html and 'id="fixed"' not in html and 'id="radar"' not in html
+    assert "Nothing to call in" in html and 'id="fixed"' not in html and 'id="radar"' not in html
 
 
 def test_report_then_service_called_then_fixed(client):
@@ -131,10 +131,11 @@ def test_report_already_called_or_fixed_from_the_form(client):
     login_operator(client)
     report(client, equipment="Ice machine", area="front-counter", impact="limited",
            service_note="Reiss, Monday")
-    report(client, equipment="Hand sink", impact="down", fixed_now="1")
+    report(client, equipment="Hand sink", impact="down", fixed_now="1",
+           service_note="Roto-Rooter, ticket 8812")
     html = page(client)
     assert "1 awaiting repair</h1>" in html and "<b>Service:</b> Reiss, Monday" in html
-    assert re.search(r'id="fixed".*Hand sink', html, re.S)
+    assert re.search(r'id="fixed".*Hand sink.*service: Roto-Rooter, ticket 8812', html, re.S)
 
 
 def test_report_needs_what_is_broken_and_bad_values_fall_back(client):
@@ -153,7 +154,14 @@ def test_problem_text_is_escaped(client):
     report(client, equipment="<b>Grill</b>", problem="<script>alert(1)</script>")
     html = page(client)
     assert "<script>alert(1)</script>" not in html and "&lt;script&gt;" in html
-    assert "&lt;b&gt;Grill&lt;/b&gt;" in html
+    assert "<b>Grill</b>" not in html and "&lt;b&gt;Grill&lt;/b&gt;" in html
+    client.post(f"/shift/equipment/{newest_id()}/called",
+                data={"called": "1", "note": "<u>Hobart</u>"})
+    client.post(f"/shift/equipment/{newest_id()}/fixed",
+                data={"fixed": "1", "note": "<i>thermostat</i>"})
+    html = page(client)
+    for raw in ("<b>Grill</b>", "<u>Hobart</u>", "<i>thermostat</i>"):
+        assert raw not in html, raw
 
 
 def test_missing_issue_flashes(client):

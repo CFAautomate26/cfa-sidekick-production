@@ -3001,7 +3001,8 @@ def add_equipment_issue(equipment: str, area: str, impact: str, food_safety: boo
     equipment name. Unknown area/impact values are stored as 'other' /
     'limited'. A service_note ("Hobart, Thu AM") means service is already
     called, stamped in the same INSERT; fixed_now logs a problem already
-    sorted out on the spot, for the repeat-repairs history (it wins)."""
+    sorted out on the spot, for the repeat-repairs history (it wins over
+    the called stamp, but a service note given with it is still kept)."""
     equipment = " ".join((equipment or "").split())[:EQUIPMENT_MAX]
     if not equipment:
         return None
@@ -3017,8 +3018,7 @@ def add_equipment_issue(equipment: str, area: str, impact: str, food_safety: boo
              area if area in EQUIPMENT_AREAS else "other",
              impact if impact in EQUIPMENT_IMPACTS else "limited",
              1 if food_safety else 0, (problem or "").strip() or None, by, stamp,
-             stamp if called else None, by if called else None,
-             note if called else None,
+             stamp if called else None, by if called else None, note,
              stamp if fixed_now else None, by if fixed_now else None),
         )
         return cur.lastrowid
@@ -3111,17 +3111,21 @@ def delete_equipment_issue(issue_id: int) -> None:
 
 
 def equipment_repeats(days: int = 90, limit: int = 8) -> list[dict]:
-    """[{'equipment', 'count'}]: problems reported per piece of equipment
-    over the last `days` business dates (today included), most first —
-    names matched ignoring case, shown as last typed. The page's
+    """[{'equipment', 'count'}]: the `limit` most-reported pieces of
+    equipment over the last `days` business dates (today included), most
+    first — names matched ignoring case (accents too: Python's casefold,
+    not SQLite's ASCII-only lower()), shown as last typed. The page's
     "what keeps breaking" radar."""
     since = (date.fromisoformat(today_local()) - timedelta(days=days - 1)).isoformat()
     with closing(connect()) as conn:
-        # SQLite: with MAX(), the bare `equipment` comes from the newest row.
-        return [{"equipment": r["equipment"], "count": r["count"]} for r in conn.execute(
-            "SELECT equipment, MAX(id) AS last_id, COUNT(*) AS count "
-            "FROM equipment_issues WHERE report_date>=? GROUP BY lower(equipment) "
-            "ORDER BY count DESC, last_id DESC LIMIT ?", (since, limit)).fetchall()]
+        rows = conn.execute("SELECT id, equipment FROM equipment_issues "
+                            "WHERE report_date>=? ORDER BY id", (since,)).fetchall()
+    tally: dict[str, dict] = {}
+    for r in rows:                                  # oldest first: the last spelling wins
+        t = tally.setdefault(r["equipment"].casefold(), {"count": 0})
+        t.update(equipment=r["equipment"], last_id=r["id"], count=t["count"] + 1)
+    ranked = sorted(tally.values(), key=lambda t: (-t["count"], -t["last_id"]))
+    return [{"equipment": t["equipment"], "count": t["count"]} for t in ranked[:limit]]
 
 
 # ---------------------------------------------------------------------------
