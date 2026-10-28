@@ -21,6 +21,7 @@ home-screen icons and every old link keep working.
 | **Lineups & Setups** | leaders | The position lineup per daypart. |
 | **Goals** | leaders | Store goals and updates. |
 | **Meetings** | leaders | Your 1:1 agenda with the Operator, 1:1s with your team, to-dos. Private to each leader and the Operator. |
+| **To-dos** | leaders | Every leader's to-do list: assign one, see open and overdue, check yours off. A tile on Today and a word in the ☰ menu. |
 | **Leadership Development** | leaders | The 48-lesson course, plus the leadership library pages. |
 
 Guest recovery and Equipment & repairs are tiles on Today (a red count

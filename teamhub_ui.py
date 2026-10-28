@@ -104,6 +104,11 @@ ART.update({
     "recovery": f'<path d="M57.5 30A23 23 0 1 0 59 40" fill="none" stroke="{N_}" stroke-width="3.2" stroke-linecap="round"/>'
                 f'<path d="M50 29.5l8 .8 1.6-8" fill="none" stroke="{N_}" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>'
                 f'<path d="M36 46.5s-14-8.3-14-17.9a7.7 7.7 0 0 1 14-4.8 7.7 7.7 0 0 1 14 4.8c0 9.6-14 17.9-14 17.9z" fill="{R_}"/>',
+    # To-dos: a list of tick circles, the first one done (as the lists look).
+    "todos": f'<circle cx="17" cy="18" r="8" fill="{R_}"/><path d="M13 18.3l3 3 5.4-5.6" fill="none" stroke="{W_}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
+             f'<path d="M32 18h30" stroke="{N_}" stroke-width="3.4" stroke-linecap="round"/>'
+             f'<circle cx="17" cy="37" r="7.5" fill="{W_}" stroke="{N_}" stroke-width="3"/><path d="M32 37h30" stroke="{N_}" stroke-width="3.4" stroke-linecap="round"/>'
+             f'<circle cx="17" cy="56" r="7.5" fill="{W_}" stroke="{N_}" stroke-width="3"/><path d="M32 56h20" stroke="{N_}" stroke-width="3.4" stroke-linecap="round"/>',
     # Equipment & repairs: a wrench over a gear.
     "equipment": f'<path d="M42.9 6.1L47.1 6.1L49.6 11.7L52.5 12.9L58.3 10.8L61.2 13.7L59.1 19.5L60.3 22.4L65.9 24.9L65.9 29.1L60.3 31.6L59.1 34.5L61.2 40.3L58.3 43.2L52.5 41.1L49.6 42.3L47.1 47.9L42.9 47.9L40.4 42.3L37.5 41.1L31.7 43.2L28.8 40.3L30.9 34.5L29.7 31.6L24.1 29.1L24.1 24.9L29.7 22.4L30.9 19.5L28.8 13.7L31.7 10.8L37.5 12.9L40.4 11.7z" fill="{R_}" stroke="{R_}" stroke-width="1.5" stroke-linejoin="round"/>'
                  f'<circle cx="45" cy="27" r="7" fill="{W_}"/>'

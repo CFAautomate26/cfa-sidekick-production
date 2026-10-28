@@ -37,8 +37,8 @@ _SECTION_OF = {
     "shift.lineup": "lineups",
     "shift.goals": "goals", "shift.goal_detail": "goals",
     "shift.oneonone": "meetings", "shift.oneonone_leader": "meetings",
-    "shift.oneonone_member": "meetings", "shift.todo": "meetings",
-    "shift.todo_leader": "meetings",
+    "shift.oneonone_member": "meetings",
+    "shift.todo": "todos", "shift.todo_leader": "todos",
     "shift.development": "development", "shift.development_leader": "development",
     "hub.home": "home", "hub.to_read": "toread", "hub.me": "me",
 }
@@ -96,7 +96,7 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
 
     kind: member | leader | operator; role: a leader's lead | admin.
     counts: unread, recoveries, coming_back, repairs_to_call, repairs_waiting,
-    meetings, to_read, drafts (missing = 0).
+    meetings, todos, to_read, drafts (missing = 0).
     categories: the Hub categories a member may see (their menu words).
     """
     counts = counts or {}
@@ -142,6 +142,7 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
                 word("Lineups & Setups", "lineups", "shift.lineup"),
                 word("Goals", "goals", "shift.goals"),
                 word("Meetings", "meetings", "shift.oneonone", counts.get("meetings", 0)),
+                word("To-dos", "todos", "shift.todo", counts.get("todos", 0)),
                 word("Leadership Development", "development", "shift.development")]
         recoveries, unread = counts.get("recoveries", 0), counts.get("unread", 0)
         coming_back = counts.get("coming_back", 0)
@@ -235,7 +236,10 @@ def leader_nav(kind: str, name: str, role: str, leader_id: int | None) -> dict:
     counts = {"unread": shift_db.unacked_count(name),
               "recoveries": len(open_recs), "coming_back": len(coming_back),
               "repairs_to_call": to_call, "repairs_waiting": awaiting,
-              "meetings": _meetings_count(kind, leader_id)}
+              "meetings": _meetings_count(kind, leader_id),
+              # A leader's own open to-dos; the Operator's, every leader's.
+              "todos": shift_db.open_task_counts(
+                  None if kind == "operator" else leader_id)[0]}
     if kind == "operator" or role == "admin":
         counts["drafts"] = _hub_drafts()
     return nav_for(kind, name, role, counts)
