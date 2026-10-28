@@ -9,9 +9,10 @@ deployment. Team Hub's look, navigation and sign-in are described in
 - **Today** — a calm home: a greeting, **today's two goals** (a
   leadership goal and an operational goal for the leader's area of
   ownership, set when they sign in and ticked off as they hit them), their
-  open to-dos, and a tile into every section (Guest Recovery's tile shows
-  a red count while a guest is still waiting to be reached). Checklists,
-  guests, the lineup, notes and announcements live on their own pages;
+  open to-dos, and a tile into every section (Guest Recovery's and
+  Equipment's tiles show a red count while a guest is still waiting to be
+  reached or a breakdown hasn't been called in). Checklists, guests,
+  repairs, the lineup, notes and announcements live on their own pages;
   Today only carries a quiet count on each tile and one link when an
   announcement is unread. Daily goals are private to each leader and the Operator (like
   1:1s); the Operator sees every leader's on Goals › Daily goals, and each
@@ -105,6 +106,19 @@ deployment. Team Hub's look, navigation and sign-in are described in
   leader sees who to expect and hands over the replacement, then taps
   "They came back ✓". Guest name + contact only — never
   payment/card info; injury or damage claims go to the Operator directly.
+- **Equipment & repairs** (`/shift/equipment`) — any leader reports what's
+  broken (free text with suggestions: "Fryer 3", "Ice machine"…), where
+  (kitchen, front counter, drive-thru…), how bad (out of service / working
+  but needs repair / minor) and whether it's a food-safety risk (temps,
+  sanitizer, hand sink — those go to the top of the list). It sits in
+  *To call in* until someone marks **"Service called"** with who's coming
+  and when (or types that straight into the report), then *Awaiting
+  repair* with a waiting-days count, until **"Fixed"** with what was done;
+  fixed ones can be reopened. Today's Equipment tile and the ☰ menu carry
+  a red count while anything is still to call in. The page also shows how
+  many problems each piece of equipment had in the last 90 days, so a
+  machine that keeps breaking stands out. Equipment and vendor details
+  only; only the Operator and admin leaders can delete an entry.
 - **1:1 meetings** — a shared agenda between the Operator and each leader.
   Both add talking points between meetings ("ask about Saturday lineup");
   during the 1-on-1 each topic is checked off (who/when stamped) with an

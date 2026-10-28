@@ -450,6 +450,7 @@ def today():
     else:
         course = {"leaders": len(shift_db.leader_course_summary())}
     open_recs, coming_back, _ = shift_db.recovery_feed(resolved_limit=0)
+    repairs_to_call, repairs_waiting = shift_db.equipment_counts()
 
     return render_template(
         "shift/today.html",
@@ -481,6 +482,8 @@ def today():
         course=course,
         recoveries_open=len(open_recs),
         recoveries_back=len(coming_back),
+        repairs_to_call=repairs_to_call,
+        repairs_waiting=repairs_waiting,
         day=day,
         short_date=_short_date,
     )
@@ -2330,6 +2333,90 @@ def recovery_resolve(recovery_id):
 def recovery_delete(recovery_id):
     shift_db.delete_recovery(recovery_id)
     return redirect(url_for("shift.recovery"))
+
+
+# ---------------------------------------------------------------------------
+# Equipment & repairs
+# ---------------------------------------------------------------------------
+
+@shift_bp.route("/equipment")
+def equipment():
+    to_call, waiting, fixed = shift_db.equipment_feed()
+    return render_template(
+        "shift/equipment.html",
+        to_call=to_call,
+        waiting=waiting,
+        fixed=fixed,
+        repeats=shift_db.equipment_repeats(),
+        AREAS=shift_db.EQUIPMENT_AREAS,
+        AREA_LABELS=shift_db.EQUIPMENT_AREA_LABELS,
+        IMPACTS=shift_db.EQUIPMENT_IMPACTS,
+        IMPACT_LABELS=shift_db.EQUIPMENT_IMPACT_LABELS,
+        SUGGESTIONS=shift_db.EQUIPMENT_SUGGESTIONS,
+        equipment_max=shift_db.EQUIPMENT_MAX,
+    )
+
+
+@shift_bp.route("/equipment", methods=["POST"])
+def equipment_create():
+    issue_id = shift_db.add_equipment_issue(
+        equipment=request.form.get("equipment", ""),
+        area=request.form.get("area", ""),
+        impact=request.form.get("impact", ""),
+        food_safety=request.form.get("food_safety") == "1",
+        problem=request.form.get("problem", ""),
+        by=current_name(),
+        service_note=request.form.get("service_note", ""),
+        fixed_now=request.form.get("fixed_now") == "1",
+    )
+    if issue_id is None:
+        flash("Say what's broken first.")
+        return redirect(url_for("shift.equipment"))
+    flash("Reported. Thanks for flagging it.")
+    return redirect(url_for("shift.equipment") + f"#eq-{issue_id}")
+
+
+@shift_bp.route("/equipment/<int:issue_id>/called", methods=["POST"])
+def equipment_called(issue_id):
+    called = request.form.get("called") == "1"
+    if not shift_db.set_equipment_called(issue_id, called, request.form.get("note", ""),
+                                         current_name()):
+        issue = shift_db.get_equipment_issue(issue_id)
+        if not issue:
+            flash("That problem isn't on the list any more.")
+            return redirect(url_for("shift.equipment"))
+        if issue["fixed_at"]:
+            flash("That one's already fixed — nothing changed.")
+        elif issue["called_at"]:
+            flash(f"Already called in by {issue['called_by'] or 'someone'} "
+                  "— nothing changed.")
+        else:
+            flash("That one wasn't marked called in — nothing changed.")
+    return redirect(url_for("shift.equipment") + f"#eq-{issue_id}")
+
+
+@shift_bp.route("/equipment/<int:issue_id>/fixed", methods=["POST"])
+def equipment_fixed(issue_id):
+    fixed = request.form.get("fixed") == "1"
+    if not shift_db.set_equipment_fixed(issue_id, fixed, request.form.get("note", ""),
+                                        current_name()):
+        issue = shift_db.get_equipment_issue(issue_id)
+        if not issue:
+            flash("That problem isn't on the list any more.")
+            return redirect(url_for("shift.equipment"))
+        if issue["fixed_at"]:
+            flash(f"Already marked fixed by {issue['fixed_by'] or 'someone'} "
+                  "— nothing changed.")
+        else:
+            flash("Already reopened — nothing changed.")
+    return redirect(url_for("shift.equipment") + f"#eq-{issue_id}")
+
+
+@shift_bp.route("/equipment/<int:issue_id>/delete", methods=["POST"])
+@admin_required
+def equipment_delete(issue_id):
+    shift_db.delete_equipment_issue(issue_id)
+    return redirect(url_for("shift.equipment"))
 
 
 # ---------------------------------------------------------------------------

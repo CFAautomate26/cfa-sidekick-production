@@ -95,7 +95,8 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
     """Everything the chrome needs for one viewer.
 
     kind: member | leader | operator; role: a leader's lead | admin.
-    counts: unread, recoveries, meetings, to_read, drafts (missing = 0).
+    counts: unread, recoveries, coming_back, repairs_to_call, repairs_waiting,
+    meetings, to_read, drafts (missing = 0).
     categories: the Hub categories a member may see (their menu words).
     """
     counts = counts or {}
@@ -144,6 +145,7 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
                 word("Leadership Development", "development", "shift.development")]
         recoveries, unread = counts.get("recoveries", 0), counts.get("unread", 0)
         coming_back = counts.get("coming_back", 0)
+        to_call, awaiting = counts.get("repairs_to_call", 0), counts.get("repairs_waiting", 0)
         small += [
             {"icon": "note", "label": "Shift notes", "url": _url("shift.notes")},
             # Red only while a guest is still waiting to be reached; once
@@ -152,6 +154,11 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
              "badge": (f"{recoveries} open" if recoveries
                        else f"{coming_back} coming back" if coming_back else ""),
              "tone": "b-red" if recoveries else "b-tan"},
+            # Same rule: red while nobody has called for service yet.
+            {"icon": "gear", "label": "Equipment & repairs", "url": _url("shift.equipment"),
+             "badge": (f"{to_call} to call in" if to_call
+                       else f"{awaiting} awaiting repair" if awaiting else ""),
+             "tone": "b-red" if to_call else "b-tan"},
             {"icon": "mega", "label": "Announcements", "url": _url("shift.announcements"),
              "badge": f"{unread} new" if unread else "", "tone": "b-red"},
             {"icon": "star", "label": "Shout-outs", "url": _url("shift.shoutouts")},
@@ -224,8 +231,10 @@ def _hub_drafts() -> int:
 def leader_nav(kind: str, name: str, role: str, leader_id: int | None) -> dict:
     """Navigation for a signed-in leader or the Operator."""
     open_recs, coming_back, _ = shift_db.recovery_feed(resolved_limit=0)
+    to_call, awaiting = shift_db.equipment_counts()
     counts = {"unread": shift_db.unacked_count(name),
               "recoveries": len(open_recs), "coming_back": len(coming_back),
+              "repairs_to_call": to_call, "repairs_waiting": awaiting,
               "meetings": _meetings_count(kind, leader_id)}
     if kind == "operator" or role == "admin":
         counts["drafts"] = _hub_drafts()

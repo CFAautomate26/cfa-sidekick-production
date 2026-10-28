@@ -104,6 +104,34 @@ RECOVERY_REMEDY_LABELS = {
     "other": "Other (spell it out in details)",
 }
 
+# Equipment & repair tracker: where the problem is and how bad. "down" (out
+# of service) is flagged red, and a food-safety flag (temps, sanitizer, hand
+# sinks) puts a problem at the top of its list whatever its impact.
+EQUIPMENT_AREAS = ["kitchen", "front-counter", "drive-thru", "dining-room",
+                   "washrooms", "outside", "office", "other"]
+EQUIPMENT_AREA_LABELS = {
+    "kitchen": "Kitchen", "front-counter": "Front counter", "drive-thru": "Drive-thru",
+    "dining-room": "Dining room", "washrooms": "Washrooms",
+    "outside": "Outside (patio, lot, signs)", "office": "Office", "other": "Other",
+}
+EQUIPMENT_IMPACTS = ["down", "limited", "minor"]
+EQUIPMENT_IMPACT_LABELS = {
+    "down": "Out of service",
+    "limited": "Working, needs repair",
+    "minor": "Minor / cosmetic",
+}
+EQUIPMENT_MAX = 60                              # characters in "what's broken"
+# Suggestions for what's broken (leaders can type anything, e.g. "Fryer 3").
+EQUIPMENT_SUGGESTIONS = [
+    "Pressure fryer", "Fry station", "Grill", "Toaster", "Holding cabinet",
+    "Walk-in cooler", "Walk-in freezer", "Reach-in / lowboy", "Ice machine",
+    "Icedream machine", "Beverage tower", "Tea brewer", "Lemonade dispenser",
+    "Coffee brewer", "Breading table", "Dish machine", "Hand sink",
+    "Registers", "iPOS tablets", "KPS screens", "Drive-thru headsets",
+    "Drive-thru menu board", "Heating / AC", "Lights", "Plumbing / drains",
+    "Doors / locks", "Playground",
+]
+
 
 def now_local() -> datetime:
     return datetime.now(STORE_TZ)
@@ -363,6 +391,29 @@ CREATE TABLE IF NOT EXISTS guest_recoveries (
 );
 CREATE INDEX IF NOT EXISTS idx_recoveries_status
     ON guest_recoveries(resolved_at, recovery_date);
+
+-- Equipment & repair tracker: something broken or not working right,
+-- tracked from reported → service called → fixed. Equipment and vendor
+-- details only — never anything about a person.
+CREATE TABLE IF NOT EXISTS equipment_issues (
+    id INTEGER PRIMARY KEY,
+    report_date TEXT NOT NULL,                  -- YYYY-MM-DD store-local (4am rollover)
+    equipment TEXT NOT NULL,                    -- what's broken, e.g. "Fryer 3"
+    area TEXT NOT NULL DEFAULT 'other',         -- one of EQUIPMENT_AREAS
+    impact TEXT NOT NULL DEFAULT 'limited',     -- one of EQUIPMENT_IMPACTS
+    food_safety INTEGER NOT NULL DEFAULT 0,     -- 1 = temps, sanitizer, hand sink...
+    problem TEXT,                               -- what's wrong + any workaround
+    reported_by TEXT,
+    created_at TEXT NOT NULL,
+    called_at TEXT,                             -- service called / repair booked
+    called_by TEXT,
+    service_note TEXT,                          -- who's coming + when, ticket #
+    fixed_at TEXT,                              -- NULL = still not right
+    fixed_by TEXT,
+    fix_note TEXT                               -- what was done
+);
+CREATE INDEX IF NOT EXISTS idx_equipment_status
+    ON equipment_issues(fixed_at, report_date);
 
 -- 1:1 meeting agendas. A topic with discussed_at NULL IS the agenda, so
 -- unchecked topics carry forward automatically; checking one off stamps
@@ -2928,6 +2979,152 @@ def purge_old_recovery_contacts(days: int = 90) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Equipment & repairs
+# ---------------------------------------------------------------------------
+
+# Food-safety problems first, then out-of-service ones, then oldest first.
+_EQUIPMENT_ORDER = ("ORDER BY food_safety DESC, CASE impact WHEN 'down' THEN 0 "
+                    "WHEN 'limited' THEN 1 ELSE 2 END, report_date, id")
+
+
+def _days_since(day: str, today: date) -> int:
+    try:
+        return max(0, (today - date.fromisoformat(day)).days)
+    except (TypeError, ValueError):
+        return 0
+
+
+def add_equipment_issue(equipment: str, area: str, impact: str, food_safety: bool,
+                        problem: str, by: str, service_note: str = "",
+                        fixed_now: bool = False) -> int | None:
+    """Report a problem. Returns the new row id, or None for a blank
+    equipment name. Unknown area/impact values are stored as 'other' /
+    'limited'. A service_note ("Hobart, Thu AM") means service is already
+    called, stamped in the same INSERT; fixed_now logs a problem already
+    sorted out on the spot, for the repeat-repairs history (it wins)."""
+    equipment = " ".join((equipment or "").split())[:EQUIPMENT_MAX]
+    if not equipment:
+        return None
+    note = (service_note or "").strip() or None
+    called = bool(note) and not fixed_now
+    stamp = now_stamp()
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "INSERT INTO equipment_issues (report_date, equipment, area, impact, "
+            "food_safety, problem, reported_by, created_at, called_at, called_by, "
+            "service_note, fixed_at, fixed_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (today_local(), equipment,
+             area if area in EQUIPMENT_AREAS else "other",
+             impact if impact in EQUIPMENT_IMPACTS else "limited",
+             1 if food_safety else 0, (problem or "").strip() or None, by, stamp,
+             stamp if called else None, by if called else None,
+             note if called else None,
+             stamp if fixed_now else None, by if fixed_now else None),
+        )
+        return cur.lastrowid
+
+
+def equipment_feed(fixed_limit: int = 50) -> tuple[list[dict], list[dict], list[dict]]:
+    """(to_call, waiting, fixed): to_call (nobody has called for service
+    yet) and waiting (service called) in _EQUIPMENT_ORDER, each with
+    days_down since it was reported (waiting also gets waiting_days since
+    the call); fixed newest-first, capped, with days_down to the fix. One
+    read transaction, like recovery_feed, so a flip can't show a problem
+    in two lists."""
+    with closing(connect()) as conn:
+        conn.execute("BEGIN")
+        to_call = [dict(r) for r in conn.execute(
+            "SELECT * FROM equipment_issues WHERE fixed_at IS NULL "
+            "AND called_at IS NULL " + _EQUIPMENT_ORDER).fetchall()]
+        waiting = [dict(r) for r in conn.execute(
+            "SELECT * FROM equipment_issues WHERE fixed_at IS NULL "
+            "AND called_at IS NOT NULL " + _EQUIPMENT_ORDER).fetchall()]
+        fixed = [dict(r) for r in conn.execute(
+            "SELECT * FROM equipment_issues WHERE fixed_at IS NOT NULL "
+            "ORDER BY fixed_at DESC, id DESC LIMIT ?", (fixed_limit,)).fetchall()]
+        conn.commit()
+    today = date.fromisoformat(today_local())
+    for r in to_call + waiting:
+        r["days_down"] = _days_since(r["report_date"], today)
+        r["stale"] = r["days_down"] >= 2
+    for r in waiting:
+        r["waiting_days"] = _days_since(business_date(r["called_at"]), today)
+    for r in fixed:
+        try:
+            end = date.fromisoformat(business_date(r["fixed_at"]))
+        except ValueError:
+            end = today
+        r["days_down"] = _days_since(r["report_date"], end)
+    return to_call, waiting, fixed
+
+
+def equipment_counts() -> tuple[int, int]:
+    """(to call in, waiting on repair) for the Today tile and the ☰ badge —
+    equipment_feed's buckets, so they never contradict the page."""
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(called_at IS NULL), 0), "
+            "COALESCE(SUM(called_at IS NOT NULL), 0) "
+            "FROM equipment_issues WHERE fixed_at IS NULL").fetchone()
+    return row[0], row[1]
+
+
+def get_equipment_issue(issue_id: int) -> dict | None:
+    with closing(connect()) as conn:
+        row = conn.execute("SELECT * FROM equipment_issues WHERE id=?",
+                           (issue_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_equipment_called(issue_id: int, called: bool, note: str, by: str) -> bool:
+    """Mark service called (or undo a mis-tap). Like set_recovery_contacted,
+    only flips unfixed rows in the opposite state, so two leaders can't
+    overwrite each other's stamp. False for an unknown id or a no-op."""
+    guard = "IS NULL" if called else "IS NOT NULL"
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE equipment_issues SET called_at=?, called_by=?, service_note=? "
+            f"WHERE id=? AND fixed_at IS NULL AND called_at {guard}",
+            (now_stamp() if called else None, by if called else None,
+             ((note or "").strip() or None) if called else None, issue_id),
+        )
+        return cur.rowcount > 0
+
+
+def set_equipment_fixed(issue_id: int, fixed: bool, note: str, by: str) -> bool:
+    """Mark fixed, or reopen (clearing the fix stamp and note). Only flips
+    rows in the opposite state. False for an unknown id or a no-op."""
+    guard = "IS NULL" if fixed else "IS NOT NULL"
+    with closing(connect()) as conn, conn:
+        cur = conn.execute(
+            "UPDATE equipment_issues SET fixed_at=?, fixed_by=?, fix_note=? "
+            f"WHERE id=? AND fixed_at {guard}",
+            (now_stamp() if fixed else None, by if fixed else None,
+             ((note or "").strip() or None) if fixed else None, issue_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_equipment_issue(issue_id: int) -> None:
+    with closing(connect()) as conn, conn:
+        conn.execute("DELETE FROM equipment_issues WHERE id=?", (issue_id,))
+
+
+def equipment_repeats(days: int = 90, limit: int = 8) -> list[dict]:
+    """[{'equipment', 'count'}]: problems reported per piece of equipment
+    over the last `days` business dates (today included), most first —
+    names matched ignoring case, shown as last typed. The page's
+    "what keeps breaking" radar."""
+    since = (date.fromisoformat(today_local()) - timedelta(days=days - 1)).isoformat()
+    with closing(connect()) as conn:
+        # SQLite: with MAX(), the bare `equipment` comes from the newest row.
+        return [{"equipment": r["equipment"], "count": r["count"]} for r in conn.execute(
+            "SELECT equipment, MAX(id) AS last_id, COUNT(*) AS count "
+            "FROM equipment_issues WHERE report_date>=? GROUP BY lower(equipment) "
+            "ORDER BY count DESC, last_id DESC LIMIT ?", (since, limit)).fetchall()]
+
+
+# ---------------------------------------------------------------------------
 # Roster
 # ---------------------------------------------------------------------------
 
@@ -3423,7 +3620,7 @@ EXPORT_TABLES = [
     "announcement_reads", "course_lessons", "lesson_progress", "leader_tasks",
     "guest_recoveries", "oneonone_topics", "oneonone_member_topics", "shoutouts",
     "hub_categories", "hub_pages", "hub_page_versions", "hub_attachments", "hub_acks",
-    "hub_reviews", "hub_audit", "daily_goals",
+    "hub_reviews", "hub_audit", "daily_goals", "equipment_issues",
 ]
 # A backup from before the Team Hub existed leaves the Hub as it is.
 HUB_TABLES = [t for t in EXPORT_TABLES if t.startswith("hub_")]

@@ -96,6 +96,7 @@ def table(w):
         ("/shift/history", LEADERS), ("/shift/lineup", LEADERS), ("/shift/goals", LEADERS),
         (f"/shift/goals/{w['goal']}", LEADERS), ("/shift/notes", LEADERS),
         ("/shift/announcements", LEADERS), ("/shift/recovery", LEADERS),
+        ("/shift/equipment", LEADERS),
         ("/shift/shoutouts", LEADERS), ("/shift/roster", LEADERS),
         ("/shift/development", EDITORS),        # a lead is sent on to their own page
         ("/shift/oneonone", LEADERS), ("/shift/todo", LEADERS),
