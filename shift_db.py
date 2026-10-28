@@ -2289,6 +2289,22 @@ def team_daily_goals(day: str) -> list[dict]:
             for l in leaders_]
 
 
+def open_task_counts(leader_id: int | None = None) -> tuple[int, int]:
+    """(open, overdue) to-dos for one leader, or with None for every active
+    leader — the To-dos tile and ☰ count. Overdue as leader_task_summary
+    counts it (a due date before today)."""
+    q = ("SELECT COUNT(*), COALESCE(SUM(t.due_date < ?), 0) FROM leader_tasks t "
+         "JOIN leaders ld ON ld.id = t.leader_id "
+         "WHERE ld.active = 1 AND t.completed_at IS NULL")
+    args: list = [today_local()]
+    if leader_id is not None:
+        q += " AND t.leader_id = ?"
+        args.append(leader_id)
+    with closing(connect()) as conn:
+        row = conn.execute(q, args).fetchone()
+    return row[0], row[1]
+
+
 def leader_task_summary() -> list[dict]:
     """Active leaders with open/overdue to-do counts, for the admin index."""
     today = today_local()

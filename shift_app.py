@@ -429,6 +429,7 @@ def today():
         leader_id, (date.fromisoformat(day) - timedelta(days=1)).isoformat())
     if leader_id:
         open_tasks = shift_db.tasks_for_leader(leader_id)[0]
+        todo_open, todo_overdue = len(open_tasks), sum(1 for t in open_tasks if t["overdue"])
         team = None
     else:
         # The Operator has no to-do list of their own: they see what they've
@@ -437,6 +438,8 @@ def today():
             (t for t in shift_db.tasks_assigned_by(OPERATOR_NAME) if not t["completed_at"]),
             key=lambda t: (t["due_date"] is None, t["due_date"] or "", t["id"]))
         team = shift_db.team_daily_goals(day)
+        # The To-dos tile: every leader's open to-dos (the To-dos page).
+        todo_open, todo_overdue = shift_db.open_task_counts()
 
     due = _due_now(runs, daypart, day)
     unread = sum(1 for a in shift_db.active_announcements(reader=name) if not a["acked"])
@@ -484,6 +487,8 @@ def today():
         recoveries_back=len(coming_back),
         repairs_to_call=repairs_to_call,
         repairs_waiting=repairs_waiting,
+        todo_open=todo_open,
+        todo_overdue=todo_overdue,
         day=day,
         short_date=_short_date,
     )

@@ -43,7 +43,8 @@ Canada.
   the Operator, private to that leader + the Operator like 1:1s; the
   leader's area is `leaders.area` — then their open to-dos and section
   tiles; triage lives on each section's own page),
-  per-leader assigned to-dos under `/shift/todo` (any leader assigns),
+  per-leader assigned to-dos under `/shift/todo` (any leader assigns; its
+  own ☰ section and a To-dos tile on Today, also inline on Meetings),
   1:1 meeting agendas under `/shift/oneonone` (private to each leader +
   the Operator master login — not other admins; plus 1:1 threads with any
   team-roster member under `/shift/oneonone/member/<id>`, table

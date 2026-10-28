@@ -5,7 +5,7 @@
 {% block content %}
 <p class="crumbs"><a href="{{ url_for('shift.todo') }}">← All leaders</a></p>
 <section class="hero compact">
-  <p class="eyebrow">Meetings · To-dos</p>
+  <p class="eyebrow">To-dos</p>
   <h1 class="headline">{{ 'Your to-dos' if own else leader.name ~ "'s to-dos" }}</h1>
   <p class="triage"><b>{{ open_tasks | length }} open</b>{% if done_tasks %} · {{ done_tasks | length }} done{% endif %}</p>
 </section>

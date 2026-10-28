@@ -383,7 +383,7 @@ def test_operator_home_shows_team_line_and_handed_out_todos(client, clock):
     assert "Daniel · " in todos and "Overdue · was due Tue, Oct 20" in todos
     assert "Maya · " in todos and "Due today" in todos
     assert "own reminder" not in todos                      # not handed out by the Operator
-    assert 'href="/shift/oneonone#todos">All 2</a>' in todos
+    assert 'href="/shift/todo">All 2</a>' in todos
 
 
 def test_leader_todos_tick_back_to_today(client, clock):
@@ -447,6 +447,70 @@ def test_tiles_link_every_section_and_count_quietly(client, clock):
     client.post("/shift/logout")
     login_leader(client)
     assert "3 active" in section(today_page(client), "tiles-head")  # her own counts
+
+
+def todos_tile(client):
+    page = today_page(client)
+    tile = re.search(r'<a class="tile" href="[^"]*"><span class="tile-art"><svg[^>]*>'
+                     r'<circle cx="17" cy="18".*?</a>', page, re.S)
+    assert tile, "no To-dos tile"
+    return tile.group(0)
+
+
+def menu_word(client, label):
+    """The ☰ menu's big word for a section, with its count and current flag."""
+    page = client.get("/shift/more").data.decode()
+    m = re.search(r'<a href="[^"]*"[^>]*><span class="w">' + label + r'.*?</a>', page, re.S)
+    assert m, label
+    return m.group(0)
+
+
+def test_todos_tile_and_menu_word(client, clock):
+    maya = make_leader(client)
+    daniel = make_leader(client, "Daniel", "1111")
+    login_leader(client)
+    tile = todos_tile(client)
+    assert f'href="/shift/todo/{maya}"' in tile and "To-dos" in tile
+    assert "All caught up" in tile and 'class="count"' not in tile
+    assert 'class="count"' not in menu_word(client, "To-dos")
+    shift_db.add_task(maya, "Order headset batteries", "", "2026-10-22", "Operator")  # overdue
+    shift_db.add_task(maya, "Pretzel training", "", "2026-10-23", "Daniel")          # due today
+    shift_db.add_task(maya, "Clean the office", "", None, "Operator")
+    shift_db.add_task(daniel, "Daniel's own", "", "2026-10-01", "Operator")           # not hers
+    shift_db.add_task(maya, "Done already", "", None, "Operator")
+    task = next(t for t in shift_db.tasks_for_leader(maya)[0] if t["title"] == "Done already")
+    shift_db.set_task_done(task["id"], True, "Maya")
+    tile = todos_tile(client)
+    assert "3 open · 1 overdue" in tile                          # her own, open only
+    assert '<span class="count" aria-hidden="true">1</span>' in tile   # red only when overdue
+    word = menu_word(client, "To-dos")
+    assert 'href="/shift/todo"' in word and '<span class="count">3</span>' in word
+    client.post("/shift/logout")
+    login_operator(client)                                       # the whole team's
+    tile = todos_tile(client)
+    assert 'href="/shift/todo"' in tile and "4 open · 2 overdue" in tile
+    assert '<span class="count">4</span>' in menu_word(client, "To-dos")
+    shift_db.set_leader_active(daniel, False)                    # a departed leader's
+    assert "3 open · 1 overdue" in todos_tile(client)            # don't count
+    for t in shift_db.tasks_for_leader(maya)[0]:
+        shift_db.set_task_done(t["id"], True, "Operator")
+    tile = todos_tile(client)
+    assert "Assign one" in tile and 'class="count"' not in tile
+
+
+def test_todo_pages_are_their_own_section(client, clock):
+    maya = make_leader(client)
+    login_leader(client)
+    for url in ("/shift/todo", f"/shift/todo/{maya}"):
+        page = client.get(url).data.decode()
+        assert '<p class="eyebrow">To-dos</p>' in page, url
+        assert "Meetings · To-dos" not in page and "← Meetings" not in page, url
+    import teamhub_nav
+    assert teamhub_nav.section_for("shift.todo", "leader") == "todos"
+    assert teamhub_nav.section_for("shift.todo_leader", "operator") == "todos"
+    page = client.get("/shift/todo").data.decode()            # not lit up as Meetings
+    tab = re.search(r'<a href="/shift/oneonone"[^>]*>', page)
+    assert tab and 'aria-current' not in tab.group(0)
 
 
 def recovery_tile(client):
