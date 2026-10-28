@@ -57,8 +57,12 @@ Canada.
   under `/shift/recovery` (guest + issue + make-it-right remedy; states
   open → contacted/coming-back → resolved, listed on the Recovery page
   until closed, with a count on Today's Guest Recovery tile and in the ☰
-  menu; guest name/contact only — never payment info), and
-  per-leader
+  menu; guest name/contact only — never payment info), an equipment &
+  repair tracker under `/shift/equipment` (table `equipment_issues`: what's
+  broken, where, impact, food-safety flag; reported → service called →
+  fixed, with a count on Today's Equipment tile and in the ☰ menu and a
+  90-day per-equipment repeat count; equipment and vendor details only),
+  and per-leader
   leadership-course tracking under `/shift/development` — course
   structure pinned from Drive in `shift_course.py`). Blueprint
   registers fault-isolated so it can never take down the bots. Storage is

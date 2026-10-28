@@ -1,0 +1,196 @@
+{% extends "shift/base.html" %}
+{% from "shift/_leader_ui.html" import ui_styles, month_day, short_stamp with context %}
+{% block title %}Equipment & repairs{% endblock %}
+{% block head %}{{ ui_styles() }}
+<style>
+.eq { padding: 16px; }
+.eq.alert { border-color: var(--red-200); box-shadow: inset 4px 0 0 var(--accent); }
+.eq-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.eq-head .row-meta { margin: 0; white-space: nowrap; }
+.eq .tags { margin-top: 8px; }
+.eq .said { font-size: 0.9375rem; color: var(--text); white-space: pre-line; margin-top: 8px; line-height: 1.45; }
+.eq .agreed { font-size: 0.9375rem; color: var(--text-strong); margin-top: 8px; }
+.eq .row-meta.by { margin-top: 8px; }
+.eq-acts { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 14px; align-items: center; }
+.eq-acts form { margin: 0; }
+.eq-acts details > summary { list-style: none; }
+.eq-acts details > summary::-webkit-details-marker { display: none; }
+.eq-acts details[open] { flex-basis: 100%; order: -1; }
+.eq-acts details[open] > summary { margin-bottom: 10px; }
+.eq-acts details form .btn { margin-top: 10px; }
+.done-row .row-title { color: var(--text-muted); }
+.done-row .acts { margin-top: 4px; }
+.stat .bar > span { background: var(--accent); }
+</style>
+{% endblock %}
+
+{% macro badges(e) %}
+<div class="row-meta tags">
+  {% if e.food_safety %}<span class="badge b-red">{{ icon('shield') }}Food safety</span>{% endif %}
+  <span class="badge {{ 'b-red' if e.impact == 'down' and not e.fixed_at else 'b-tan' }}">{{ IMPACT_LABELS.get(e.impact, e.impact) }}</span>
+  <span class="badge b-tan">{{ AREA_LABELS.get(e.area, e.area) }}</span>
+</div>
+{% endmacro %}
+
+{% macro delete_form(e) %}
+{% if shift_is_admin %}
+<form method="post" action="{{ url_for('shift.equipment_delete', issue_id=e.id) }}"
+      onsubmit="return confirm('Delete this from the list? Use Fixed instead to keep its history.');">
+  <button class="linkbtn" type="submit">Delete</button>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro fixed_form(e, label) %}
+<details>
+  <summary class="btn btn-primary sm">{{ icon('check') }}{{ label }}</summary>
+  <form method="post" action="{{ url_for('shift.equipment_fixed', issue_id=e.id) }}">
+    <input type="hidden" name="fixed" value="1">
+    <label class="sr" for="f-{{ e.id }}">What was done</label>
+    <input type="text" id="f-{{ e.id }}" name="note" placeholder="What was done — e.g. replaced the thermostat">
+    <button class="btn btn-primary sm" type="submit">Mark fixed</button>
+  </form>
+</details>
+{% endmacro %}
+
+{% block content %}
+{% set n_call, n_waiting = to_call | length, waiting | length %}
+{% set n_down = (to_call + waiting) | selectattr('impact', 'equalto', 'down') | list | length %}
+<section class="hero compact">
+  <p class="eyebrow">Equipment &amp; repairs</p>
+  <h1 class="headline">{% if n_call %}{{ n_call }} to call in{% elif n_waiting %}{{ n_waiting }} awaiting repair{% else %}Everything's working{% endif %}</h1>
+  <p class="triage"><b>{{ n_call }}</b> to call in · <b>{{ n_waiting }}</b> awaiting repair · <b>{{ n_down }}</b> out of service</p>
+</section>
+
+<div class="split">
+<details class="feature cream composer" id="report" open>
+  <summary><span class="plus">{{ icon('plus') }}</span><span class="grow">Report a problem</span>{{ icon('chev', 'chev') }}</summary>
+  <form method="post" action="{{ url_for('shift.equipment_create') }}">
+    <label class="field" for="e-what">What's broken</label>
+    <input type="text" id="e-what" name="equipment" required maxlength="{{ equipment_max }}"
+           list="e-suggest" autocomplete="off" placeholder="e.g. Fryer 3, Ice machine">
+    <datalist id="e-suggest">
+      {% for s in SUGGESTIONS %}<option value="{{ s }}">{% endfor %}
+    </datalist>
+    <label class="field" for="e-area">Where</label>
+    <select id="e-area" name="area">
+      {% for a in AREAS %}<option value="{{ a }}">{{ AREA_LABELS[a] }}</option>{% endfor %}
+    </select>
+    <label class="field" for="e-impact">How bad</label>
+    <select id="e-impact" name="impact">
+      {% for i in IMPACTS %}<option value="{{ i }}"{% if i == 'limited' %} selected{% endif %}>{{ IMPACT_LABELS[i] }}</option>{% endfor %}
+    </select>
+    <label class="check"><input type="checkbox" name="food_safety" value="1"><span>Food safety risk<small>Not holding temperature, sanitizer, hand sink, pests — goes to the top of the list</small></span></label>
+    <label class="field" for="e-problem">What's wrong</label>
+    <textarea id="e-problem" name="problem"
+      placeholder="What it's doing + any workaround — e.g. not holding 350°, using fryer 2 for now"></textarea>
+    <label class="field" for="e-service">Already called for service?</label>
+    <input type="text" id="e-service" name="service_note"
+           placeholder="Optional — who's coming + when, ticket #">
+    <label class="check"><input type="checkbox" name="fixed_now" value="1"><span>Fixed it already — just logging it</span></label>
+    <button class="btn btn-primary block" type="submit">Report it</button>
+  </form>
+</details>
+
+<div class="feed">
+<section class="sec" id="to-call">
+  <div class="sec-head"><h2>To call in {% if n_call %}<span class="badge b-red">{{ n_call }}</span>{% endif %}</h2></div>
+  {% for e in to_call %}
+  <article class="card eq {{ 'alert' if e.food_safety or e.impact == 'down' or e.stale }}" id="eq-{{ e.id }}">
+    <div class="eq-head">
+      <span class="row-title">{{ e.equipment }}</span>
+      <span class="row-meta"{% if e.stale %} style="color:var(--red-700); font-weight:700;"{% endif %}>{{ month_day(e.report_date) }}{% if e.days_down %} · {{ e.days_down }}d{% endif %}</span>
+    </div>
+    {{ badges(e) }}
+    {% if e.problem %}<p class="said">{{ e.problem }}</p>{% endif %}
+    <p class="row-meta by">Reported by {{ e.reported_by }} · {{ short_stamp(e.created_at) }}</p>
+    <div class="eq-acts">
+      <details>
+        <summary class="btn btn-secondary sm">{{ icon('phone') }}Service called</summary>
+        <form method="post" action="{{ url_for('shift.equipment_called', issue_id=e.id) }}">
+          <input type="hidden" name="called" value="1">
+          <label class="sr" for="c-{{ e.id }}">Who's coming and when</label>
+          <input type="text" id="c-{{ e.id }}" name="note" placeholder="Who's coming + when — e.g. Hobart, Thu AM, ticket 4471">
+          <button class="btn btn-secondary sm" type="submit">Mark called in</button>
+        </form>
+      </details>
+      {{ fixed_form(e, 'Fixed') }}
+      {{ delete_form(e) }}
+    </div>
+  </article>
+  {% else %}
+  <div class="empty">{% if waiting %}Nothing left to call in — {{ n_waiting }} awaiting repair below.{% else %}Nothing to call in — everything's working.{% endif %}</div>
+  {% endfor %}
+</section>
+
+{% if waiting %}
+<section class="sec" id="waiting">
+  <div class="sec-head"><h2>Awaiting repair ({{ n_waiting }})</h2></div>
+  {% for e in waiting %}
+  <article class="card eq {{ 'alert' if e.food_safety }}" id="eq-{{ e.id }}">
+    <div class="eq-head">
+      <span class="row-title">{{ e.equipment }}</span>
+      <span class="row-meta">{{ month_day(e.report_date) }}{% if e.days_down %} · {{ e.days_down }}d{% endif %}</span>
+    </div>
+    {{ badges(e) }}
+    {% if e.service_note %}<p class="agreed"><b>Service:</b> {{ e.service_note }}</p>{% endif %}
+    {% if e.problem %}<p class="said">{{ e.problem }}</p>{% endif %}
+    <p class="row-meta tags by"><span>Called in {{ short_stamp(e.called_at) }} by {{ e.called_by }}</span>{% if e.waiting_days %}<span class="badge {{ 'b-red' if e.waiting_days >= 7 else 'b-tan' }}">Waiting {{ e.waiting_days }}d</span>{% endif %}</p>
+    <div class="eq-acts">
+      {{ fixed_form(e, 'Fixed') }}
+      <form method="post" action="{{ url_for('shift.equipment_called', issue_id=e.id) }}"
+            onsubmit="return confirm('Undo? This clears the called-in stamp and the service note, and moves it back to To call in.');">
+        <input type="hidden" name="called" value="0">
+        <button class="linkbtn" type="submit">Undo</button>
+      </form>
+      {{ delete_form(e) }}
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if fixed %}
+<details class="fold" id="fixed">
+  <summary><span class="grow">Fixed ({% if fixed | length >= 50 %}latest 50{% else %}{{ fixed | length }}{% endif %})</span>{{ icon('chev', 'chev') }}</summary>
+  <div class="card list">
+    {% for e in fixed %}
+    <div class="row top done-row" id="eq-{{ e.id }}">
+      <span class="lead-ico green">{{ icon('check') }}</span>
+      <div class="row-main">
+        <span class="row-title">{{ e.equipment }}</span>
+        {{ badges(e) }}
+        {% if e.fix_note %}<span class="row-body">{{ e.fix_note }}</span>{% endif %}
+        <span class="row-meta">Reported {{ month_day(e.report_date) }}{% if e.service_note %} · service: {{ e.service_note }}{% endif %} · fixed {{ short_stamp(e.fixed_at) }} by {{ e.fixed_by }}{% if e.days_down %} · {{ e.days_down }}d to fix{% endif %}</span>
+        <div class="acts">
+          <form method="post" action="{{ url_for('shift.equipment_fixed', issue_id=e.id) }}">
+            <input type="hidden" name="fixed" value="0">
+            <button class="linkbtn nav" type="submit">Reopen</button>
+          </form>
+          {{ delete_form(e) }}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+{% if repeats %}
+{% set max_count = repeats | map(attribute='count') | max %}
+<details class="fold" id="radar">
+  <summary><span class="grow">Last 90 days</span>{{ icon('chev', 'chev') }}</summary>
+  <div class="card">
+    {% for row in repeats %}
+    <div class="stat">
+      <div class="row-between"><span>{{ row.equipment }}</span><b>{{ row.count }}</b></div>
+      <span class="bar"><span style="width: {{ (row.count / max_count * 100) | round }}%"></span></span>
+    </div>
+    {% endfor %}
+    <p class="hint">The most-reported equipment (top 8). The same one on here again and again? Worth asking the vendor about a replacement.</p>
+  </div>
+</details>
+{% endif %}
+</div>
+</div>
+{% endblock %}

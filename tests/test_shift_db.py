@@ -2552,6 +2552,142 @@ def test_recoveries_survive_export_import(isolated_db):
     assert shift_db.open_recovery_count() == 0
 
 
+# --- Equipment & repairs ------------------------------------------------------
+
+def _set_report_date(issue_id, day):
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE equipment_issues SET report_date=? WHERE id=?", (day, issue_id))
+
+
+def test_equipment_lifecycle(isolated_db):
+    eid = shift_db.add_equipment_issue("  Fryer   3 ", "kitchen", "down", False,
+                                       "Not holding 350°, using fryer 2", "Maya")
+    e = shift_db.get_equipment_issue(eid)
+    assert (e["equipment"], e["area"], e["impact"], e["food_safety"]) == \
+        ("Fryer 3", "kitchen", "down", 0)
+    assert e["reported_by"] == "Maya" and e["report_date"] == shift_db.today_local()
+    assert shift_db.equipment_counts() == (1, 0)
+    # Service called: moves to waiting, with who/when/note
+    assert shift_db.set_equipment_called(eid, True, "Hobart, Thu AM, #4471", "Daniel")
+    assert not shift_db.set_equipment_called(eid, True, "", "Maya")   # stale page: no-op
+    to_call, waiting, fixed = shift_db.equipment_feed()
+    assert to_call == [] and [w["id"] for w in waiting] == [eid] and fixed == []
+    assert (waiting[0]["called_by"], waiting[0]["service_note"]) == \
+        ("Daniel", "Hobart, Thu AM, #4471")
+    assert shift_db.equipment_counts() == (0, 1)
+    # Undo puts it back, clearing the stamp and the note
+    assert shift_db.set_equipment_called(eid, False, "", "Daniel")
+    e = shift_db.get_equipment_issue(eid)
+    assert e["called_at"] is None and e["service_note"] is None
+    # Fixed (straight from "to call in" — fixed in-house), first stamp kept
+    assert shift_db.set_equipment_fixed(eid, True, "Reset the high-limit", "Maya")
+    assert not shift_db.set_equipment_fixed(eid, True, "", "Daniel")
+    assert not shift_db.set_equipment_called(eid, True, "", "Daniel")  # fixed: can't call in
+    _, _, fixed = shift_db.equipment_feed()
+    assert fixed[0]["fixed_by"] == "Maya" and fixed[0]["fix_note"] == "Reset the high-limit"
+    assert fixed[0]["days_down"] == 0
+    assert shift_db.equipment_counts() == (0, 0)
+    # Reopen clears the fix; reopening again is a no-op
+    assert shift_db.set_equipment_fixed(eid, False, "", "Daniel")
+    assert not shift_db.set_equipment_fixed(eid, False, "", "Daniel")
+    e = shift_db.get_equipment_issue(eid)
+    assert e["fixed_at"] is None and e["fix_note"] is None and e["fixed_by"] is None
+    shift_db.delete_equipment_issue(eid)
+    assert shift_db.get_equipment_issue(eid) is None
+    assert not shift_db.set_equipment_fixed(eid, True, "", "Maya")     # gone: False
+
+
+def test_equipment_report_needs_a_name_and_coerces_choices(isolated_db):
+    assert shift_db.add_equipment_issue("   ", "kitchen", "down", False, "", "Maya") is None
+    eid = shift_db.add_equipment_issue("x" * 200, "the moon", "on fire", True, "", "Maya")
+    e = shift_db.get_equipment_issue(eid)
+    assert len(e["equipment"]) == shift_db.EQUIPMENT_MAX
+    assert (e["area"], e["impact"], e["food_safety"]) == ("other", "limited", 1)
+
+
+def test_equipment_report_already_called_or_fixed(isolated_db):
+    called = shift_db.add_equipment_issue("Ice machine", "front-counter", "limited", False,
+                                          "", "Maya", service_note="  Reiss, Monday ")
+    blank = shift_db.add_equipment_issue("Toaster", "kitchen", "limited", False,
+                                         "", "Maya", service_note="   ")
+    fixed = shift_db.add_equipment_issue("Hand sink", "kitchen", "down", True,
+                                         "Clog", "Maya", service_note="Plumber",
+                                         fixed_now=True)
+    to_call, waiting, done = shift_db.equipment_feed()
+    assert [e["id"] for e in to_call] == [blank]
+    assert [e["id"] for e in waiting] == [called]
+    assert waiting[0]["service_note"] == "Reiss, Monday" and waiting[0]["called_by"] == "Maya"
+    assert [e["id"] for e in done] == [fixed] and done[0]["called_at"] is None
+    assert done[0]["service_note"] == "Plumber"                 # who did it is kept
+
+
+def test_equipment_order_food_safety_then_out_of_service_then_oldest(isolated_db):
+    minor_old = shift_db.add_equipment_issue("Chair", "dining-room", "minor", False, "", "M")
+    _set_report_date(minor_old, "2020-01-01")
+    limited = shift_db.add_equipment_issue("Toaster", "kitchen", "limited", False, "", "M")
+    down_new = shift_db.add_equipment_issue("Grill", "kitchen", "down", False, "", "M")
+    down_old = shift_db.add_equipment_issue("Fryer 3", "kitchen", "down", False, "", "M")
+    _set_report_date(down_old, "2020-01-02")
+    safety = shift_db.add_equipment_issue("Walk-in cooler", "kitchen", "minor", True, "", "M")
+    to_call, _, _ = shift_db.equipment_feed()
+    assert [e["id"] for e in to_call] == [safety, down_old, down_new, limited, minor_old]
+    assert to_call[1]["stale"] and to_call[1]["days_down"] >= 2
+    assert not to_call[2]["stale"] and to_call[2]["days_down"] == 0
+
+
+def test_equipment_days_and_waiting(isolated_db, monkeypatch):
+    monkeypatch.setattr(shift_db, "today_local", lambda: "2026-10-23")
+    monkeypatch.setattr(shift_db, "now_stamp", lambda: "2026-10-21 14:00")
+    eid = shift_db.add_equipment_issue("Ice machine", "front-counter", "down", False, "", "M")
+    _set_report_date(eid, "2026-10-20")
+    shift_db.set_equipment_called(eid, True, "Reiss", "M")          # called Oct 21
+    _, waiting, _ = shift_db.equipment_feed()
+    assert (waiting[0]["days_down"], waiting[0]["waiting_days"]) == (3, 2)
+    monkeypatch.setattr(shift_db, "now_stamp", lambda: "2026-10-24 02:30")  # Friday's close
+    shift_db.set_equipment_fixed(eid, True, "", "M")
+    assert shift_db.equipment_feed()[2][0]["days_down"] == 3        # fixed on the 23rd's shift
+    # Reopened, it's back with its service call; a corrupt date never breaks the page
+    _set_report_date(eid, "10/20/2026")
+    shift_db.set_equipment_fixed(eid, False, "", "M")
+    assert shift_db.equipment_feed()[1][0]["days_down"] == 0
+
+
+def test_equipment_repeats_count_by_name_over_90_days(isolated_db):
+    from datetime import date, timedelta
+    today = date.fromisoformat(shift_db.today_local())
+    for name in ("Fryer 3", "fryer 3", "FRYER 3 "):
+        shift_db.add_equipment_issue(name, "kitchen", "down", False, "", "M")
+    for name in ("Écran KPS", "écran kps"):                     # accents fold too
+        shift_db.add_equipment_issue(name, "kitchen", "limited", False, "", "M")
+    shift_db.add_equipment_issue("Ice machine", "front-counter", "limited", False, "", "M")
+    edge = shift_db.add_equipment_issue("Toaster", "kitchen", "limited", False, "", "M")
+    _set_report_date(edge, (today - timedelta(days=89)).isoformat())     # in
+    old = shift_db.add_equipment_issue("Dish machine", "kitchen", "limited", False, "", "M")
+    _set_report_date(old, (today - timedelta(days=90)).isoformat())      # out
+    repeats = shift_db.equipment_repeats()
+    assert repeats[0] == {"equipment": "FRYER 3", "count": 3}           # last spelling
+    assert {"equipment": "Toaster", "count": 1} in repeats
+    assert {"equipment": "écran kps", "count": 2} in repeats
+    assert all(r["equipment"] != "Dish machine" for r in repeats)
+    assert len(shift_db.equipment_repeats(limit=2)) == 2
+
+
+def test_equipment_survives_export_import(isolated_db):
+    eid = shift_db.add_equipment_issue("Ice machine", "drive-thru", "down", True,
+                                       "No ice", "Maya", service_note="Reiss")
+    raw = shift_db.export_json()
+    shift_db.delete_equipment_issue(eid)
+    assert shift_db.import_json(raw) is None
+    _, waiting, _ = shift_db.equipment_feed()
+    assert (waiting[0]["equipment"], waiting[0]["food_safety"], waiting[0]["service_note"]) \
+        == ("Ice machine", 1, "Reiss")
+    # A backup from before the tracker restores cleanly, to an empty list.
+    old = json.loads(raw)
+    del old["equipment_issues"]
+    assert shift_db.import_json(json.dumps(old)) is None
+    assert shift_db.equipment_counts() == (0, 0)
+
+
 def test_recent_dates_shape(isolated_db):
     dates = shift_db.recent_dates(3)
     assert len(dates) == 3
