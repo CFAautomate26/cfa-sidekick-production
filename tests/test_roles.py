@@ -93,8 +93,7 @@ def table(w):
         ("/shift/", LEADERS), ("/shift/?edit=goals", LEADERS), ("/shift/more", LEADERS),
         ("/shift/checklists", LEADERS),
         (f"/shift/checklists/run/{w['run']}", LEADERS), ("/shift/checklists/scorecard", LEADERS),
-        ("/shift/history", LEADERS), ("/shift/lineup", LEADERS), ("/shift/goals", LEADERS),
-        (f"/shift/goals/{w['goal']}", LEADERS), ("/shift/notes", LEADERS),
+        ("/shift/history", LEADERS), ("/shift/goals", LEADERS), ("/shift/notes", LEADERS),
         ("/shift/announcements", LEADERS), ("/shift/recovery", LEADERS),
         ("/shift/equipment", LEADERS),
         ("/shift/shoutouts", LEADERS), ("/shift/roster", LEADERS),
@@ -124,6 +123,23 @@ def test_every_page_for_every_role(world, role):
                 assert status == 200, (role, path, status)
             else:
                 assert status in (302, 404), (role, path, status)
+
+
+def test_retired_pages_land_on_today(world):
+    """Lineups and the Goals section left the app: old links and home-screen
+    shortcuts land a leader on Today, and never get a team member past the
+    leader gate."""
+    for role in ROLES:
+        with cfa_app.app.test_client() as client:
+            sign_in(client, role)
+            for path in ("/shift/lineup", f"/shift/goals/{world['goal']}"):
+                resp = client.get(path)
+                where = resp.headers.get("Location", "")
+                assert resp.status_code == 302, (role, path)
+                if role in LEADERS:
+                    assert where.endswith("/shift/"), (role, path, where)
+                else:
+                    assert "/shift" not in where, (role, path, where)
 
 
 def test_signed_out_sees_only_the_front_door(world):

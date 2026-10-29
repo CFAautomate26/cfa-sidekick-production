@@ -16,7 +16,7 @@ import shift_db
 LEADER_TABS = [
     ("today", "home", "Today", "shift.today"),
     ("checklists", "clip", "Checklists", "shift.checklists"),
-    ("lineups", "users", "Lineups", "shift.lineup"),
+    ("todos", "checkcircle", "To-dos", "shift.todo"),
     ("procedures", "book", "Procedures", "hub.library"),
     ("meetings", "chat", "Meetings", "shift.oneonone"),
 ]
@@ -34,8 +34,7 @@ _SECTION_OF = {
     "shift.run_detail": "checklists", "shift.history": "checklists",
     "shift.admin_templates": "checklists", "shift.admin_template_new": "checklists",
     "shift.admin_template_edit": "checklists",
-    "shift.lineup": "lineups",
-    "shift.goals": "goals", "shift.goal_detail": "goals",
+    "shift.goals": "today",                     # Daily goals: Today's, over time
     "shift.oneonone": "meetings", "shift.oneonone_leader": "meetings",
     "shift.oneonone_member": "meetings",
     "shift.todo": "todos", "shift.todo_leader": "todos",
@@ -113,7 +112,7 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
         tabs = [tab(*t, count=counts.get("to_read", 0) if t[0] == "toread" else 0)
                 for t in MEMBER_TABS]
     else:
-        tabs = [tab(*t, count=counts.get("meetings", 0) if t[0] == "meetings" else 0)
+        tabs = [tab(*t, count=counts.get(t[0], 0) if t[0] in ("meetings", "todos") else 0)
                 for t in LEADER_TABS if up or t[3] != "hub.library"]
 
     big: list[dict] = []
@@ -139,8 +138,6 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
         if up:
             big.append(word("Systems & Procedures", "procedures", "hub.library"))
         big += [word("Checklists", "checklists", "shift.checklists"),
-                word("Lineups & Setups", "lineups", "shift.lineup"),
-                word("Goals", "goals", "shift.goals"),
                 word("Meetings", "meetings", "shift.oneonone", counts.get("meetings", 0)),
                 word("To-dos", "todos", "shift.todo", counts.get("todos", 0)),
                 word("Leadership Development", "development", "shift.development")]

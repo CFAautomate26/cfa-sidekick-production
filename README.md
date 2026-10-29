@@ -10,7 +10,7 @@ one Flask service deployed on Render.
 | --- | --- | --- |
 | GroupMe bot | `app.py` | Team-member support bot — answers `cow:` questions (OpenAI-backed), auto-responds to coverage/sick messages, posts daily affirmations via `/scheduled` endpoints |
 | Slack coverage bot | `slack_coverage.py` | Auto-responds in the #shift-coverage channel: validates 🔄 COVERAGE REQUEST posts and walks people through the release → post → approve flow |
-| **Shift Lead app** | `shift_app.py` + `shift_db.py` | Phone-first leadership tool at `/shift`: daily checklists with who-did-what stamps, position lineups, goals, shift notes, announcements with read receipts, and per-leader leadership-course tracking (`shift_course.py`) |
+| **Shift Lead app** | `shift_app.py` + `shift_db.py` | Phone-first leadership tool at `/shift`: daily checklists with who-did-what stamps, daily goals, to-dos, shift notes, announcements with read receipts, and per-leader leadership-course tracking (`shift_course.py`) |
 | Leadership application | `templates/apply.html` + `assets/leadership-qr/` | CFA-branded fallback application form at `/apply` and the QR poster for the live Google Form |
 | Office QR poster | `assets/shift-qr/` | Print-ready poster pointing leaders at the Shift Lead app |
 

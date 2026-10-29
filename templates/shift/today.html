@@ -74,7 +74,7 @@
         <button class="btn btn-primary" type="submit">{{ icon('target', 'sm') }}{{ 'Save goals' if goals else "Set today's goals" }}</button>
         {% if goals %}<a class="textlink" href="{{ url_for('shift.today') }}#goals">Cancel</a>{% endif %}
       </div>
-      <p class="private">{% if my_leader_id %}Only you and the Operator see these.{% else %}Only you see these. Your leaders' goals are on the Goals page.{% endif %} Leave a goal blank to clear it.</p>
+      <p class="private">{% if my_leader_id %}Only you and the Operator see these.{% else %}Only you see these. Your leaders' are under Your leaders.{% endif %} Leave a goal blank to clear it.</p>
     </form>
     {% else %}
     <div class="card list">
@@ -101,8 +101,8 @@
       {% endfor %}
     </div>
     {% endif %}
-    {% if yesterday_set and not editing %}
-    <p class="since">Yesterday you hit <b>{{ yesterday_done }} of {{ yesterday_set }}</b>.</p>
+    {% if not editing %}
+    <p class="since">{% if yesterday_set %}Yesterday you hit <b>{{ yesterday_done }} of {{ yesterday_set }}</b>. {% endif %}<a class="textlink" href="{{ url_for('shift.goals') }}">Past days</a></p>
     {% endif %}
   </section>
 
@@ -152,8 +152,6 @@
   {% set meetings = (nav.tabs | selectattr('key', 'equalto', 'meetings') | first) if nav else none %}
   <div class="tiles small">
     <a class="tile" href="{{ url_for('shift.checklists') }}"><span class="tile-art">{{ art('checklists') }}</span><span class="tile-name">Checklists</span><span class="tile-meta">{% if due %}{{ due | length }} due now{% else %}All done for now{% endif %}</span></a>
-    <a class="tile" href="{{ url_for('shift.lineup') }}"><span class="tile-art">{{ art('lineup') }}</span><span class="tile-name">Lineups &amp; Setups</span><span class="tile-meta">{% if not lineup.started %}Not set yet{% elif lineup.open %}{{ lineup.open }} open{% else %}All filled{% endif %}</span></a>
-    <a class="tile" href="{{ url_for('shift.goals') }}"><span class="tile-art">{{ art('goals') }}</span><span class="tile-name">Goals</span><span class="tile-meta">{% if goal_count %}{{ goal_count }} active{% elif goals %}{{ goals | length }} of 2 set today{% else %}None yet{% endif %}</span></a>
     <a class="tile" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) if my_leader_id else url_for('shift.todo') }}"><span class="tile-art">{{ art('todos') }}{% if todo_overdue %}<span class="count" aria-hidden="true">{{ todo_overdue }}</span>{% endif %}</span><span class="tile-name">To-dos</span><span class="tile-meta">{% if todo_open %}{{ todo_open }} open{% if todo_overdue %} · {{ todo_overdue }} overdue{% endif %}{% else %}{{ 'All caught up' if my_leader_id else 'Assign one' }}{% endif %}</span></a>
     <a class="tile" href="{{ url_for('shift.recovery') }}"><span class="tile-art">{{ art('recovery') }}{% if recoveries_open %}<span class="count" aria-hidden="true">{{ recoveries_open }}</span>{% endif %}</span><span class="tile-name">Guest Recovery</span><span class="tile-meta">{% if recoveries_open %}{{ recoveries_open }} open{% if recoveries_back %} · {{ recoveries_back }} coming back{% endif %}{% elif recoveries_back %}{{ recoveries_back }} coming back{% else %}Log a guest{% endif %}</span></a>
     <a class="tile" href="{{ url_for('shift.equipment') }}"><span class="tile-art">{{ art('equipment') }}{% if repairs_to_call %}<span class="count" aria-hidden="true">{{ repairs_to_call }}</span>{% endif %}</span><span class="tile-name">Equipment</span><span class="tile-meta">{% if repairs_to_call %}{{ repairs_to_call }} to call in{% if repairs_waiting %} · {{ repairs_waiting }} awaiting repair{% endif %}{% elif repairs_waiting %}{{ repairs_waiting }} awaiting repair{% else %}All working{% endif %}</span></a>

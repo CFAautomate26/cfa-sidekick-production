@@ -12,11 +12,12 @@ deployment. Team Hub's look, navigation and sign-in are described in
   open to-dos, and a tile into every section (Guest Recovery's and
   Equipment's tiles show a red count while a guest is still waiting to be
   reached or a breakdown hasn't been called in). Checklists, guests,
-  repairs, the lineup, notes and announcements live on their own pages;
+  repairs, notes and announcements live on their own pages;
   Today only carries a quiet count on each tile and one link when an
   announcement is unread. Daily goals are private to each leader and the Operator (like
-  1:1s); the Operator sees every leader's on Goals › Daily goals, and each
-  leader sees their own last week there.
+  1:1s); "Past days" under them opens the Daily goals page
+  (`/shift/goals`), where each leader sees their own last week and the
+  Operator also sees every leader's goals for today.
 - **Shift checklists** — FOH/BOH opening, breakfast→lunch transition,
   afternoon reset, and closing lists generated fresh every day. Tapping an
   item stamps *who* checked it and *when*. Items marked **critical**
@@ -66,17 +67,17 @@ deployment. Team Hub's look, navigation and sign-in are described in
   made on a Sunday applies from the next week. Manager checks count from
   the day the button arrived. Holidays the store is closed do count as
   not opened — read those squares accordingly.
-- **Lineup / setup sheet** — assign team members to positions per daypart,
-  with one-tap **copy from yesterday** or **copy from the previous daypart**,
-  and name autosuggest from the roster.
-- **Goals** — targets with a metric, unit, direction (higher/lower is
-  better), and rhythm; any leader logs progress numbers or notes; progress
-  bars everywhere; mark achieved 🏆 or archive.
+- **Lineups and the Goals section came out of the app** (October 2026):
+  lineups are done on the floor with the setup sheets, and goal setting
+  happens in person. Their tables (`positions`, `lineup_assignments`,
+  `goals`, `goal_updates`) and backups are kept, so nothing saved was lost;
+  old links and home-screen shortcuts to them land on Today. Today's two
+  daily goals stay.
 - **Shift notes** — the store logbook (wins / issues / equipment / staffing /
   guest / food-safety), a handoff for the next shift.
 - **Announcements** — Operator/admin posts; every leader taps **Got it**, and
   admins see exactly who has acknowledged.
-- **History** — any past day's checklists (who did what), lineups, and notes.
+- **History** — any past day's checklists (who did what) and notes.
 - **Leader to-dos** (`/shift/todo`, its own word in the ☰ menu and a
   To-dos tile on Today) — any leader assigns tasks to any leader (title,
   details, due date; stamped with who assigned it); each leader's open
@@ -127,11 +128,8 @@ deployment. Team Hub's look, navigation and sign-in are described in
   during the 1-on-1 each topic is checked off (who/when stamped) with an
   optional outcome note, unchecked topics carry forward automatically, and
   past meetings form a browsable thread. Action items drop straight onto
-  the leader's to-do list, and the page gathers their personal goals
-  (goals can be tagged to a leader; a tagged goal is private to that
-  leader + the Operator everywhere — the Goals tab and its detail page
-  hide it from everyone else) and course
-  progress — a one-screen sit-down. **Privacy:
+  the leader's to-do list, and the page gathers their open to-dos and
+  course progress — a one-screen sit-down. **Privacy:
   each agenda is visible to that leader and the Operator master login
   only — not to other leaders, and not to admin-role leaders either.**
   Growth and operational topics only; conduct/discipline/wage/health
@@ -142,8 +140,8 @@ deployment. Team Hub's look, navigation and sign-in are described in
   also links their own agenda with the Operator, and the Operator's
   dropdown lists leaders first, then the team. A team-member 1:1 works
   the same way — talking points between meetings, check-offs with outcome
-  notes, carried topics, past-meeting history — minus goals, course, and
-  to-dos (those are leader features). **Privacy: each team-member 1:1
+  notes, carried topics, past-meeting history — minus course and to-dos
+  (those are leader features). **Privacy: each team-member 1:1
   belongs to whoever holds it.** A leader's 1:1s with team members are
   visible to that leader and the Operator only — never to other leaders,
   admin-role included; the Operator's own are Operator-only; and the
@@ -212,7 +210,7 @@ leader tapping the checkmark.
 The Operator's 1:1 page and the Team roster page have a **↻ Pull team from
 Slack #general** button (Operator master login only). It adds everyone in
 #general to the team roster under their Slack real name, so they show up
-in the 1:1 dropdown (and lineup autosuggest):
+in the 1:1 dropdown and shout-out name suggestions:
 
 - Leaders with a login are skipped — they're already under Leaders.
   A login matches the Slack account whose full or display name *is* the
@@ -254,7 +252,7 @@ One-time Slack setup (the bot can only post until you do this):
 ## The persistent disk (do this before rollout)
 
 Render wipes the service filesystem on every deploy. Without this step the
-app still works, but **all checklist history, goals, and notes vanish each
+app still works, but **all checklist history, daily goals, and notes vanish each
 deploy** — the admin page shows a red warning banner while that's the case.
 
 1. Render dashboard → the CFA Sidekick service → **Disks** → **Add Disk**
@@ -328,7 +326,7 @@ scale.
   lock a name for 10 minutes after 5 attempts. Deactivating a leader cuts
   their access on their next request.
 - This is honor-system-grade auth for operational content (checklists,
-  lineups, notes). **Never store HR, discipline, wage, or medical
+  to-dos, notes). **Never store HR, discipline, wage, or medical
   information in this app** — that stays in the processes under
   `docs/legal-counsel/`.
 - Shift notes are operational handoffs. Anything about a specific team

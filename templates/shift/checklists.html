@@ -243,7 +243,7 @@ details.fold > a.row { background: var(--gray-050); }
 </a>
 <div class="card list more-links">
   <a class="row compact" href="{{ url_for('shift.history') }}"><span class="lead-ico">{{ icon('history') }}</span>
-    <span class="row-main"><span class="row-title">Past days</span><span class="row-meta">Who checked what, lineups and notes</span></span>{{ icon('chev', 'chev') }}</a>
+    <span class="row-main"><span class="row-title">Past days</span><span class="row-meta">Who checked what, and the shift notes</span></span>{{ icon('chev', 'chev') }}</a>
   <form method="get" action="{{ url_for('shift.checklists') }}" class="day-pick">
     <label for="pick-day">Checklists for another day</label>
     <div class="inline-form">

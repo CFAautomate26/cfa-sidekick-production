@@ -359,7 +359,7 @@ def test_goals_are_private_to_their_leader_and_the_operator(client, clock):
     client.post(f"/shift/today/goals/{goal['id']}/done", data={"done": "1"})
     assert shift_db.daily_goals(maya, FRI)["leadership"]["done_at"] is None   # only its holder
     goals_page = client.get("/shift/goals").data.decode()
-    daily = goals_page[goals_page.index('id="daily"'):goals_page.index("Store goals")]
+    daily = goals_page[goals_page.index('id="daily"'):]
     assert "Your leaders today" in daily and "private growth goal" in daily
     assert "Drive-Thru" in daily and "Daniel" in daily and "Not set yet today" in daily
 
@@ -423,30 +423,40 @@ def test_yesterday_line(client, clock):
     shift_db.set_daily_goal_done(lead["id"], maya, True)
     shift_db.save_daily_goals(maya, FRI, "Today lead", "Today ops", "BOH")
     login_leader(client)
-    assert "Yesterday you hit <b>1 of 2</b>." in today_page(client)
+    page = today_page(client)
+    assert "Yesterday you hit <b>1 of 2</b>." in page
+    assert '<a class="textlink" href="/shift/goals">Past days</a>' in page
     history = client.get("/shift/goals").data.decode()
-    daily = history[history.index('id="daily"'):history.index("Store goals")]
+    assert "<title>Daily goals" in history or "Daily goals</h1>" in history
+    daily = history[history.index('id="daily"'):]
     assert "Today lead" in daily and "Thu, Oct 22" in daily and "Lead" in daily
 
 
 def test_tiles_link_every_section_and_count_quietly(client, clock):
-    maya = make_leader(client)
-    make_leader(client, "Daniel", "1111")
-    shift_db.create_goal("OSAT 80%", "", "OSAT", "%", 80, "up", "monthly", "", "Operator")
-    shift_db.create_goal("Catering accounts", "", "", "", None, "up", "monthly", "", "Operator")
-    shift_db.create_goal("Maya's personal goal", "", "", "", None, "up", "monthly", "",
-                         "Operator", leader_id=maya)
+    daniel = make_leader(client, "Daniel", "1111")
     login_leader(client, "Daniel", "1111")
     tiles = section(today_page(client), "tiles-head")
-    for href in ("/hub/library", "/shift/checklists", "/shift/lineup", "/shift/goals",
-                 "/shift/oneonone", "/shift/development"):
+    for href in ("/hub/library", "/shift/checklists", f"/shift/todo/{daniel}",
+                 "/shift/recovery", "/shift/equipment", "/shift/oneonone",
+                 "/shift/development"):
         assert f'href="{href}"' in tiles
-    assert "2 active" in tiles                                  # Daniel can't see Maya's
+    assert tiles.count('<a class="tile"') == 7
+    # Lineups and the Goals section left the app (floor setup sheets, goals in person)
+    assert "/shift/lineup" not in tiles and 'href="/shift/goals"' not in tiles
+    assert "Lineups" not in tiles and ">Goals<" not in tiles
     assert "due now" in tiles and "critical" not in tiles       # a count, not an alarm
     assert "0 of " in tiles and "lessons" in tiles
-    client.post("/shift/logout")
+
+
+def test_lineups_and_goals_are_out_of_the_menu_and_tabs(client, clock):
+    make_leader(client)
     login_leader(client)
-    assert "3 active" in section(today_page(client), "tiles-head")  # her own counts
+    page = today_page(client)
+    tabs = page[page.index('<nav class="tabbar"'):page.index("</nav>", page.index('<nav class="tabbar"'))]
+    assert [t for t in re.findall(r"<span>([^<]+)</span>", tabs)] == \
+        ["Today", "Checklists", "To-dos", "Procedures", "Meetings"]
+    menu = client.get("/shift/more").data.decode()
+    assert "Lineups" not in menu and ">Goals<" not in menu and "Goals</span>" not in menu
 
 
 def todos_tile(client):
@@ -643,14 +653,6 @@ def test_cleared_area_stays_cleared(client, clock):
     clock["now"] = at("2026-10-24 09:00")
     goals = goals_section(today_page(client))
     assert 'value=""' in goals
-
-
-def test_goals_tile_counts_todays_goals(client, clock):
-    make_leader(client)
-    login_leader(client)
-    assert "None yet" in section(today_page(client), "tiles-head")
-    client.post("/shift/today/goals", data={"leadership": "L", "operational": "", "area": ""})
-    assert "1 of 2 set today" in section(today_page(client), "tiles-head")
 
 
 def test_announcement_page_link_opens_the_hub_page(client, clock):

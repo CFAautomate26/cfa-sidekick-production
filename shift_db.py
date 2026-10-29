@@ -55,7 +55,6 @@ CLOSED_WEEKDAYS = (6,)
 
 NOTE_CATEGORIES = ["general", "win", "issue", "equipment", "staffing", "guest", "food-safety"]
 
-GOAL_PERIODS = ["daily", "weekly", "monthly", "one-time"]
 # Daily goals: the two a leader sets each business day, in this order.
 DAILY_GOAL_KINDS = ("leadership", "operational")
 DAILY_GOAL_MAX = 200                            # characters per goal
@@ -269,7 +268,7 @@ CREATE TABLE IF NOT EXISTS goals (
     unit TEXT,                                  -- e.g. 'sec', '%', '$'
     target_value REAL,                          -- NULL for yes/no goals
     direction TEXT NOT NULL DEFAULT 'up',       -- up: higher is better, down: lower is better
-    period TEXT NOT NULL DEFAULT 'weekly',      -- one of GOAL_PERIODS
+    period TEXT NOT NULL DEFAULT 'weekly',      -- daily | weekly | monthly | one-time
     due_date TEXT,                              -- YYYY-MM-DD or NULL
     status TEXT NOT NULL DEFAULT 'active',      -- active | achieved | archived
     created_by TEXT,
@@ -1680,200 +1679,6 @@ def set_template_active(template_id: int, active: bool) -> None:
             (1 if active else 0, template_id),
         )
         _log_schedule(conn, template_id)
-
-
-# ---------------------------------------------------------------------------
-# Goals
-# ---------------------------------------------------------------------------
-
-def goals_by_status(status: str = "active", leader_id: int | None = None,
-                    store_only: bool = False) -> list[dict]:
-    """Goals with latest value + progress. leader_id filters to one
-    leader's personal goals (their 1:1 page); store_only keeps the Today
-    dashboard to store-wide goals. Defaults return everything."""
-    q = ("SELECT g.*, ld.name AS leader_name FROM goals g "
-         "LEFT JOIN leaders ld ON ld.id = g.leader_id WHERE g.status=?")
-    params: list = [status]
-    if leader_id is not None:
-        q += " AND g.leader_id=?"
-        params.append(leader_id)
-    elif store_only:
-        q += " AND g.leader_id IS NULL"
-    q += " ORDER BY g.created_at DESC, g.id DESC"
-    with closing(connect()) as conn:
-        goals = [dict(g) for g in conn.execute(q, params).fetchall()]
-        for g in goals:
-            latest = conn.execute(
-                "SELECT value, recorded_at FROM goal_updates WHERE goal_id=? "
-                "AND value IS NOT NULL ORDER BY recorded_at DESC, id DESC LIMIT 1",
-                (g["id"],),
-            ).fetchone()
-            g["latest_value"] = latest["value"] if latest else None
-            g["latest_at"] = latest["recorded_at"] if latest else None
-            g["progress_pct"] = goal_progress_pct(g)
-    return goals
-
-
-def goal_progress_pct(g: dict) -> int | None:
-    """0-100 progress for goals with a numeric target, else None."""
-    target = g.get("target_value")
-    value = g.get("latest_value")
-    if target in (None, 0) or value is None:
-        return None
-    if g.get("direction") == "down":
-        # Lower is better (e.g. DT times): hitting or beating target = 100.
-        if value <= 0:
-            return 100
-        pct = target / value * 100
-    else:
-        pct = value / target * 100
-    if not math.isfinite(pct):
-        return None
-    return max(0, min(100, round(pct)))
-
-
-def goal_with_updates(goal_id: int) -> tuple[dict | None, list[dict]]:
-    with closing(connect()) as conn:
-        g = conn.execute(
-            "SELECT g.*, ld.name AS leader_name FROM goals g "
-            "LEFT JOIN leaders ld ON ld.id = g.leader_id WHERE g.id=?",
-            (goal_id,)).fetchone()
-        if not g:
-            return None, []
-        updates = conn.execute(
-            "SELECT * FROM goal_updates WHERE goal_id=? ORDER BY recorded_at DESC, id DESC",
-            (goal_id,),
-        ).fetchall()
-    g = dict(g)
-    latest = next((u for u in updates if u["value"] is not None), None)
-    g["latest_value"] = latest["value"] if latest else None
-    g["progress_pct"] = goal_progress_pct(g)
-    return g, [dict(u) for u in updates]
-
-
-def create_goal(title: str, why: str, metric: str, unit: str, target_value: float | None,
-                direction: str, period: str, due_date: str, created_by: str,
-                leader_id: int | None = None) -> int:
-    with closing(connect()) as conn, conn:
-        # Re-validate the optional leader tag so a stale form select can't
-        # violate the FK — unknown leader means a store-wide goal.
-        if leader_id is not None and not conn.execute(
-                "SELECT 1 FROM leaders WHERE id=?", (leader_id,)).fetchone():
-            leader_id = None
-        cur = conn.execute(
-            "INSERT INTO goals (title, why, metric, unit, target_value, direction, "
-            "period, due_date, status, created_by, created_at, leader_id) "
-            "VALUES (?,?,?,?,?,?,?,?,'active',?,?,?)",
-            (title, why, metric, unit, target_value, direction, period,
-             due_date or None, created_by, now_stamp(), leader_id),
-        )
-        return cur.lastrowid
-
-
-def add_goal_update(goal_id: int, value: float | None, note: str, by: str) -> None:
-    with closing(connect()) as conn, conn:
-        conn.execute(
-            "INSERT INTO goal_updates (goal_id, value, note, recorded_by, recorded_at) "
-            "VALUES (?,?,?,?,?)",
-            (goal_id, value, note, by, now_stamp()),
-        )
-
-
-def set_goal_status(goal_id: int, status: str) -> None:
-    with closing(connect()) as conn, conn:
-        conn.execute("UPDATE goals SET status=? WHERE id=?", (status, goal_id))
-
-
-# ---------------------------------------------------------------------------
-# Lineup / setup sheet
-# ---------------------------------------------------------------------------
-
-def active_positions() -> list[dict]:
-    with closing(connect()) as conn:
-        return [dict(r) for r in conn.execute(
-            "SELECT * FROM positions WHERE active=1 ORDER BY sort, id"
-        ).fetchall()]
-
-
-def lineup_for(lineup_date: str, daypart: str) -> dict[int, list[dict]]:
-    """position_id -> assignment rows for one date+daypart."""
-    with closing(connect()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM lineup_assignments WHERE lineup_date=? AND daypart=? "
-            "ORDER BY id",
-            (lineup_date, daypart),
-        ).fetchall()
-    out: dict[int, list[dict]] = {}
-    for r in rows:
-        out.setdefault(r["position_id"], []).append(dict(r))
-    return out
-
-
-def assign_position(lineup_date: str, daypart: str, position_id: int,
-                    member_name: str) -> bool:
-    """Assign a name to a position. Returns False for an unknown position
-    (stale form, tampered id) instead of raising. Duplicate (position, name)
-    pairs are absorbed by the uq_lineup_slot unique index."""
-    with closing(connect()) as conn, conn:
-        if not conn.execute(
-            "SELECT 1 FROM positions WHERE id=?", (position_id,)
-        ).fetchone():
-            return False
-        conn.execute(
-            "INSERT OR IGNORE INTO lineup_assignments "
-            "(lineup_date, daypart, position_id, member_name) VALUES (?,?,?,?)",
-            (lineup_date, daypart, position_id, member_name),
-        )
-    return True
-
-
-def unassign(assignment_id: int) -> None:
-    with closing(connect()) as conn, conn:
-        conn.execute("DELETE FROM lineup_assignments WHERE id=?", (assignment_id,))
-
-
-def copy_lineup(from_date: str, from_daypart: str, to_date: str, to_daypart: str) -> int:
-    """Copy a lineup between (date, daypart) slots — 'copy from yesterday' and
-    'copy from the previous daypart' both come through here. Duplicates are
-    absorbed by the uq_lineup_slot unique index. Returns copied count."""
-    copied = 0
-    with closing(connect()) as conn, conn:
-        src = conn.execute(
-            "SELECT position_id, member_name FROM lineup_assignments "
-            "WHERE lineup_date=? AND daypart=? ORDER BY id",
-            (from_date, from_daypart),
-        ).fetchall()
-        for row in src:
-            cur = conn.execute(
-                "INSERT OR IGNORE INTO lineup_assignments "
-                "(lineup_date, daypart, position_id, member_name) VALUES (?,?,?,?)",
-                (to_date, to_daypart, row["position_id"], row["member_name"]),
-            )
-            copied += cur.rowcount
-    return copied
-
-
-def previous_lineup_date(before_date: str, daypart: str) -> str | None:
-    """Most recent date before before_date that has assignments for daypart."""
-    with closing(connect()) as conn:
-        row = conn.execute(
-            "SELECT lineup_date FROM lineup_assignments WHERE daypart=? AND lineup_date<? "
-            "ORDER BY lineup_date DESC LIMIT 1",
-            (daypart, before_date),
-        ).fetchone()
-    return row["lineup_date"] if row else None
-
-
-def recent_lineup_names(days: int = 14) -> list[str]:
-    """Distinct names used in recent lineups, for autosuggest."""
-    since = (date.fromisoformat(today_local()) - timedelta(days=days)).isoformat()
-    with closing(connect()) as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT member_name FROM lineup_assignments WHERE lineup_date>=? "
-            "ORDER BY member_name COLLATE NOCASE",
-            (since,),
-        ).fetchall()
-    return [r["member_name"] for r in rows]
 
 
 # ---------------------------------------------------------------------------

@@ -35,8 +35,10 @@ Canada.
   (Huddle-style: daily/weekly/monthly checklists with who-did-what stamps,
   Owner + Manager check, lock-at-period-end, and a consistency scorecard
   at `/shift/checklists/scorecard` — station cleaning sheets pinned in
-  `shift_cleaning.py`; position
-  lineups, goals, shift notes, announcements with read receipts,
+  `shift_cleaning.py`; shift notes, announcements with read receipts
+  (position lineups and the Goals section were removed in Oct 2026 — done
+  on the floor / in person; their tables and backups are kept, and old
+  URLs redirect to Today),
   a calm Today home (`/shift/`: greeting, the leader's two daily goals —
   leadership + operational for their area of ownership, table
   `daily_goals`, one per kind per holder per business day, NULL holder =
