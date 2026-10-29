@@ -196,39 +196,28 @@ def test_repeat_repairs_radar(client):
     assert re.search(r"fryer 3</span><b>2</b>", radar) and "Ice machine</span><b>1</b>" in radar
 
 
-def tile(client):
-    html = client.get("/shift/").data.decode()
-    m = re.search(r'<a class="tile" href="/shift/equipment">.*?</a>', html, re.S)
-    assert m, "no Equipment tile"
-    return m.group(0)
-
-
 def menu_row(client):
     html = client.get("/shift/more").data.decode()
     i = html.index("Equipment &amp; repairs")
     return html[i:i + 200]
 
 
-def test_today_tile_and_menu_badge(client):
+def test_menu_badge_counts_what_to_call_in(client):
+    """Equipment lives in the ☰ menu (Today is just to-dos): red while
+    something hasn't been called in, a quiet count while awaiting repair."""
     make_leader(client)
     login_leader(client)
-    t = tile(client)
-    assert "Equipment" in t and "All working" in t and 'class="count"' not in t
-    assert "to call in" not in menu_row(client)
+    assert "/shift/equipment" not in client.get("/shift/").data.decode()
+    assert "to call in" not in menu_row(client) and "awaiting" not in menu_row(client)
     report(client)
     first = newest_id()
     report(client, equipment="Ice machine", service_note="Reiss")
-    t = tile(client)
-    assert '<span class="count" aria-hidden="true">1</span>' in t
-    assert "1 to call in · 1 awaiting repair" in t
     assert "1 to call in" in menu_row(client) and "b-red" in menu_row(client)
     client.post(f"/shift/equipment/{first}/called", data={"called": "1", "note": "Hobart"})
-    t = tile(client)
-    assert 'class="count"' not in t and "2 awaiting repair" in t
     assert "2 awaiting repair" in menu_row(client) and "b-tan" in menu_row(client)
     for eid in (first, newest_id()):
         client.post(f"/shift/equipment/{eid}/fixed", data={"fixed": "1"})
-    assert "All working" in tile(client)
+    assert "awaiting" not in menu_row(client) and "to call in" not in menu_row(client)
     client.post("/shift/logout")
     login_operator(client)
-    assert "All working" in tile(client)                        # the Operator has it too
+    assert "Equipment &amp; repairs" in client.get("/shift/more").data.decode()

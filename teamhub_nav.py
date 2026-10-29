@@ -12,12 +12,12 @@ from flask import current_app, request, url_for
 
 import shift_db
 
-# (key, icon, label, endpoint) — labels are a word from the section's name.
-# A leader's tabs are Today and the four things the team uses most:
-# to-dos, Systems & Procedures, 1:1 meetings and Leadership Development.
+# A leader's home is their to-dos (Today), then Checklists and the things
+# the team uses most: Systems & Procedures, 1:1 meetings and Leadership
+# Development. (key, icon, label, endpoint) — labels are a single word.
 LEADER_TABS = [
-    ("today", "home", "Today", "shift.today"),
-    ("todos", "checkcircle", "To-dos", "shift.todo"),
+    ("today", "checkcircle", "To-dos", "shift.today"),
+    ("checklists", "clip", "Checklists", "shift.checklists"),
     ("procedures", "book", "Procedures", "hub.library"),
     ("meetings", "chat", "Meetings", "shift.oneonone"),
     ("development", "cap", "Leadership", "shift.development"),
@@ -36,10 +36,9 @@ _SECTION_OF = {
     "shift.run_detail": "checklists", "shift.history": "checklists",
     "shift.admin_templates": "checklists", "shift.admin_template_new": "checklists",
     "shift.admin_template_edit": "checklists",
-    "shift.goals": "today",                     # Daily goals: Today's, over time
     "shift.oneonone": "meetings", "shift.oneonone_leader": "meetings",
     "shift.oneonone_member": "meetings",
-    "shift.todo": "todos", "shift.todo_leader": "todos",
+    "shift.todo": "today", "shift.todo_leader": "today",   # Today is the to-dos
     "shift.development": "development", "shift.development_leader": "development",
     "hub.home": "home", "hub.to_read": "toread", "hub.me": "me",
 }
@@ -114,7 +113,8 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
         tabs = [tab(*t, count=counts.get("to_read", 0) if t[0] == "toread" else 0)
                 for t in MEMBER_TABS]
     else:
-        tabs = [tab(*t, count=counts.get(t[0], 0) if t[0] in ("meetings", "todos") else 0)
+        tab_counts = {"today": counts.get("todos", 0), "meetings": counts.get("meetings", 0)}
+        tabs = [tab(*t, count=tab_counts.get(t[0], 0))
                 for t in LEADER_TABS if up or t[3] != "hub.library"]
 
     big: list[dict] = []
@@ -136,13 +136,12 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
     else:
         def word(label, key, endpoint, count=0):
             return {"label": label, "url": _url(endpoint), "count": count, "on": key == current}
-        big += [word("Today", "today", "shift.today"),
-                word("To-dos", "todos", "shift.todo", counts.get("todos", 0))]
+        big += [word("To-dos", "today", "shift.today", counts.get("todos", 0)),
+                word("Checklists", "checklists", "shift.checklists")]
         if up:
             big.append(word("Systems & Procedures", "procedures", "hub.library"))
         big += [word("Meetings", "meetings", "shift.oneonone", counts.get("meetings", 0)),
-                word("Leadership Development", "development", "shift.development"),
-                word("Checklists", "checklists", "shift.checklists")]
+                word("Leadership Development", "development", "shift.development")]
         recoveries, unread = counts.get("recoveries", 0), counts.get("unread", 0)
         coming_back = counts.get("coming_back", 0)
         to_call, awaiting = counts.get("repairs_to_call", 0), counts.get("repairs_waiting", 0)
@@ -236,9 +235,11 @@ def leader_nav(kind: str, name: str, role: str, leader_id: int | None) -> dict:
               "recoveries": len(open_recs), "coming_back": len(coming_back),
               "repairs_to_call": to_call, "repairs_waiting": awaiting,
               "meetings": _meetings_count(kind, leader_id),
-              # A leader's own open to-dos; the Operator's, every leader's.
-              "todos": shift_db.open_task_counts(
-                  None if kind == "operator" else leader_id)[0]}
+              # What each home lists: a leader's own open to-dos; the
+              # Operator's, the open ones they handed out.
+              "todos": (shift_db.open_task_counts(assigned_by=name)
+                        if kind == "operator" else
+                        shift_db.open_task_counts(leader_id))[0]}
     if kind == "operator" or role == "admin":
         counts["drafts"] = _hub_drafts()
     return nav_for(kind, name, role, counts)

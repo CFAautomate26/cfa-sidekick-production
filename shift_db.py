@@ -54,14 +54,37 @@ CLOSED_WEEKDAYS = (6,)
 
 NOTE_CATEGORIES = ["general", "win", "issue", "equipment", "staffing", "guest", "food-safety"]
 
-# Daily goals: the two a leader sets each business day, in this order.
-DAILY_GOAL_KINDS = ("leadership", "operational")
-DAILY_GOAL_MAX = 200                            # characters per goal
-AREA_MAX = 40                                   # an area of ownership's name
-# Suggestions for a leader's area of ownership (they can type their own).
-AREA_SUGGESTIONS = ["Front of House", "Back of House", "Drive-Thru", "Hospitality",
-                    "Catering", "Food Safety", "Training", "Talent", "Marketing",
-                    "Facilities"]
+# Which side of the store a checklist belongs to, and which side each leader
+# sees on Checklists (the Operator always sees all). A front-of-house leader
+# sees front + both; back of house, back + both. Not a lock: "Show all"
+# is one tap away — it just keeps a leader's list to their own area.
+CHECKLIST_SIDES = ["foh", "boh", "both"]
+CHECKLIST_SIDE_LABELS = {"foh": "Front of house", "boh": "Back of house",
+                         "both": "Front and back"}
+CHECKLIST_VIEWS = ["all", "foh", "boh"]
+CHECKLIST_VIEW_LABELS = {"all": "Every checklist", "foh": "Front of house",
+                         "boh": "Back of house"}
+_FRONT_AREAS = {"front counter", "dining room", "drive thru", "drive-thru", "washrooms",
+                "front of house", "foh", "hospitality"}
+_BACK_AREAS = {"kitchen", "machines", "boards", "produce", "breading & raw", "breading",
+               "prep", "back of house", "boh"}
+
+
+def side_for(area: str | None, name: str | None = "") -> str:
+    """A list's side from its area (the Operator can change it after). The
+    posted Food Safety Daily Commitment sheet is front-counter and drive-thru
+    stations, whatever its area says."""
+    a = (area or "").strip().lower()
+    if a in _FRONT_AREAS or (name or "").lower().startswith("food safety commitment"):
+        return "foh"
+    if a in _BACK_AREAS:
+        return "boh"
+    return "both"
+
+
+def sides_for_view(view: str | None) -> tuple[str, ...] | None:
+    """The list sides a leader's checklist view shows (None: every list)."""
+    return {"foh": ("foh", "both"), "boh": ("boh", "both")}.get(view or "all")
 
 RECOVERY_ISSUES = ["order-error", "food-quality", "wait-time", "service",
                    "cleanliness", "spill-accident", "catering", "other"]
@@ -465,10 +488,10 @@ CREATE TABLE IF NOT EXISTS oneonone_member_topics (
 CREATE INDEX IF NOT EXISTS idx_oneonone_member_topics
     ON oneonone_member_topics(member_id, discussed_at);
 
--- Daily goals: when a leader signs in they set two goals for the business
--- day, a leadership goal and an operational goal for their area of
--- ownership, and tick them off as they hit them. Private to that leader +
--- the Operator master login, like 1:1 agendas. Work goals only: never
+-- Daily goals (retired from the app in Oct 2026; rows kept, and backed
+-- up): the two goals a leader set for the business day, a leadership goal
+-- and an operational goal for their area of ownership. Private to that
+-- leader + the Operator master login, like 1:1 agendas. Work goals only: never
 -- HR/discipline/wage/medical content. CASCADE: a deleted leader's goals
 -- go with them (import_json re-inserts them from the backup).
 CREATE TABLE IF NOT EXISTS daily_goals (
@@ -893,6 +916,10 @@ def _migrate(conn) -> None:
     # operational goal (NULL until they or the Operator set one).
     if "area" not in cols:
         conn.execute("ALTER TABLE leaders ADD COLUMN area TEXT")
+    # Which side's checklists each leader sees (the Operator sets it).
+    if "checklist_side" not in cols:
+        conn.execute("ALTER TABLE leaders ADD COLUMN "
+                     "checklist_side TEXT NOT NULL DEFAULT 'all'")
     # Checklists gained weekly/monthly lists, the paper sheets' Owner and
     # Manager check, and run-level frequency snapshots. Existing templates
     # and runs are daily, exactly as before.
@@ -902,6 +929,12 @@ def _migrate(conn) -> None:
                      "frequency TEXT NOT NULL DEFAULT 'daily'")
     if "due_weekday" not in cols:
         conn.execute("ALTER TABLE checklist_templates ADD COLUMN due_weekday INTEGER")
+    # Each list's side of the store, worked out from its area once (lists
+    # added later get theirs when they're made).
+    if "side" not in cols:
+        conn.execute("ALTER TABLE checklist_templates ADD COLUMN "
+                     "side TEXT NOT NULL DEFAULT 'both'")
+        _backfill_sides(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(checklist_runs)")}
     for col_def in ("frequency TEXT NOT NULL DEFAULT 'daily'", "owner TEXT",
                     "verified_by TEXT", "verified_at TEXT"):
@@ -950,6 +983,15 @@ def _migrate(conn) -> None:
         conn.execute("UPDATE hub_access SET nonce = lower(hex(randomblob(16)))")
 
 
+def _backfill_sides(conn, template_ids: list[int] | None = None) -> None:
+    """Set lists' side from their area (all lists, or just these ids)."""
+    rows = conn.execute("SELECT id, name, area FROM checklist_templates").fetchall()
+    for r in rows:
+        if template_ids is None or r["id"] in template_ids:
+            conn.execute("UPDATE checklist_templates SET side=? WHERE id=?",
+                         (side_for(r["area"], r["name"]), r["id"]))
+
+
 def _seed_base(conn) -> None:
     seeded = conn.execute("SELECT value FROM meta WHERE key='seeded'").fetchone()
     if seeded:
@@ -957,8 +999,9 @@ def _seed_base(conn) -> None:
     stamp = now_stamp()
     for sort, (name, daypart, area, items) in enumerate(SEED_TEMPLATES):
         cur = conn.execute(
-            "INSERT INTO checklist_templates (name, daypart, area, sort) VALUES (?,?,?,?)",
-            (name, daypart, area, sort),
+            "INSERT INTO checklist_templates (name, daypart, area, sort, side) "
+            "VALUES (?,?,?,?,?)",
+            (name, daypart, area, sort, side_for(area, name)),
         )
         conn.executemany(
             "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
@@ -1123,8 +1166,8 @@ def _seed_cleaning(conn) -> None:
                 continue
             cur = conn.execute(
                 "INSERT INTO checklist_templates (name, daypart, area, sort, frequency, "
-                "due_weekday) VALUES (?,?,?,?,?,?)",
-                (name, daypart, area, sort, frequency, due_weekday),
+                "due_weekday, side) VALUES (?,?,?,?,?,?,?)",
+                (name, daypart, area, sort, frequency, due_weekday, side_for(area, name)),
             )
             conn.executemany(
                 "INSERT INTO checklist_template_items (template_id, label, critical, "
@@ -1319,7 +1362,7 @@ def runs_for_date(run_date: str) -> list[dict]:
             """
             SELECT r.id, r.template_id, r.run_date, r.frequency, r.owner, r.verified_by,
                    r.verified_at, t.name, t.daypart, t.area, t.sort, t.due_weekday,
-                   t.active, t.frequency AS template_frequency, COUNT(i.id) AS total,
+                   t.side, t.active, t.frequency AS template_frequency, COUNT(i.id) AS total,
                    COALESCE(SUM(i.done), 0) AS done,
                    COALESCE(SUM(CASE WHEN i.critical=1 AND i.done=0 THEN 1 ELSE 0 END), 0)
                        AS critical_remaining
@@ -1623,17 +1666,19 @@ def _clean_schedule(frequency: str, due_weekday) -> tuple[str, int | None]:
 
 def create_template(name: str, daypart: str, area: str,
                     items: list[tuple[str, bool]], frequency: str = "daily",
-                    due_weekday: int | None = None) -> int:
-    """items are (label, critical) pairs."""
+                    due_weekday: int | None = None, side: str | None = None) -> int:
+    """items are (label, critical) pairs. No (or an unknown) side: worked
+    out from the area."""
     frequency, due_weekday = _clean_schedule(frequency, due_weekday)
+    side = side if side in CHECKLIST_SIDES else side_for(area, name)
     with closing(connect()) as conn, conn:
         sort = conn.execute(
             "SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM checklist_templates"
         ).fetchone()["s"]
         cur = conn.execute(
             "INSERT INTO checklist_templates (name, daypart, area, sort, frequency, "
-            "due_weekday) VALUES (?,?,?,?,?,?)",
-            (name, daypart, area, sort, frequency, due_weekday),
+            "due_weekday, side) VALUES (?,?,?,?,?,?,?)",
+            (name, daypart, area, sort, frequency, due_weekday, side),
         )
         conn.executemany(
             "INSERT INTO checklist_template_items (template_id, label, critical, sort) "
@@ -1647,17 +1692,18 @@ def create_template(name: str, daypart: str, area: str,
 
 def update_template(template_id: int, name: str, daypart: str, area: str,
                     items: list[tuple[str, bool]], frequency: str = "daily",
-                    due_weekday: int | None = None) -> None:
+                    due_weekday: int | None = None, side: str | None = None) -> None:
     """Replace a template's fields and item list ((label, critical) pairs).
     Existing runs keep their snapshotted items (and frequency, and their
     item ids — a page left open must never check a different item); only
     runs started later pick up the change."""
     frequency, due_weekday = _clean_schedule(frequency, due_weekday)
+    side = side if side in CHECKLIST_SIDES else side_for(area, name)
     with closing(connect()) as conn, conn:
         conn.execute(
             "UPDATE checklist_templates SET name=?, daypart=?, area=?, frequency=?, "
-            "due_weekday=? WHERE id=?",
-            (name, daypart, area, frequency, due_weekday, template_id),
+            "due_weekday=?, side=? WHERE id=?",
+            (name, daypart, area, frequency, due_weekday, side, template_id),
         )
         conn.execute(
             "DELETE FROM checklist_template_items WHERE template_id=?", (template_id,)
@@ -1685,7 +1731,8 @@ def set_template_active(template_id: int, active: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def leaders(include_inactive: bool = False) -> list[dict]:
-    q = "SELECT id, name, role, active, created_at, slack_id, area FROM leaders "
+    q = ("SELECT id, name, role, active, created_at, slack_id, area, checklist_side "
+         "FROM leaders ")
     if not include_inactive:
         q += "WHERE active=1 "
     q += "ORDER BY name COLLATE NOCASE"
@@ -1751,7 +1798,8 @@ def leader_is_active(leader_id: int) -> bool:
 def get_leader(leader_id: int) -> dict | None:
     with closing(connect()) as conn:
         row = conn.execute(
-            "SELECT id, name, role, active, area FROM leaders WHERE id=?", (leader_id,)
+            "SELECT id, name, role, active, area, checklist_side FROM leaders WHERE id=?",
+            (leader_id,)
         ).fetchone()
     return dict(row) if row else None
 
@@ -1772,6 +1820,15 @@ def reset_leader_pin(leader_id: int, pin: str) -> str | None:
             (generate_password_hash(pin), leader_id),
         )
     return None
+
+
+def set_leader_checklist_view(leader_id: int, view: str) -> bool:
+    """Which side's checklists a leader sees: all, foh or boh."""
+    if view not in CHECKLIST_VIEWS:
+        return False
+    with closing(connect()) as conn, conn:
+        return conn.execute("UPDATE leaders SET checklist_side=? WHERE id=?",
+                            (view, leader_id)).rowcount > 0
 
 
 def set_leader_role(leader_id: int, role: str) -> bool:
@@ -1983,119 +2040,11 @@ def delete_task(task_id: int) -> None:
         conn.execute("DELETE FROM leader_tasks WHERE id=?", (task_id,))
 
 
-# ---------------------------------------------------------------------------
-# Daily goals (a leader's leadership + operational goal for the business day)
-# ---------------------------------------------------------------------------
-
-def _goal_text(text: str | None, cap: int) -> str:
-    return " ".join((text or "").split())[:cap]
-
-
-def daily_goals(holder_leader_id: int | None, day: str) -> dict[str, dict]:
-    """{kind: row} for one holder's day (holder None = the Operator's own)."""
-    with closing(connect()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM daily_goals WHERE holder_leader_id IS ? AND day=?",
-            (holder_leader_id, day)).fetchall()
-    return {r["kind"]: dict(r) for r in rows}
-
-
-def save_daily_goals(holder_leader_id: int | None, day: str, leadership: str,
-                     operational: str, area: str) -> None:
-    """Set (or change) one holder's two goals for `day`. A goal left blank
-    is cleared; a goal whose words change is no longer ticked off. A
-    leader's area is remembered on their login for next time."""
-    stamp = now_stamp()
-    area = _goal_text(area, AREA_MAX)
-    texts = {"leadership": _goal_text(leadership, DAILY_GOAL_MAX),
-             "operational": _goal_text(operational, DAILY_GOAL_MAX)}
-    with closing(connect()) as conn, conn:
-        # The read and the writes under one write lock: two quick saves
-        # (a double tap, two phones) queue up instead of both inserting.
-        conn.execute("BEGIN IMMEDIATE")
-        for kind, body in texts.items():
-            row = conn.execute(
-                "SELECT id, body FROM daily_goals WHERE holder_leader_id IS ? AND day=? "
-                "AND kind=?", (holder_leader_id, day, kind)).fetchone()
-            row_area = (area or None) if kind == "operational" else None
-            if not body:
-                if row:
-                    conn.execute("DELETE FROM daily_goals WHERE id=?", (row["id"],))
-            elif row:
-                conn.execute(
-                    "UPDATE daily_goals SET body=?, area=?, updated_at=?, "
-                    "done_at=CASE WHEN body=? THEN done_at ELSE NULL END WHERE id=?",
-                    (body, row_area, stamp, body, row["id"]))
-            else:
-                conn.execute(
-                    "INSERT INTO daily_goals (holder_leader_id, day, kind, body, area, "
-                    "created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
-                    (holder_leader_id, day, kind, body, row_area, stamp, stamp))
-        if holder_leader_id is not None:
-            conn.execute("UPDATE leaders SET area=? WHERE id=?", (area or None, holder_leader_id))
-
-
-def set_daily_goal_done(goal_id: int, holder_leader_id: int | None, done: bool) -> bool:
-    """Tick a goal off (or back on). Only its holder can: False otherwise."""
-    with closing(connect()) as conn, conn:
-        return conn.execute(
-            "UPDATE daily_goals SET done_at=? WHERE id=? AND holder_leader_id IS ?",
-            (now_stamp() if done else None, goal_id, holder_leader_id)).rowcount == 1
-
-
-def holder_area(holder_leader_id: int | None) -> str:
-    """The area to suggest for an operational goal: a leader's saved area
-    (blank if they cleared it); for the Operator, the area on their latest
-    operational goal."""
-    with closing(connect()) as conn:
-        if holder_leader_id is not None:
-            row = conn.execute("SELECT area FROM leaders WHERE id=?",
-                               (holder_leader_id,)).fetchone()
-            return (row["area"] or "") if row else ""
-        row = conn.execute(
-            "SELECT area FROM daily_goals WHERE holder_leader_id IS ? AND kind='operational' "
-            "AND area IS NOT NULL AND area != '' ORDER BY day DESC, id DESC LIMIT 1",
-            (holder_leader_id,)).fetchone()
-    return row["area"] if row else ""
-
-
-def daily_goal_history(holder_leader_id: int | None, before: str,
-                       days: int = 7) -> list[dict]:
-    """One holder's goals on the `days` business days before `before`, newest
-    first, one entry per day that has any: {day, leadership, operational}."""
-    start = (date.fromisoformat(before) - timedelta(days=days)).isoformat()
-    with closing(connect()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM daily_goals WHERE holder_leader_id IS ? AND day >= ? AND day < ? "
-            "ORDER BY day DESC", (holder_leader_id, start, before)).fetchall()
-    by_day: dict[str, dict] = {}
-    for r in rows:
-        by_day.setdefault(r["day"], {"day": r["day"]})[r["kind"]] = dict(r)
-    return list(by_day.values())
-
-
-def team_daily_goals(day: str) -> list[dict]:
-    """Every active leader's goals for `day` (for the Operator), by name:
-    {leader_id, name, area, leadership, operational} with None where unset."""
-    with closing(connect()) as conn:
-        leaders_ = conn.execute(
-            "SELECT id, name, area FROM leaders WHERE active=1 "
-            "ORDER BY name COLLATE NOCASE").fetchall()
-        rows = conn.execute(
-            "SELECT * FROM daily_goals WHERE day=? AND holder_leader_id IS NOT NULL",
-            (day,)).fetchall()
-    goals: dict[int, dict] = {}
-    for r in rows:
-        goals.setdefault(r["holder_leader_id"], {})[r["kind"]] = dict(r)
-    return [{"leader_id": l["id"], "name": l["name"], "area": l["area"] or "",
-             "leadership": goals.get(l["id"], {}).get("leadership"),
-             "operational": goals.get(l["id"], {}).get("operational")}
-            for l in leaders_]
-
-
-def open_task_counts(leader_id: int | None = None) -> tuple[int, int]:
-    """(open, overdue) to-dos for one leader, or with None for every active
-    leader — the To-dos tile and ☰ count. Overdue as leader_task_summary
+def open_task_counts(leader_id: int | None = None,
+                     assigned_by: str | None = None) -> tuple[int, int]:
+    """(open, overdue) to-dos for one leader, the ones `assigned_by` handed
+    out (the Operator's To-dos tab and ☰ count — what their home lists), or
+    with neither every active leader's. Overdue as leader_task_summary
     counts it (a due date before today)."""
     q = ("SELECT COUNT(*), COALESCE(SUM(t.due_date < ?), 0) FROM leader_tasks t "
          "JOIN leaders ld ON ld.id = t.leader_id "
@@ -2104,6 +2053,9 @@ def open_task_counts(leader_id: int | None = None) -> tuple[int, int]:
     if leader_id is not None:
         q += " AND t.leader_id = ?"
         args.append(leader_id)
+    if assigned_by is not None:
+        q += " AND t.assigned_by = ?"
+        args.append(" ".join(assigned_by.split()))
     with closing(connect()) as conn:
         row = conn.execute(q, args).fetchone()
     return row[0], row[1]
@@ -3483,8 +3435,8 @@ def export_json() -> str:
         for table in EXPORT_TABLES:
             payload[table] = [dict(r) for r in conn.execute(f"SELECT * FROM {table}")]
         payload["leaders"] = [dict(r) for r in conn.execute(
-            "SELECT id, name, role, active, created_at, slack_id, area FROM leaders"
-        )]
+            "SELECT id, name, role, active, created_at, slack_id, area, checklist_side "
+            "FROM leaders")]
         conn.commit()
     return json.dumps(payload, ensure_ascii=False, indent=1)
 
@@ -3583,11 +3535,14 @@ def import_json(raw: str) -> str | None:
                     for row in payload.get("leaders", []):
                         conn.execute(
                             "INSERT INTO leaders (id, name, pin_hash, role, active, "
-                            "created_at, slack_id, area) VALUES (?,?,?,?,?,?,?,?)",
+                            "created_at, slack_id, area, checklist_side) "
+                            "VALUES (?,?,?,?,?,?,?,?,?)",
                             (row.get("id"), row.get("name", ""), locked_hash,
                              row.get("role", "lead"), row.get("active", 1),
                              row.get("created_at", now_stamp()),
-                             row.get("slack_id"), row.get("area")),
+                             row.get("slack_id"), row.get("area"),
+                             row.get("checklist_side")
+                             if row.get("checklist_side") in CHECKLIST_VIEWS else "all"),
                         )
                     for table in EXPORT_TABLES:
                         if table in HUB_TABLES and table not in payload:
@@ -3605,6 +3560,11 @@ def import_json(raw: str) -> str | None:
                                 f"VALUES ({','.join('?' * len(cols))})",
                                 [row[c] for c in cols],
                             )
+                    # Lists from a backup made before sides (or with a side
+                    # this version doesn't know) get theirs from their area.
+                    _backfill_sides(conn, [
+                        row.get("id") for row in payload.get("checklist_templates", [])
+                        if row.get("side") not in CHECKLIST_SIDES])
                     for row in access:
                         # A fresh nonce: everyone signs in again after a restore.
                         conn.execute(

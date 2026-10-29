@@ -18,7 +18,7 @@ import os
 import re
 import threading
 import time
-from datetime import date, timedelta
+from datetime import date
 from functools import wraps
 from urllib.parse import urlparse
 
@@ -256,6 +256,10 @@ def inject_shift_globals():
         "CHECKLIST_DAYPARTS": shift_db.CHECKLIST_DAYPARTS,
         "FREQUENCY_LABELS": shift_db.FREQUENCY_LABELS,
         "WEEKDAY_LABELS": shift_db.WEEKDAY_LABELS,
+        "CHECKLIST_SIDES": shift_db.CHECKLIST_SIDES,
+        "CHECKLIST_SIDE_LABELS": shift_db.CHECKLIST_SIDE_LABELS,
+        "CHECKLIST_VIEWS": shift_db.CHECKLIST_VIEWS,
+        "CHECKLIST_VIEW_LABELS": shift_db.CHECKLIST_VIEW_LABELS,
         "CLOSED_WEEKDAYS": shift_db.CLOSED_WEEKDAYS,
         "check_stamp": shift_db.check_stamp,
         "NOTE_CATEGORIES": shift_db.NOTE_CATEGORIES,
@@ -394,78 +398,31 @@ def logout():
 
 @shift_bp.route("/")
 def today():
-    """A leader's home, kept calm: a greeting, today's two goals (one for
-    leading people, one for their area of ownership), their open to-dos,
-    and the way into every section. What needs doing on the shift lives
-    on those sections' own pages; the tiles carry a quiet count."""
+    """A leader's home is their to-dos and nothing else: a greeting, every
+    open to-do (ticked off right here) and a box to add one. The Operator,
+    who has no list of their own, sees the open ones they handed out,
+    soonest due first. Everything else is a tab or the ☰ menu away."""
     day = shift_db.today_local()
+    # Opening the app starts the day's checklists (the scorecard counts on
+    # it), even though they're a tab away now.
     shift_db.ensure_runs_for_date(day)
-    runs = shift_db.runs_for_date(day)
-    daypart = shift_db.current_daypart()
     now = shift_db.now_local()
     name = current_name()
     leader_id = session.get("shift_leader_id")       # None: the Operator login
-
-    goals = shift_db.daily_goals(leader_id, day)
-    yesterday = shift_db.daily_goals(
-        leader_id, (date.fromisoformat(day) - timedelta(days=1)).isoformat())
     if leader_id:
         open_tasks = shift_db.tasks_for_leader(leader_id)[0]
-        todo_open, todo_overdue = len(open_tasks), sum(1 for t in open_tasks if t["overdue"])
-        team = None
     else:
-        # The Operator has no to-do list of their own: they see what they've
-        # handed out that's still open, soonest due first.
         open_tasks = sorted(
             (t for t in shift_db.tasks_assigned_by(OPERATOR_NAME) if not t["completed_at"]),
             key=lambda t: (t["due_date"] is None, t["due_date"] or "", t["id"]))
-        team = shift_db.team_daily_goals(day)
-        # The To-dos tile: every leader's open to-dos (the To-dos page).
-        todo_open, todo_overdue = shift_db.open_task_counts()
-
-    due = _due_now(runs, daypart, day)
-    unread = sum(1 for a in shift_db.active_announcements(reader=name) if not a["acked"])
-    if leader_id:
-        modules = shift_db.course_overview(leader_id)
-        course = {"done": sum(m["done"] for m in modules),
-                  "total": sum(m["total"] for m in modules)}
-    else:
-        course = {"leaders": len(shift_db.leader_course_summary())}
-    open_recs, coming_back, _ = shift_db.recovery_feed(resolved_limit=0)
-    repairs_to_call, repairs_waiting = shift_db.equipment_counts()
-
     return render_template(
         "shift/today.html",
-        eyebrow=_today_eyebrow(daypart, day, now),
+        eyebrow=_today_eyebrow(shift_db.current_daypart(), day, now),
         greeting=_greeting(now),
         # The Operator login is "Operator", not a name: its greeting goes without.
         first_name=(name.split() or [""])[0] if leader_id else "",
-        goals=goals,
-        editing=request.args.get("edit") == "goals" or not goals,
-        # Today's operational goal keeps its own area (even a cleared one).
-        area=((goals["operational"]["area"] or "") if "operational" in goals
-              else shift_db.holder_area(leader_id)),
-        areas=shift_db.AREA_SUGGESTIONS,
-        goal_max=shift_db.DAILY_GOAL_MAX,
-        area_max=shift_db.AREA_MAX,
-        yesterday_set=len(yesterday),
-        yesterday_done=sum(1 for g in yesterday.values() if g["done_at"]),
-        team_set=sum(1 for t in (team or []) if t["leadership"] or t["operational"]),
-        team_total=len(team or []),
-        tasks=open_tasks[:5],
-        task_total=len(open_tasks),
+        tasks=open_tasks,
         my_leader_id=leader_id,
-        unread=unread,
-        due=due,
-        to_read=_hub_to_read(),
-        hub_on=teamhub_nav.hub_up(),
-        course=course,
-        recoveries_open=len(open_recs),
-        recoveries_back=len(coming_back),
-        repairs_to_call=repairs_to_call,
-        repairs_waiting=repairs_waiting,
-        todo_open=todo_open,
-        todo_overdue=todo_overdue,
         day=day,
         short_date=_short_date,
     )
@@ -480,115 +437,6 @@ def _greeting(now) -> str:
     if 12 <= hour < 17:
         return "Good afternoon"
     return "Good evening"
-
-
-@shift_bp.route("/today/goals", methods=["POST"])
-def today_goals_save():
-    """Set or change today's two goals (the signed-in leader's own, or the
-    Operator's own). A goal left blank is cleared."""
-    shift_db.save_daily_goals(
-        session.get("shift_leader_id"), shift_db.today_local(),
-        request.form.get("leadership") or "", request.form.get("operational") or "",
-        request.form.get("area") or "")
-    return redirect(url_for("shift.today") + "#goals")
-
-
-@shift_bp.route("/today/goals/<int:goal_id>/done", methods=["POST"])
-def today_goal_done(goal_id):
-    """Tick one of your own goals off for today (or back on)."""
-    done = request.form.get("done") == "1"
-    if not shift_db.set_daily_goal_done(goal_id, session.get("shift_leader_id"), done):
-        flash("That goal isn't yours to tick off.")
-    return redirect(url_for("shift.today") + "#goals")
-
-
-_DAYPART_FROM = {"breakfast": "From breakfast", "lunch": "From lunch",
-                 "afternoon": "From the afternoon", "dinner": "From dinner"}
-
-
-def _due_now(runs: list[dict], daypart: str, day: str) -> list[dict]:
-    """Today's "Due now" rows, built from runs_for_date(day) alone (pure:
-    no queries, no request), in this order:
-
-      1. this daypart's daily lists that aren't finished;
-      2. earlier dayparts' lists with critical items still open, badged
-         "From breakfast" (etc.);
-      3. all-day station sheets with critical items open, one row each;
-      4. every other all-day sheet folded into one "Station cleaning
-         sheets" row (shown while it has items left);
-      5. weekly and monthly lists that are due (_due_period_runs).
-
-    Lists with critical items left move to the top; otherwise that order
-    holds. Retired lists and empty ones never nag; later dayparts wait for
-    the Checklists page.
-
-    Each row: kind ("run" | "cleaning"), run_id, title, done, total, left,
-    critical (critical items left), tags [(label, badge class)] and meta
-    (one gray line); the "cleaning" row also carries count."""
-    order = {d: i for i, d in enumerate(shift_db.DAYPARTS)}
-    now_at = order.get(daypart, 0)
-    current, leftover, allday_critical, sheets = [], [], [], []
-    for r in runs:
-        if r["frequency"] != "daily" or not r.get("scheduled", True) or not r["total"]:
-            continue
-        if r["daypart"] == "allday":
-            if r["critical_remaining"]:
-                allday_critical.append(
-                    _due_row(r, meta=f"All day · {r['done']} of {r['total']}"))
-            else:
-                sheets.append(r)
-        elif r["daypart"] == daypart:
-            if r["done"] < r["total"]:
-                current.append(_due_row(r))
-        elif order.get(r["daypart"], 99) < now_at and r["critical_remaining"]:
-            # The ring already says how many are left: keep the row to its
-            # badges (and who owns it) so it stays one line on a phone.
-            leftover.append(_due_row(
-                r, tags=[(_DAYPART_FROM.get(r["daypart"], "From earlier"), "b-tan")],
-                meta=f"owner {r['owner']}" if r.get("owner") else ""))
-
-    folded = []
-    done, total = sum(r["done"] for r in sheets), sum(r["total"] for r in sheets)
-    if done < total:
-        n = len(sheets)
-        folded.append({
-            "kind": "cleaning", "run_id": None, "title": "Station cleaning sheets",
-            "count": n, "done": done, "total": total, "left": total - done,
-            "critical": 0, "tags": [],
-            "meta": f"{n} all-day list{'s' if n != 1 else ''} · {done} of {total} done",
-        })
-
-    period = [_due_row(r, tags=[_period_tag(r, day)])
-              for r in _due_period_runs(runs, day) if r["total"]]
-
-    rows = current + leftover + allday_critical + folded + period
-    rows.sort(key=lambda row: not row["critical"])      # stable: order kept within
-    return rows
-
-
-def _due_row(r: dict, tags: list | None = None, meta: str | None = None) -> dict:
-    if meta is None:
-        meta = f"{r['done']} of {r['total']}" + (
-            f" · owner {r['owner']}" if r.get("owner") else "")
-    return {"kind": "run", "run_id": r["id"], "title": r["name"], "done": r["done"],
-            "total": r["total"], "left": r["total"] - r["done"],
-            "critical": r["critical_remaining"], "tags": tags or [], "meta": meta}
-
-
-def _period_tag(r: dict, day: str) -> tuple[str, str]:
-    """The badge on a due weekly/monthly list: due today, overdue, or by when."""
-    today = date.fromisoformat(day)
-    if r["frequency"] == "weekly":
-        due_day = r["due_weekday"] if r["due_weekday"] is not None else 5
-        if today.weekday() == due_day:
-            return ("Due today", "b-tan")
-        if r["due_weekday"] is not None and today.weekday() > due_day:
-            return (f"Overdue · was due {shift_db.WEEKDAY_LABELS[due_day]}", "b-red")
-        return (f"Due {shift_db.WEEKDAY_LABELS[due_day]}", "b-tan")
-    end = date.fromisoformat(r["period_end"])
-    if end <= today:
-        return ("Due today", "b-tan")
-    return (f"Due by {end.strftime('%b')} {end.day}", "b-tan")
 
 
 def _daypart_word(daypart: str) -> str:
@@ -620,24 +468,6 @@ def _short_date(iso: str | None) -> str:
     except ValueError:
         return iso or ""
     return f"{d.strftime('%a, %b')} {d.day}"
-
-
-def _hub_to_read() -> list[dict]:
-    """Required Systems & Procedures pages this leader hasn't confirmed yet.
-    The Hub is optional to /shift: if it isn't loaded or has trouble, Today
-    just shows nothing to read."""
-    if not teamhub_nav.hub_up():
-        return []
-    try:
-        import hub_db
-        leader_id = session.get("shift_leader_id")
-        viewer = (hub_db.Viewer("leader", leader_id, current_name(),
-                                session.get("shift_role", "lead"))
-                  if leader_id else hub_db.Viewer("operator", None, OPERATOR_NAME, "admin"))
-        return hub_db.to_read(viewer)
-    except Exception as e:          # the Hub's trouble must never break Today
-        print(f"Today: couldn't read the Team Hub's pages to read: {e}")
-        return []
 
 
 def _due_period_runs(runs: list[dict], day: str) -> list[dict]:
@@ -693,6 +523,15 @@ def checklists():
     if is_today:
         shift_db.ensure_runs_for_date(day)
     runs = shift_db.runs_for_date(day)
+    # Each leader sees their side of the store's lists (and the ones that
+    # are both) unless they tap Show all; the Operator always sees every list.
+    leader_id = session.get("shift_leader_id")
+    view = ((shift_db.get_leader(leader_id) or {}).get("checklist_side") or "all"
+            if leader_id else "all")
+    sides = shift_db.sides_for_view(view)
+    show_all = request.args.get("lists") == "all"
+    if sides and not show_all:
+        runs = [r for r in runs if r["side"] in sides]
     parts = shift_db.DAYPARTS
     now_part = shift_db.current_daypart()
     daypart = _valid_checklist_daypart(request.args.get("daypart"))
@@ -785,6 +624,8 @@ def checklists():
         allday_total=sum(r["total"] for r in allday),
         score_pct=round(score_done / score_total * 100) if score_total else None,
         score_days=score_days,
+        filtered=bool(sides), show_all=show_all,
+        view_label=shift_db.CHECKLIST_VIEW_LABELS.get(view, ""),
     )
 
 
@@ -876,30 +717,18 @@ def toggle_item(item_id):
 
 
 # ---------------------------------------------------------------------------
-# Daily goals
+# Retired pages
 # ---------------------------------------------------------------------------
-# Lineups and the Goals section (store goals with targets) came out of the
-# app in October 2026: lineups live on the floor's setup sheets and goal
-# setting happens in person. Their tables stay, and stay in backups; old
-# links and home-screen shortcuts land on Today.
+# Lineups and goals (store goals with targets, then the daily goals) came
+# out of the app in October 2026: lineups live on the floor's setup sheets
+# and goals are set and seen on the floor, in person. Their tables stay,
+# and stay in backups; old links and home-screen shortcuts land on Today.
 
 @shift_bp.route("/lineup")
+@shift_bp.route("/goals")
 @shift_bp.route("/goals/<int:goal_id>")
 def retired_page(goal_id=None):
     return redirect(url_for("shift.today"))
-
-
-@shift_bp.route("/goals")
-def goals():
-    """Today's two goals over time, private like 1:1s: a leader sees their
-    own today and last week; the Operator also sees every leader today."""
-    day = shift_db.today_local()
-    leader_id = session.get("shift_leader_id")
-    return render_template("shift/goals.html", day=day,
-                           daily_mine=shift_db.daily_goals(leader_id, day),
-                           daily_history=shift_db.daily_goal_history(leader_id, day),
-                           daily_team=shift_db.team_daily_goals(day) if _is_operator() else [],
-                           short_date=_short_date)
 
 
 # ---------------------------------------------------------------------------
@@ -1313,7 +1142,8 @@ def todo_assign(leader_id):
     )
     if not ok:
         flash("A to-do needs a title (and a leader who still exists).")
-    return redirect(url_for("shift.todo_leader", leader_id=leader_id))
+    return redirect(_back_to_meetings(url_for("shift.todo_leader", leader_id=leader_id),
+                                      "#todos"))
 
 
 def send_completion_slack(task: dict, leader_name: str, remaining: int) -> None:
@@ -2335,6 +2165,20 @@ def admin_leader_role(leader_id):
     return redirect(url_for("shift.admin"))
 
 
+@shift_bp.route("/admin/leaders/<int:leader_id>/checklists", methods=["POST"])
+@admin_required
+def admin_leader_checklists(leader_id):
+    """Which side's checklists a leader sees: every list, front of house or
+    back of house (plus the lists that are both)."""
+    leader = shift_db.get_leader(leader_id)
+    view = request.form.get("view", "")
+    if leader and shift_db.set_leader_checklist_view(leader_id, view):
+        flash(f"{leader['name']} sees every checklist." if view == "all" else
+              f"{leader['name']} sees {shift_db.CHECKLIST_VIEW_LABELS[view].lower()}"
+              " checklists (and the ones for both).")
+    return redirect(url_for("shift.admin") + f"#leader-{leader_id}")
+
+
 def _parse_items(raw: str) -> list[tuple[str, bool]]:
     """One checklist item per line; a leading '!' marks it critical."""
     items = []
@@ -2375,7 +2219,8 @@ def admin_template_new():
             return redirect(url_for("shift.admin_template_new"))
         shift_db.create_template(name, _valid_checklist_daypart(request.form.get("daypart")),
                                  (request.form.get("area") or "All").strip() or "All",
-                                 items, *_template_schedule())
+                                 items, *_template_schedule(),
+                                 side=request.form.get("side"))
         return redirect(url_for("shift.admin_templates"))
     return render_template("shift/admin_template_edit.html", template=None, items_text="")
 
@@ -2396,7 +2241,8 @@ def admin_template_edit(template_id):
         shift_db.update_template(template_id, name,
                                  _valid_checklist_daypart(request.form.get("daypart")),
                                  (request.form.get("area") or "All").strip() or "All",
-                                 parsed, *_template_schedule())
+                                 parsed, *_template_schedule(),
+                                 side=request.form.get("side"))
         period = {"weekly": "week", "monthly": "month"}.get(
             shift_db.template_with_items(template_id)[0]["frequency"], "day")
         flash(f"Saved. A list already started keeps its items (history is never "

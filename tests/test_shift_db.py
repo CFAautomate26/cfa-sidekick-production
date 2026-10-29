@@ -2608,81 +2608,34 @@ def test_current_daypart_is_valid(isolated_db):
 
 # --- daily goals --------------------------------------------------------------
 
-def test_daily_goals_one_per_kind_per_holder_per_day(isolated_db):
-    import sqlite3
+def test_kept_daily_goals_areas_and_views_survive_export_import(isolated_db):
+    """Daily goals left the app; their rows (and leaders' areas) stay and
+    ride every backup. Each leader's checklist view rides along too."""
     shift_db.add_leader("Maya", "4721")
     maya = shift_db.leaders()[0]["id"]
-    day = "2026-10-23"
-    shift_db.save_daily_goals(maya, day, "Lead", "Ops", "Drive-Thru")
-    shift_db.save_daily_goals(maya, day, "Lead again", "Ops again", "Drive-Thru")
-    shift_db.save_daily_goals(None, day, "Operator lead", "", "")      # the Operator's own
-    shift_db.save_daily_goals(None, day, "Operator lead 2", "", "")
-    mine = shift_db.daily_goals(maya, day)
-    assert {k: g["body"] for k, g in mine.items()} == {"leadership": "Lead again",
-                                                       "operational": "Ops again"}
-    assert list(shift_db.daily_goals(None, day)) == ["leadership"]
-    assert shift_db.daily_goals(None, day)["leadership"]["body"] == "Operator lead 2"
-    # The slot index holds even for the Operator's NULL holder
-    with shift_db.connect() as conn:
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute("INSERT INTO daily_goals (holder_leader_id, day, kind, body, created_at, "
-                         "updated_at) VALUES (NULL, ?, 'leadership', 'dup', 'x', 'x')", (day,))
-
-
-def test_daily_goal_tick_only_by_its_holder(isolated_db):
-    shift_db.add_leader("Maya", "4721")
-    shift_db.add_leader("Devon", "8888")
-    maya = next(l["id"] for l in shift_db.leaders() if l["name"] == "Maya")
-    devon = next(l["id"] for l in shift_db.leaders() if l["name"] == "Devon")
-    shift_db.save_daily_goals(maya, "2026-10-23", "Lead", "", "")
-    gid = shift_db.daily_goals(maya, "2026-10-23")["leadership"]["id"]
-    assert shift_db.set_daily_goal_done(gid, devon, True) is False
-    assert shift_db.set_daily_goal_done(gid, None, True) is False      # not even the Operator
-    assert shift_db.set_daily_goal_done(gid, maya, True) is True
-    assert shift_db.daily_goals(maya, "2026-10-23")["leadership"]["done_at"]
-
-
-def test_holder_area_and_team_view(isolated_db):
-    shift_db.add_leader("Maya", "4721")
-    shift_db.add_leader("Devon", "8888")
-    maya = next(l["id"] for l in shift_db.leaders() if l["name"] == "Maya")
-    assert shift_db.holder_area(maya) == ""
-    shift_db.save_daily_goals(maya, "2026-10-22", "", "Ops", "Back of House")
-    assert shift_db.holder_area(maya) == "Back of House"
-    shift_db.save_daily_goals(None, "2026-10-22", "", "Store ops", "Whole store")
-    assert shift_db.holder_area(None) == "Whole store"
-    team = shift_db.team_daily_goals("2026-10-22")
-    assert [t["name"] for t in team] == ["Devon", "Maya"]
-    assert team[0]["leadership"] is None and team[1]["operational"]["body"] == "Ops"
-    assert team[1]["area"] == "Back of House"
-    history = shift_db.daily_goal_history(maya, "2026-10-23")
-    assert [h["day"] for h in history] == ["2026-10-22"]
-    assert shift_db.daily_goal_history(maya, "2026-10-23", days=0) == []
-
-
-def test_daily_goals_and_areas_survive_export_import(isolated_db):
-    shift_db.add_leader("Maya", "4721")
-    maya = shift_db.leaders()[0]["id"]
-    shift_db.save_daily_goals(maya, "2026-10-23", "Lead", "Ops", "Drive-Thru")
-    shift_db.save_daily_goals(None, "2026-10-23", "Op lead", "Op ops", "Whole store")
-    gid = shift_db.daily_goals(maya, "2026-10-23")["leadership"]["id"]
-    shift_db.set_daily_goal_done(gid, maya, True)
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("INSERT INTO daily_goals (holder_leader_id, day, kind, body, created_at, "
+                     "updated_at) VALUES (?, '2026-10-23', 'leadership', 'Lead', 'x', 'x')", (maya,))
+        conn.execute("UPDATE leaders SET area='Drive-Thru' WHERE id=?", (maya,))
+    assert shift_db.set_leader_checklist_view(maya, "foh")
     raw = shift_db.export_json()
-    shift_db.save_daily_goals(maya, "2026-10-23", "", "", "")
-    shift_db.save_daily_goals(None, "2026-10-23", "", "", "")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("DELETE FROM daily_goals")
+    shift_db.set_leader_checklist_view(maya, "all")
     assert shift_db.import_json(raw) is None
-    restored = shift_db.daily_goals(maya, "2026-10-23")
-    assert restored["leadership"]["body"] == "Lead" and restored["leadership"]["done_at"]
-    assert shift_db.daily_goals(None, "2026-10-23")["operational"]["area"] == "Whole store"
-    assert shift_db.get_leader(maya)["area"] == "Drive-Thru"
-    # A backup from before daily goals restores cleanly (no daily goals in it)
+    with shift_db.closing(shift_db.connect()) as conn:
+        assert conn.execute("SELECT body FROM daily_goals").fetchone()[0] == "Lead"
+    leader = shift_db.get_leader(maya)
+    assert (leader["area"], leader["checklist_side"]) == ("Drive-Thru", "foh")
+    # A backup from before: no daily goals, areas or views — it restores
+    # cleanly, and everyone sees every checklist.
     old = json.loads(raw)
     old.pop("daily_goals")
     for row in old["leaders"]:
         row.pop("area", None)
+        row.pop("checklist_side", None)
     assert shift_db.import_json(json.dumps(old)) is None
-    assert shift_db.daily_goals(maya, "2026-10-23") == {}
-
+    assert shift_db.get_leader(maya)["checklist_side"] == "all"
 
 def test_migration_adds_leader_area(tmp_path, monkeypatch):
     import sqlite3
@@ -2701,5 +2654,88 @@ def test_migration_adds_leader_area(tmp_path, monkeypatch):
     shift_db.init_db()   # idempotent
     maya = shift_db.leaders()[0]
     assert maya["name"] == "Maya" and maya["area"] is None
-    shift_db.save_daily_goals(maya["id"], "2026-10-23", "Lead", "Ops", "BOH")
-    assert shift_db.get_leader(maya["id"])["area"] == "BOH"
+    assert maya["checklist_side"] == "all"                    # sees every list until set
+
+
+# --- Checklists by side of the store ----------------------------------------
+
+def test_seeded_lists_get_their_side(isolated_db):
+    side = {t["name"]: t["side"] for t in shift_db.all_templates(include_inactive=True)}
+    assert side["FOH Opening"] == side["FOH Closing"] == "foh"
+    assert side["BOH Opening"] == side["BOH Closing"] == "boh"
+    assert side["Breakfast → Lunch Transition"] == side["Afternoon Reset"] == "both"
+    assert side["Dining Room & Washrooms — Daily"] == side["Drive Thru — Weekly"] == "foh"
+    assert side["Food Safety Commitment — AM"] == side["Food Safety Commitment — PM"] == "foh"
+    assert side["Sanitizer & spindles — 10:30 / 12:30"] == "both"
+    assert side["Machines — Daily"] == side["Breading & Raw — Monthly audit"] == "boh"
+    assert {t["side"] for t in shift_db.all_templates()} <= set(shift_db.CHECKLIST_SIDES)
+
+
+def test_sides_come_to_an_existing_database_once(isolated_db):
+    with shift_db.closing(shift_db.connect()) as conn, conn:   # a database from before
+        conn.execute("ALTER TABLE checklist_templates DROP COLUMN side")
+        conn.execute("ALTER TABLE leaders DROP COLUMN checklist_side")
+    shift_db.init_db()
+    side = {t["name"]: t["side"] for t in shift_db.all_templates()}
+    assert side["FOH Opening"] == "foh" and side["BOH Closing"] == "boh"
+    assert side["Afternoon Reset"] == "both"
+    # The Operator's later choice survives the next boot
+    tid = next(t["id"] for t in shift_db.all_templates() if t["name"] == "Afternoon Reset")
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE checklist_templates SET side='boh' WHERE id=?", (tid,))
+    shift_db.init_db()
+    assert shift_db.template_with_items(tid)[0]["side"] == "boh"
+    shift_db.add_leader("Grace", "4721")
+    assert shift_db.leaders()[0]["checklist_side"] == "all"   # sees every list until set
+
+
+def test_side_for_area_and_name():
+    assert shift_db.side_for("Front Counter") == "foh" and shift_db.side_for(" drive-thru ") == "foh"
+    assert shift_db.side_for("Kitchen") == "boh" and shift_db.side_for("BREADING & RAW") == "boh"
+    assert shift_db.side_for("All") == shift_db.side_for("") == shift_db.side_for(None) == "both"
+    assert shift_db.side_for("Food Safety", "Food Safety Commitment — AM") == "foh"
+    assert shift_db.side_for("Food Safety", "Sanitizer & spindles") == "both"
+    assert shift_db.sides_for_view("foh") == ("foh", "both")
+    assert shift_db.sides_for_view("boh") == ("boh", "both")
+    assert shift_db.sides_for_view("all") is None and shift_db.sides_for_view(None) is None
+
+
+def test_template_side_set_or_worked_out(isolated_db):
+    worked = shift_db.create_template("Patio", "allday", "Dining Room", [("Wipe", False)])
+    chosen = shift_db.create_template("Lot walk", "allday", "Dining Room", [("Walk", False)],
+                                      side="both")
+    junk = shift_db.create_template("Fryers", "dinner", "Kitchen", [("Filter", False)],
+                                    side="garage")
+    side = lambda tid: shift_db.template_with_items(tid)[0]["side"]
+    assert (side(worked), side(chosen), side(junk)) == ("foh", "both", "boh")
+    shift_db.update_template(worked, "Patio", "allday", "Dining Room", [("Wipe", False)],
+                             side="boh")
+    assert side(worked) == "boh"
+    shift_db.update_template(worked, "Patio", "allday", "Kitchen", [("Wipe", False)])
+    assert side(worked) == "boh"                              # no side given: from the area
+
+
+def test_leader_checklist_view(isolated_db):
+    shift_db.add_leader("Grace", "4721")
+    grace = shift_db.leaders()[0]["id"]
+    assert shift_db.set_leader_checklist_view(grace, "foh")
+    assert not shift_db.set_leader_checklist_view(grace, "patio")
+    assert not shift_db.set_leader_checklist_view(9999, "boh")
+    assert shift_db.get_leader(grace)["checklist_side"] == "foh"
+
+
+def test_restore_fills_in_missing_or_unknown_sides(isolated_db):
+    ids = {t["name"]: t["id"] for t in shift_db.all_templates()}
+    with shift_db.closing(shift_db.connect()) as conn, conn:   # the Operator's own choice
+        conn.execute("UPDATE checklist_templates SET side='both' WHERE id=?",
+                     (ids["FOH Closing"],))
+    payload = json.loads(shift_db.export_json())
+    for row in payload["checklist_templates"]:
+        if row["name"] == "BOH Opening":
+            del row["side"]                                    # a backup from before sides
+        if row["name"] == "FOH Opening":
+            row["side"] = "garage"
+    assert shift_db.import_json(json.dumps(payload)) is None
+    side = {t["name"]: t["side"] for t in shift_db.all_templates()}
+    assert (side["BOH Opening"], side["FOH Opening"], side["FOH Closing"]) == \
+        ("boh", "foh", "both")

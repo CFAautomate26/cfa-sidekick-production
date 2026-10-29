@@ -7,6 +7,8 @@
 .leader.off .row-title { color: var(--text-muted); text-decoration: line-through; }
 .pinform { display: flex; gap: 6px; align-items: center; }
 .pinform input[type=text] { width: 7.5rem; min-height: 38px; padding: 6px 12px; }
+.viewform { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+.viewform select { width: auto; max-width: 100%; min-height: 38px; padding: 6px 30px 6px 12px; }
 .backup .btn-primary { min-width: 0; }
 .backup hr { border: 0; border-top: 1px solid var(--rule); margin: 18px 0 4px; }
 .backup input[type=file] { margin-top: 6px; font-size: 0.9375rem; max-width: 100%; }
@@ -54,6 +56,13 @@
                 {% else %}onsubmit="return confirm('Make this leader an admin? They can then post announcements, edit checklist templates and Systems & Procedures pages, and manage leader logins.');"{% endif %}>
             <input type="hidden" name="role" value="{{ 'lead' if l.role == 'admin' else 'admin' }}">
             <button class="linkbtn nav" type="submit">{{ 'Make lead' if l.role == 'admin' else 'Make admin' }}</button>
+          </form>
+          <form method="post" action="{{ url_for('shift.admin_leader_checklists', leader_id=l.id) }}" class="viewform">
+            <label class="sr" for="view-{{ l.id }}">Checklists {{ l.name }} sees</label>
+            <select id="view-{{ l.id }}" name="view">
+              {% for v in CHECKLIST_VIEWS %}<option value="{{ v }}" {{ 'selected' if (l.checklist_side or 'all') == v }}>Sees {{ CHECKLIST_VIEW_LABELS[v] | lower }}</option>{% endfor %}
+            </select>
+            <button class="btn btn-secondary sm" type="submit">Save</button>
           </form>
           <form method="post" action="{{ url_for('shift.admin_leader_toggle', leader_id=l.id) }}">
             <input type="hidden" name="active" value="{{ '0' if l.active else '1' }}">

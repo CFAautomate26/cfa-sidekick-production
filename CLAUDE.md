@@ -29,28 +29,30 @@ Canada.
   `static/teamhub/`). `teamhub_nav.py` builds each role's tabs and ☰ menu
   (links only where that role may go — routes stay the gate;
   `tests/test_roles.py` checks every page × role). The app's front page is
-  `/hub/` (one manifest, scope `/`); a leader's home is Today (`/shift/`).
-  The four main sections — To-dos, Systems & Procedures, Meetings,
-  Leadership Development — are a leader's tabs (with Today) and Today's
-  big tiles; Checklists, Guest recovery and Equipment are the "On shift"
-  row.
+  `/hub/` (one manifest, scope `/`); a leader's home is their to-dos
+  (`/shift/`) and nothing else. A leader's tabs are To-dos · Checklists ·
+  Procedures · Meetings · Leadership; Guest recovery, Equipment and the
+  rest are in the ☰ menu.
   Guide: [docs/team-hub.md](docs/team-hub.md).
 - `shift_app.py` + `shift_db.py` — the leader tools at `/shift` (formerly "Shift Lead")
   (Huddle-style: daily/weekly/monthly checklists with who-did-what stamps,
   Owner + Manager check, lock-at-period-end, and a consistency scorecard
   at `/shift/checklists/scorecard` — station cleaning sheets pinned in
   `shift_cleaning.py`; shift notes, announcements with read receipts
-  (position lineups and the Goals section were removed in Oct 2026 — done
-  on the floor / in person; their tables and backups are kept, and old
-  URLs redirect to Today),
-  a calm Today home (`/shift/`: greeting, the leader's two daily goals —
-  leadership + operational for their area of ownership, table
-  `daily_goals`, one per kind per holder per business day, NULL holder =
-  the Operator, private to that leader + the Operator like 1:1s; the
-  leader's area is `leaders.area` — then their open to-dos and section
-  tiles; triage lives on each section's own page),
-  per-leader assigned to-dos under `/shift/todo` (any leader assigns; its
-  own ☰ section and a To-dos tile on Today, also inline on Meetings),
+  (position lineups, the Goals section and daily goals were removed in
+  Oct 2026 — done on the floor / in person; their tables, `leaders.area`
+  and backups are kept, and old URLs redirect to the home),
+  checklists by side of the store (`checklist_templates.side` foh/boh/both,
+  worked out from the area by `shift_db.side_for` unless set in the
+  template; `leaders.checklist_side` all/foh/boh, set in Admin › Leader
+  logins; a view, not a lock — "Show all" (`?lists=all`) and every run
+  page stay open; the Operator always sees every list),
+  a to-dos-only home (`/shift/`: greeting, the leader's open to-dos with
+  tick-off and an add box; the Operator's lists the open ones they handed
+  out; it still starts the day's checklist runs for the scorecard),
+  per-leader assigned to-dos (the To-dos tab is the home; every leader's
+  lists are under `/shift/todo`, linked from the home and Meetings — any
+  leader assigns),
   1:1 meeting agendas under `/shift/oneonone` (private to each leader +
   the Operator master login — not other admins; plus 1:1 threads with any
   team-roster member under `/shift/oneonone/member/<id>`, table
@@ -63,12 +65,12 @@ Canada.
   recovery log
   under `/shift/recovery` (guest + issue + make-it-right remedy; states
   open → contacted/coming-back → resolved, listed on the Recovery page
-  until closed, with a count on Today's Guest Recovery tile and in the ☰
-  menu; guest name/contact only — never payment info), an equipment &
+  until closed, with a count in the ☰ menu; guest name/contact only —
+  never payment info), an equipment &
   repair tracker under `/shift/equipment` (table `equipment_issues`: what's
   broken, where, impact, food-safety flag; reported → service called →
-  fixed, with a count on Today's Equipment tile and in the ☰ menu and a
-  90-day per-equipment repeat count; equipment and vendor details only),
+  fixed, with a count in the ☰ menu and a 90-day per-equipment repeat
+  count; equipment and vendor details only),
   and per-leader
   leadership-course tracking under `/shift/development` — course
   structure pinned from Drive in `shift_course.py`). Blueprint

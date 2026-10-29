@@ -243,7 +243,6 @@ def test_restyled_pages_use_the_compact_hero(client):
     shift_db.add_leader("Maya", "4721", "admin")
     login_operator(client)
     expected = {
-        "/shift/goals": "Today",                          # Daily goals: Today's, over time
         "/shift/notes": "Shift notes",
         "/shift/announcements": "Announcements",
         "/shift/recovery": "Guest recovery",

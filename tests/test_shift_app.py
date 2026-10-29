@@ -396,7 +396,7 @@ def test_scorecard_says_when_tracking_really_starts(client, monkeypatch):
     card = page[page.index("Patio deep clean"):]
     assert card.split("Tracking starts", 1)[1].lstrip().startswith("next week")
     templates = client.get("/shift/admin/templates").data.decode()
-    assert "Weekly · All day · Patio · 1 items" in " ".join(templates.split())
+    assert "Weekly · All day · Patio · Front and back · 1 items" in " ".join(templates.split())
     client.post("/shift/admin/templates/new", data={
         "name": "Lobby dusting", "daypart": "allday", "area": "Lobby", "items": "Dust"})
     page = client.get("/shift/checklists/scorecard").data.decode()
@@ -496,8 +496,7 @@ def test_announcement_flow(client):
 
     make_leader(client)
     login_leader(client)
-    resp = client.get("/shift/")
-    assert b"1 new announcement" in resp.data   # Today keeps it to one quiet link
+    assert b"1 new" in client.get("/shift/more").data   # a badge in the ☰ menu
     assert b"New SOP" in client.get("/shift/announcements").data
 
     a = shift_db.active_announcements()[0]

@@ -93,7 +93,7 @@ def table(w):
         ("/shift/", LEADERS), ("/shift/?edit=goals", LEADERS), ("/shift/more", LEADERS),
         ("/shift/checklists", LEADERS),
         (f"/shift/checklists/run/{w['run']}", LEADERS), ("/shift/checklists/scorecard", LEADERS),
-        ("/shift/history", LEADERS), ("/shift/goals", LEADERS), ("/shift/notes", LEADERS),
+        ("/shift/history", LEADERS), ("/shift/notes", LEADERS),
         ("/shift/announcements", LEADERS), ("/shift/recovery", LEADERS),
         ("/shift/equipment", LEADERS),
         ("/shift/shoutouts", LEADERS), ("/shift/roster", LEADERS),
@@ -126,13 +126,13 @@ def test_every_page_for_every_role(world, role):
 
 
 def test_retired_pages_land_on_today(world):
-    """Lineups and the Goals section left the app: old links and home-screen
+    """Lineups and goals left the app: old links and home-screen
     shortcuts land a leader on Today, and never get a team member past the
     leader gate."""
     for role in ROLES:
         with cfa_app.app.test_client() as client:
             sign_in(client, role)
-            for path in ("/shift/lineup", f"/shift/goals/{world['goal']}"):
+            for path in ("/shift/lineup", "/shift/goals", f"/shift/goals/{world['goal']}"):
                 resp = client.get(path)
                 where = resp.headers.get("Location", "")
                 assert resp.status_code == 302, (role, path)

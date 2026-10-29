@@ -6,20 +6,14 @@ into the CFA Sidekick Flask service, at **`/shift`** on the Render
 deployment. Team Hub's look, navigation and sign-in are described in
 [docs/team-hub.md](team-hub.md). It gives the leadership team:
 
-- **Today** — a calm home: a greeting, **today's two goals** (a
-  leadership goal and an operational goal for the leader's area of
-  ownership, set when they sign in and ticked off as they hit them), their
-  open to-dos, then big tiles for the four things the team uses most
-  (To-dos, Systems & Procedures, Meetings, Leadership Development) and a
-  smaller "On shift" row (Checklists, Guest Recovery, Equipment — those two
-  show a red count while a guest is still waiting to be reached or a
-  breakdown hasn't been called in). Checklists, guests,
-  repairs, notes and announcements live on their own pages;
-  Today only carries a quiet count on each tile and one link when an
-  announcement is unread. Daily goals are private to each leader and the Operator (like
-  1:1s); "Past days" under them opens the Daily goals page
-  (`/shift/goals`), where each leader sees their own last week and the
-  Operator also sees every leader's goals for today.
+- **To-dos home** (`/shift/`) — what a leader sees when they sign in, and
+  nothing else: a greeting, their open to-dos (soonest due first; tick
+  one off right there) and an *Add a to-do* box. The Operator's home lists
+  the open to-dos they've handed out. Checklists, Systems & Procedures,
+  Meetings and Leadership Development are the other tabs; guests, repairs,
+  notes and announcements are in the ☰ menu (guests and repairs with a red
+  count while one needs attention). Opening the app still starts the
+  day's checklists, so the scorecard counts the day.
 - **Shift checklists** — FOH/BOH opening, breakfast→lunch transition,
   afternoon reset, and closing lists generated fresh every day. Tapping an
   item stamps *who* checked it and *when*. Items marked **critical**
@@ -41,9 +35,22 @@ deployment. Team Hub's look, navigation and sign-in are described in
   (temperatures, sanitizer strength, raw/ready-to-eat separation, hold and
   shelf-life limits) flagged red. Lists can be **daily, weekly (Mon–Sun, with an optional
   assigned day), or monthly**; all-day lists show on Checklists all day, and a
-  weekly/monthly list counts as due (on Checklists and Today's Checklists
-  tile) from its assigned day — the weekend if none — or the month's last
-  week, until it's done.
+  weekly/monthly list counts as due on Checklists from its assigned day —
+  the weekend if none — or the month's last week, until it's done.
+- **Checklists by side of the store** — every list is front of house,
+  back of house or both, and every leader sees every checklist, front of
+  house or back of house (Admin → *Leader logins*, set by the Operator or
+  an admin leader; every checklist until set, and always for the Operator
+  login). A front-of-house leader's Checklists shows the front lists and
+  the shared ones (transition, afternoon reset, sanitizer & spindles);
+  **Show all** under the heading shows the rest, and a list's own page
+  always opens — it's a view, not a lock. A list's side is "Who sees it"
+  in its template; the built-in lists were sorted by area (Food Safety
+  Commitment lists are front of house), and a new list's side is worked
+  out from its area unless one is picked. Stored as `leaders.checklist_side`
+  (`all`/`foh`/`boh`) and `checklist_templates.side` (`foh`/`boh`/`both`);
+  both ride in backups, and a restored list missing its side gets it from
+  its area.
   Each list carries the paper sheet's **Owner** (roster name) and
   **Manager check** (a leader taps "I checked this station" — stamped).
   A list **locks when its day/week/month ends** so the numbers reflect
@@ -69,24 +76,26 @@ deployment. Team Hub's look, navigation and sign-in are described in
   made on a Sunday applies from the next week. Manager checks count from
   the day the button arrived. Holidays the store is closed do count as
   not opened — read those squares accordingly.
-- **Lineups and the Goals section came out of the app** (October 2026):
-  lineups are done on the floor with the setup sheets, and goal setting
-  happens in person. Their tables (`positions`, `lineup_assignments`,
-  `goals`, `goal_updates`) and backups are kept, so nothing saved was lost;
-  old links and home-screen shortcuts to them land on Today. Today's two
-  daily goals stay.
+- **Lineups and goals came out of the app** (October 2026): lineups are
+  done on the floor with the setup sheets, and goal setting happens in
+  person — results show on the floor. The Goals section went first, then
+  the daily goals (and the leader's area of ownership that went with
+  them). Their tables (`positions`, `lineup_assignments`, `goals`,
+  `goal_updates`, `daily_goals`, `leaders.area`) and backups are kept, so
+  nothing saved was lost; old links and home-screen shortcuts to them land
+  on the to-dos home.
 - **Shift notes** — the store logbook (wins / issues / equipment / staffing /
   guest / food-safety), a handoff for the next shift.
 - **Announcements** — Operator/admin posts; every leader taps **Got it**, and
   admins see exactly who has acknowledged.
 - **History** — any past day's checklists (who did what) and notes.
-- **Leader to-dos** (`/shift/todo`, its own word in the ☰ menu and a
-  To-dos tile on Today) — any leader assigns tasks to any leader (title,
-  details, due date; stamped with who assigned it); each leader's open
-  to-dos appear on their Today screen the moment they sign in (the tile
-  counts them, red when any are overdue; the Operator's counts every
-  leader's), they check
-  them off from their to-do page (stamped who/when; only the assignee or
+- **Leader to-dos** — each leader's open to-dos are their home screen
+  (`/shift/`, the To-dos tab) the moment they sign in, and the tab counts
+  them; the Operator's home and count are the open ones they handed out.
+  *Every leader's to-dos* at the bottom of the home (also on Meetings and
+  Admin) opens `/shift/todo`, where any leader assigns tasks to any leader
+  (title, details, due date; stamped with who assigned it). Leaders tick
+  them off on the home or their to-do page (stamped who/when; only the assignee or
   an admin can complete or reopen a task, and only admins delete), and
   everyone sees open/overdue counts per leader with a full completed
   history. When a leader completes a task, the
@@ -101,8 +110,7 @@ deployment. Team Hub's look, navigation and sign-in are described in
   quality, wait, service…), and the make-it-right remedy being provided
   (remade on the spot, refund, free entrée card, dessert/drink, catering
   credit…), plus whether the guest expects a call-back. Open recoveries
-  stay on the Recovery page (with a count on Today's Guest Recovery tile
-  and in the ☰ menu) until someone
+  stay on the Recovery page (with a count in the ☰ menu) until someone
   resolves them (stamped
   who/when, with a note on how it was closed); every leader sees the
   28-day what-keeps-going-wrong breakdown. A middle state covers the common case
@@ -120,7 +128,7 @@ deployment. Team Hub's look, navigation and sign-in are described in
   *To call in* until someone marks **"Service called"** with who's coming
   and when (or types that straight into the report), then *Awaiting
   repair* with a waiting-days count, until **"Fixed"** with what was done;
-  fixed ones can be reopened. Today's Equipment tile and the ☰ menu carry
+  fixed ones can be reopened. The ☰ menu carries
   a red count while anything is still to call in. The page also shows the
   most-reported equipment of the last 90 days (top 8), so a machine that
   keeps breaking stands out. Equipment and vendor details
@@ -254,7 +262,7 @@ One-time Slack setup (the bot can only post until you do this):
 ## The persistent disk (do this before rollout)
 
 Render wipes the service filesystem on every deploy. Without this step the
-app still works, but **all checklist history, daily goals, and notes vanish each
+app still works, but **all checklist history, to-dos, and notes vanish each
 deploy** — the admin page shows a red warning banner while that's the case.
 
 1. Render dashboard → the CFA Sidekick service → **Disks** → **Add Disk**
@@ -273,7 +281,8 @@ scale.
 2. Sign in as **Operator** with that PIN.
 3. **More → Admin**: add each shift lead/director as a leader with their own
    4+ digit PIN (role `lead`, or `admin` for directors who should manage
-   templates/announcements/backups).
+   templates/announcements/backups), then pick which checklists each one
+   sees — every checklist, front of house or back of house.
 4. **Admin → Edit checklist templates**: the app ships with seeded FOH/BOH
    opening, transition, afternoon, and closing lists — walk them with a
    senior director and reword to match the store before launch. One item per

@@ -15,29 +15,50 @@ home-screen icons and every old link keep working.
 
 | Section | Who | What's there |
 |---|---|---|
-| **Today** (leaders) / **Home** (team members) | everyone | Leaders: a calm start — today's leadership goal and operational goal (private to them and the Operator), their open to-dos, and a tile into each section. Team members: their required reading, the categories, what's new. |
+| **To-dos** (leaders' home) / **Home** (team members) | everyone | Leaders: their open to-dos and nothing else — tick one off right there, or add one; the Operator sees the ones they handed out. Team members: their required reading, the categories, what's new. |
 | **Systems & Procedures** | everyone (filtered) | HR, FOH Operations, BOH Operations, Leadership Development (leaders only) — pages, required reading, search, editor tools. |
-| **Checklists** | leaders | Daypart lists, station cleaning sheets, scorecard, past days. |
+| **Checklists** | leaders | Daypart lists, station cleaning sheets, scorecard, past days. Each leader sees their side of the store — see *Checklists by side of the store* below. |
 | **Meetings** | leaders | Your 1:1 agenda with the Operator, 1:1s with your team, to-dos. Private to each leader and the Operator. |
-| **To-dos** | leaders | Every leader's to-do list: assign one, see open and overdue, check yours off. A tile on Today and a word in the ☰ menu. |
+| **Every leader's to-dos** | leaders | `/shift/todo`: assign one to any leader, see open and overdue per leader, the completed history. |
 | **Leadership Development** | leaders | The 48-lesson course, plus the leadership library pages. |
 
-Guest recovery and Equipment & repairs are tiles on Today (a red count
-while a guest is waiting to be reached, or something broken hasn't been
-called in) and in the ☰ menu. Shift notes, announcements, shout-outs, the
-roster and history are in the ☰ menu; admin leaders also see Manage pages and Leader
+Guest recovery and Equipment & repairs are in the ☰ menu, with a red
+count while a guest is waiting to be reached or something broken hasn't
+been called in. Shift notes, announcements, shout-outs, the roster and
+history are in the ☰ menu too; admin leaders also see Manage pages and Leader
 logins & checklist templates; the Operator also sees Backups, Team Hub
 access (clock-in numbers) and Categories.
 
-The team's four main things are To-dos, Systems & Procedures, Meetings
-(1:1s) and Leadership Development: they're a leader's bottom tabs with
-Today, the four big tiles on Today, and the first words in the ☰ menu.
-Checklists, Guest recovery and Equipment sit in Today's smaller "On shift"
-row (and the ☰ menu).
+A leader signs in to their to-dos and nothing else. The team's main things
+— To-dos, Checklists, Systems & Procedures, Meetings (1:1s) and Leadership
+Development — are a leader's bottom tabs and the first words in the ☰ menu.
+Daily goals came out of the app in October 2026 (goals are set in person
+and seen on the floor); their table and backups are kept, and the old
+Daily goals page lands on To-dos.
 
-Bottom tabs — leaders: Today · To-dos · Procedures · Meetings · Leadership;
+Bottom tabs — leaders: To-dos · Checklists · Procedures · Meetings · Leadership;
 team members: Home · Procedures · To read · Me. On the office computer the
 tabs become a row under the logo.
+
+### Checklists by side of the store
+
+Every checklist is **front of house**, **back of house** or **both**, and
+every leader sees **every checklist**, **front of house** or **back of
+house** — so a drive-thru leader opens Checklists to the front-of-house
+lists (and the ones for both, like sanitizer & spindles) instead of
+scrolling past the kitchen's. It's a view, not a lock: **Show all** sits
+right under the heading, and a list's own page always opens.
+
+- **Who sees what:** Admin → *Leader logins* → each leader's
+  "Sees every checklist / front of house / back of house" (Operator and
+  admin leaders). New and existing leaders see every checklist until it's
+  set; the Operator login always does.
+- **Which side a list is on:** Admin → *Checklist templates* → a list →
+  "Who sees it". The built-in lists were sorted by their area (Front
+  Counter, Dining Room, Drive Thru, Washrooms → front; Kitchen, Machines,
+  Boards, Produce, Breading & Raw → back; anything else → both). The Food
+  Safety Commitment lists are front of house. A new list's side is worked
+  out from its area unless one is picked.
 
 ## Signing in (one front door)
 
