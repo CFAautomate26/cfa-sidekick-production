@@ -107,6 +107,7 @@ def table(w):
         (f"/shift/development/{admin}", {"admin", "operator"}),
         # Admin pages, and the Operator's own
         ("/shift/admin", EDITORS), ("/shift/admin/templates", EDITORS),
+        ("/shift/admin/checklist-views", EDITORS),
         ("/shift/admin/templates/new", EDITORS),
         (f"/shift/admin/templates/{w['template']}", EDITORS),
         ("/shift/admin/export", OPERATOR),

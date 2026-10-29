@@ -1822,13 +1822,27 @@ def reset_leader_pin(leader_id: int, pin: str) -> str | None:
     return None
 
 
-def set_leader_checklist_view(leader_id: int, view: str) -> bool:
-    """Which side's checklists a leader sees: all, foh or boh."""
+def set_leader_checklist_view(leader_id: int, view: str,
+                              expected: str | None = None,
+                              name: str | None = None) -> bool:
+    """Which side's checklists a leader sees: all, foh or boh. With
+    `expected`, only if they still see that (an unknown stored value counts
+    as all) — checked and written in one statement, so of two saves at the
+    same moment the second finds the first's pick and writes nothing. With
+    `name`, only if that id is still that person (a restore can renumber)."""
     if view not in CHECKLIST_VIEWS:
         return False
+    q, args = "UPDATE leaders SET checklist_side=? WHERE id=?", [view, leader_id]
+    if name is not None:
+        q += " AND name=?"
+        args.append(name)
+    if expected is not None:
+        known = ", ".join("?" * len(CHECKLIST_VIEWS))
+        q += (f" AND CASE WHEN checklist_side IN ({known}) THEN checklist_side"
+              " ELSE 'all' END = ?")
+        args += [*CHECKLIST_VIEWS, expected]
     with closing(connect()) as conn, conn:
-        return conn.execute("UPDATE leaders SET checklist_side=? WHERE id=?",
-                            (view, leader_id)).rowcount > 0
+        return conn.execute(q, args).rowcount > 0
 
 
 def set_leader_role(leader_id: int, role: str) -> bool:

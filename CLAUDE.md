@@ -44,8 +44,10 @@ Canada.
   and backups are kept, and old URLs redirect to the home),
   checklists by side of the store (`checklist_templates.side` foh/boh/both,
   worked out from the area by `shift_db.side_for` unless set in the
-  template; `leaders.checklist_side` all/foh/boh, set in Admin › Leader
-  logins; a view, not a lock — "Show all" (`?lists=all`) and every run
+  template; `leaders.checklist_side` all/foh/boh, set for every active
+  leader at once on `/shift/admin/checklist-views` (Operator + admin
+  leaders; only picks changed on that page are written — a pick someone
+  else changed since it opened is skipped and named); a view, not a lock — "Show all" (`?lists=all`) and every run
   page stay open; the Operator always sees every list),
   a to-dos-only home (`/shift/`: greeting, the leader's open to-dos with
   tick-off and an add box; the Operator's lists the open ones they handed

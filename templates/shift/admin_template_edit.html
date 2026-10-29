@@ -73,7 +73,7 @@ month; each locks when its period ends.</span></p>
     <option value="{{ sd }}" {{ 'selected' if template and template.side == sd }}>{{ CHECKLIST_SIDE_LABELS[sd] }} leaders</option>
     {% endfor %}
   </select>
-  <p class="hint">Each leader sees their side's lists (set under Admin › Leader logins); "Front and back" lists show for everyone.</p>
+  <p class="hint">Each leader sees their side's lists (set on <a href="{{ url_for('shift.admin_checklist_views') }}">Who sees which checklists</a>); "Front and back" lists show for everyone.</p>
   <label class="field" for="t-items">Items — one per line</label>
   <p class="hint">Start a line with <b>!</b> to mark it critical (food safety / cash — flagged red).</p>
   <textarea id="t-items" name="items" required

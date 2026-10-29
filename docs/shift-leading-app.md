@@ -39,9 +39,10 @@ deployment. Team Hub's look, navigation and sign-in are described in
   the weekend if none — or the month's last week, until it's done.
 - **Checklists by side of the store** — every list is front of house,
   back of house or both, and every leader sees every checklist, front of
-  house or back of house (Admin → *Leader logins*, set by the Operator or
-  an admin leader; every checklist until set, and always for the Operator
-  login). A front-of-house leader's Checklists shows the front lists and
+  house or back of house (Admin → *Who sees which checklists*
+  (`/shift/admin/checklist-views`): every active leader on one page with
+  Both / Front / Back and one Save, for the Operator or an admin leader;
+  Both until set, and always for the Operator login). A front-of-house leader's Checklists shows the front lists and
   the shared ones (transition, afternoon reset, sanitizer & spindles);
   **Show all** under the heading shows the rest, and a list's own page
   always opens — it's a view, not a lock. A list's side is "Who sees it"
@@ -281,8 +282,8 @@ scale.
 2. Sign in as **Operator** with that PIN.
 3. **More → Admin**: add each shift lead/director as a leader with their own
    4+ digit PIN (role `lead`, or `admin` for directors who should manage
-   templates/announcements/backups), then pick which checklists each one
-   sees — every checklist, front of house or back of house.
+   templates/announcements/backups), then open *Who sees which
+   checklists* and pick Both, Front or Back for each one.
 4. **Admin → Edit checklist templates**: the app ships with seeded FOH/BOH
    opening, transition, afternoon, and closing lists — walk them with a
    senior director and reword to match the store before launch. One item per

@@ -2165,18 +2165,58 @@ def admin_leader_role(leader_id):
     return redirect(url_for("shift.admin"))
 
 
-@shift_bp.route("/admin/leaders/<int:leader_id>/checklists", methods=["POST"])
+# The one-word picks on Who sees which checklists, in the order shown.
+_VIEW_WORDS = {"all": "Both", "foh": "Front", "boh": "Back"}
+
+
+@shift_bp.route("/admin/checklist-views", methods=["GET", "POST"])
 @admin_required
-def admin_leader_checklists(leader_id):
-    """Which side's checklists a leader sees: every list, front of house or
-    back of house (plus the lists that are both)."""
-    leader = shift_db.get_leader(leader_id)
-    view = request.form.get("view", "")
-    if leader and shift_db.set_leader_checklist_view(leader_id, view):
-        flash(f"{leader['name']} sees every checklist." if view == "all" else
-              f"{leader['name']} sees {shift_db.CHECKLIST_VIEW_LABELS[view].lower()}"
-              " checklists (and the ones for both).")
-    return redirect(url_for("shift.admin") + f"#leader-{leader_id}")
+def admin_checklist_views():
+    """Who sees which checklists: every active leader on one page with Both
+    (every list), Front or Back (that side's lists plus the ones for both),
+    saved in one go. Only the picks changed on this page are written (each
+    row posts the pick it showed as was-<id>), and one someone else changed
+    since the page opened is left alone and named, so an old open copy can't
+    quietly undo another admin's pick. A page opened before a backup restore
+    writes nothing — the restore can renumber leader ids."""
+    epoch = shift_db.session_epoch()     # before the rows: a restore between reads
+    leaders = shift_db.leaders()         # leaves the page with the old epoch
+    for l in leaders:                    # an unknown stored value reads as Both
+        if l["checklist_side"] not in shift_db.CHECKLIST_VIEWS:
+            l["checklist_side"] = "all"
+    if request.method == "POST":
+        if request.form.get("epoch", "") != epoch:
+            flash("A backup was restored since you opened this page, so nothing was "
+                  "saved. Check the picks below and save again.")
+            return redirect(url_for("shift.admin_checklist_views"))
+        saved, clashed = [], []
+        for l in leaders:
+            now = l["checklist_side"]
+            view = request.form.get(f"view-{l['id']}")
+            was = request.form.get(f"was-{l['id']}") or now
+            if not view or view in (was, now):      # untouched here, or already so
+                continue
+            if now == was and shift_db.set_leader_checklist_view(
+                    l["id"], view, expected=was, name=l["name"]):
+                saved.append(f"{l['name']} → {_VIEW_WORDS[view]}")
+            elif view in shift_db.CHECKLIST_VIEWS:
+                clashed.append(l["name"])
+        if saved:
+            flash(f"Saved: {', '.join(saved)}.")
+        if clashed:
+            flash(f"Not saved — changed by someone else since you opened this page: "
+                  f"{', '.join(clashed)}. Check their pick below and save again.")
+        if not saved and not clashed:
+            flash("Nothing changed.")
+        return redirect(url_for("shift.admin_checklist_views"))
+    lists = shift_db.all_templates()
+    return render_template(
+        "shift/admin_checklist_views.html", leaders=leaders, view_words=_VIEW_WORDS,
+        epoch=epoch,
+        names_by_view={v: [l["name"] for l in leaders if l["checklist_side"] == v]
+                       for v in shift_db.CHECKLIST_VIEWS},
+        lists_by_side={s: [t["name"] for t in lists if t["side"] == s]
+                       for s in shift_db.CHECKLIST_SIDES})
 
 
 def _parse_items(raw: str) -> list[tuple[str, bool]]:
