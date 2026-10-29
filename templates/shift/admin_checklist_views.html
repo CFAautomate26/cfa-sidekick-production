@@ -17,6 +17,10 @@
   font-size: 0.875rem; font-weight: 700; color: var(--nav); }
 .pick input:checked + span { background: var(--nav); color: #fff; }
 .pick input:focus-visible + span { box-shadow: var(--focus); }
+@media (forced-colors: active) {
+  .pick input:checked + span { outline: 2px solid CanvasText; outline-offset: -2px; }
+  .pick input:focus-visible + span { outline: 2px dashed Highlight; outline-offset: 1px; }
+}
 .legend { margin: 14px 0 0; padding: 0; list-style: none; font-size: var(--fs-small); color: var(--text-muted); }
 .legend li + li { margin-top: 4px; }
 .legend b { color: var(--text-strong); }
@@ -69,6 +73,7 @@
         <span class="av" aria-hidden="true">{{ l.name[:1] | upper }}</span>
         <span class="row-main"><span class="row-title">{{ l.name }}</span>
           <span class="row-meta">{{ 'Admin' if l.role == 'admin' else 'Lead' }}</span></span>
+        <input type="hidden" name="was-{{ l.id }}" value="{{ l.checklist_side }}">
         <fieldset class="pick">
           <legend class="sr">Checklists {{ l.name }} sees</legend>
           {% for v, word in view_words.items() %}

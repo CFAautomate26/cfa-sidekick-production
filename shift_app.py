@@ -2174,14 +2174,30 @@ _VIEW_WORDS = {"all": "Both", "foh": "Front", "boh": "Back"}
 def admin_checklist_views():
     """Who sees which checklists: every active leader on one page with Both
     (every list), Front or Back (that side's lists plus the ones for both),
-    saved in one go. Only the leaders whose pick changed are written."""
+    saved in one go. Only the picks changed on this page are written (each
+    row posts the pick it showed as was-<id>), and one someone else changed
+    since the page opened is left alone and named, so an old open copy can't
+    quietly undo another admin's pick."""
     leaders = shift_db.leaders()
     if request.method == "POST":
-        changed = [f"{l['name']} → {_VIEW_WORDS[view]}" for l in leaders
-                   if (view := request.form.get(f"view-{l['id']}"))
-                   and view != (l["checklist_side"] or "all")
-                   and shift_db.set_leader_checklist_view(l["id"], view)]
-        flash(f"Saved: {', '.join(changed)}." if changed else "Nothing changed.")
+        saved, clashed = [], []
+        for l in leaders:
+            now = l["checklist_side"] or "all"
+            view = request.form.get(f"view-{l['id']}")
+            was = request.form.get(f"was-{l['id']}") or now
+            if not view or view in (was, now):      # untouched here, or already so
+                continue
+            if now != was:
+                clashed.append(l["name"])
+            elif shift_db.set_leader_checklist_view(l["id"], view):
+                saved.append(f"{l['name']} → {_VIEW_WORDS[view]}")
+        if saved:
+            flash(f"Saved: {', '.join(saved)}.")
+        if clashed:
+            flash(f"Not saved — changed by someone else since you opened this page: "
+                  f"{', '.join(clashed)}. Check their pick below and save again.")
+        if not saved and not clashed:
+            flash("Nothing changed.")
         return redirect(url_for("shift.admin_checklist_views"))
     for l in leaders:
         if l["checklist_side"] not in shift_db.CHECKLIST_VIEWS:

@@ -125,6 +125,9 @@ def test_every_leader_on_one_page(client, team):
     grace = grace[:grace.index("</fieldset>")]
     assert '<input type="radio" name="view-%d" value="foh" checked>' % team["Grace"] in grace
     assert grace.count(" checked") == 1
+    assert f'<input type="hidden" name="was-{team["Grace"]}" value="foh">' in grace
+    neha = who[who.index(f'id="who-{team["Neha"]}"'):]
+    assert '<input type="radio" name="view-%d" value="all" checked>' % team["Neha"] in neha[:neha.index("</fieldset>")]
     flat = " ".join(who.split())
     assert "Front of house</span> <span class=\"row-meta\">Grace</span>" in flat
     assert "Back of house</span> <span class=\"row-meta\">Jabina</span>" in flat
@@ -144,6 +147,29 @@ def test_one_save_sets_everyone(client, team):
     assert "Nothing changed." in resp.data.decode()
     client.post(WHO, data={f"view-{team['Neha']}": "kitchen", f"view-{team['Grace']}": ""})
     assert views() == {"Neha": "foh", "Grace": "all", "Jabina": "boh"}   # unknown: unchanged
+
+
+def test_an_old_open_page_never_undoes_someone_elses_pick(client, team):
+    login(client)
+    shown = {f"view-{i}": v for i, v in ((team["Neha"], "all"), (team["Grace"], "foh"),
+                                         (team["Jabina"], "boh"))}
+    form = {**shown, **{k.replace("view", "was"): v for k, v in shown.items()}}
+    shift_db.set_leader_checklist_view(team["Grace"], "boh")      # another admin, meanwhile
+    form[f"view-{team['Jabina']}"] = "all"                        # this admin's only change
+    resp = client.post(WHO, data=form, follow_redirects=True).data.decode()
+    assert "Saved: Jabina → Both." in resp and "Grace →" not in resp
+    assert views()["Grace"] == "boh"                               # left alone
+    form[f"view-{team['Neha']}"] = "foh"
+    form[f"view-{team['Grace']}"] = "all"                          # changed here AND there
+    resp = client.post(WHO, data=form, follow_redirects=True).data.decode()
+    assert "Saved: Neha → Front." in resp
+    assert "changed by someone else since you opened this page: Grace." in resp
+    assert views() == {"Neha": "foh", "Grace": "boh", "Jabina": "all"}
+    form[f"view-{team['Grace']}"] = "boh"                          # same as theirs: nothing to do
+    form[f"view-{team['Neha']}"] = "all"
+    form[f"was-{team['Neha']}"] = "foh"
+    resp = client.post(WHO, data=form, follow_redirects=True).data.decode()
+    assert "Saved: Neha → Both." in resp and "someone else" not in resp
 
 
 def test_only_active_leaders_are_listed_or_set(client, team):
@@ -196,6 +222,7 @@ def test_each_list_has_a_side_in_the_template_editor(client, team):
         "side": "both"})
     assert shift_db.template_with_items(patio["id"])[0]["side"] == "both"
     edit = page(client, f"/shift/admin/templates/{patio['id']}")
+    assert 'set on <a href="/shift/admin/checklist-views">Who sees which checklists</a>' in edit
     assert '<option value="both" selected>Front and back leaders</option>' in edit
     assert "Work it out from the area" not in edit
     listing = " ".join(page(client, "/shift/admin/templates").split())
