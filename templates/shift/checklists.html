@@ -31,6 +31,9 @@
 .caught .f-body { margin-top: 2px; font-size: 0.9375rem; color: var(--text-muted); }
 .first-card { margin-top: 22px; }
 .past { margin-top: 18px; align-items: center; }
+.viewline { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: var(--fs-small); color: var(--text-muted); }
+.viewline .i { width: 18px; height: 18px; flex: 0 0 auto; }
+.viewline .textlink { white-space: nowrap; }
 .past span { flex: 1; }
 .past .textlink { white-space: nowrap; }
 .score { display: flex; gap: 16px; align-items: center; margin-top: 32px; }
@@ -103,7 +106,9 @@ details.fold > a.row { background: var(--gray-050); }
 {%- endmacro %}
 
 {% block content %}
-{% set day_args = {} if is_today else {'date': day} %}
+{# The day being looked at, and Show all, ride along on every link here. #}
+{% if is_today %}{% set day_args = {'lists': 'all'} if show_all else {} %}
+{% else %}{% set day_args = {'date': day, 'lists': 'all'} if show_all else {'date': day} %}{% endif %}
 <section class="hero compact">
   <p class="eyebrow">Checklists · {{ day_label }}</p>
   <h1 class="headline">{{ part_name }} checklists</h1>
@@ -123,6 +128,12 @@ details.fold > a.row { background: var(--gray-050); }
     {% endfor %}
   </nav>
 </section>
+
+{% if filtered %}
+<p class="viewline">{{ icon('users') }}<span>{% if show_all %}Showing every list.{% else %}Your {{ view_label | lower }} lists.{% endif %}</span>
+  {% if show_all %}<a class="textlink" href="{{ url_for('shift.checklists', daypart=daypart, **({} if is_today else {'date': day})) }}">Just {{ view_label | lower }}</a>
+  {% else %}<a class="textlink" href="{{ url_for('shift.checklists', daypart=daypart, lists='all', **({} if is_today else {'date': day})) }}">Show all</a>{% endif %}</p>
+{% endif %}
 
 {% if not is_today %}
 <p class="callout tan past">{{ icon('history') }}<span>{% if when == 'past' %}Looking back at {{ day_label }}. Lists lock when their day ends.{% else %}{{ day_label }} hasn't happened yet.{% endif %}</span>
@@ -249,6 +260,7 @@ details.fold > a.row { background: var(--gray-050); }
     <div class="inline-form">
       <input type="date" id="pick-day" name="date" value="{{ day }}" max="{{ shift_today }}">
       <input type="hidden" name="daypart" value="{{ daypart }}">
+      {% if show_all %}<input type="hidden" name="lists" value="all">{% endif %}
       <button class="btn btn-secondary sm" type="submit">Go</button>
     </div>
   </form>

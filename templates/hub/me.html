@@ -19,7 +19,7 @@
 
 {% if viewer.is_leader %}
 <div class="card list">
-  <a class="row" href="{{ url_for('shift.today') }}"><span class="lead-ico">{{ icon('home') }}</span><span class="row-main"><span class="row-title">Today</span><span class="row-meta">Your goals for today and your to-dos</span></span>{{ icon('chev', 'chev') }}</a>
+  <a class="row" href="{{ url_for('shift.today') }}"><span class="lead-ico">{{ icon('home') }}</span><span class="row-main"><span class="row-title">To-dos</span><span class="row-meta">Your to-dos</span></span>{{ icon('chev', 'chev') }}</a>
   {% if viewer.is_operator %}
   <a class="row" href="{{ url_for('hub.people') }}"><span class="lead-ico">{{ icon('key') }}</span><span class="row-main"><span class="row-title">Team Hub access</span><span class="row-meta">Give team members access with their clock-in number</span></span>{{ icon('chev', 'chev') }}</a>
   {% endif %}

@@ -1,170 +1,79 @@
 {% extends "shift/base.html" %}
-{# Today: a leader's home, kept calm. A greeting, today's two goals (one for
-   leading people, one for their area of ownership), their open to-dos, and
-   the way into every section. Title is plain "Team Hub" (empty title block). #}
+{# Today: a leader's home is their to-dos and nothing else — a greeting,
+   every open to-do (tick it off right here) and a box to add one. The
+   Operator sees the to-dos they've handed out. Everything else is a tab
+   or the ☰ menu away. Title is plain "Team Hub" (empty title block). #}
 {% block head %}
 <style>
-.purpose { margin-top: 26px; }
-.purpose .sec-head { margin-bottom: 10px; }
-.goal { display: flex; align-items: flex-start; gap: 10px; padding: 14px 12px 14px 16px; }
-.goal + .goal, .card > * + .goal { border-top: 1px solid var(--rule); }
-.goal .goal-main { flex: 1; min-width: 0; }
-.goal-kind { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
-  letter-spacing: var(--track-eyebrow); color: var(--text-muted); }
-.goal-kind .i { width: 15px; height: 15px; color: var(--nav); }
-.goal-text { display: block; margin-top: 5px; font-weight: 700; font-size: 1.0625rem; line-height: 1.35; color: var(--text-strong);
-  overflow-wrap: anywhere; }
-.goal.done .goal-text { color: var(--text-muted); }
-.goal .badge { margin-top: 7px; }
+.todos { margin-top: 22px; }
+.todos .sec-head { margin-bottom: 10px; }
 /* A 44px tap target around each tick circle */
 .tick-form { margin: -6px -4px -6px 0; flex: 0 0 auto; }
 .tick { position: relative; width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 0;
   cursor: pointer; padding: 0; }
 .tick::before { content: ""; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--gray-400); background: #fff; }
 .tick:hover::before { border-color: var(--ok); }
-.tick.on::before { background: var(--ok); border-color: var(--ok); }
-.tick .i { position: absolute; left: 50%; top: 50%; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; color: #fff;
-  stroke-width: 3.2; }
 .tick:focus-visible { outline: 3px solid var(--nav); outline-offset: -4px; border-radius: 50%; }
-.add-goal { color: var(--nav); }
-.add-goal .row-title { color: var(--nav); font-size: 1rem; }
-.since { font-size: var(--fs-small); color: var(--text-muted); margin-top: 10px; }
-.since b { color: var(--text-strong); }
-.on-shift { margin: 26px 0 10px; }
-/* The goal-setting form */
-.goal-form { padding: 6px 16px 18px; }
-.goal-form .lede { font-size: 0.9375rem; color: var(--text-muted); line-height: 1.45; margin: 12px 0 2px; }
-.goal-form .field small { display: block; font-weight: 400; color: var(--text-muted); font-size: 0.8125rem; margin-top: 2px; }
-.goal-form textarea { min-height: 72px; }
-.goal-form .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 18px; }
-.goal-form .private { font-size: 0.8125rem; color: var(--text-muted); margin-top: 12px; line-height: 1.4; }
 .todo-row .row-main { min-width: 0; }
 .due-red { color: var(--red-700); font-weight: 700; }
-.triage .textlink { white-space: nowrap; }
-.team-row .row-title { font-size: 1rem; }
-.later { margin-top: 32px; }
-@media (min-width: 960px) {
-  .home { display: grid; grid-template-columns: 1.15fr 1fr; gap: 0 40px; align-items: start; }
-  .home.solo { grid-template-columns: minmax(0, 640px); }
-}
+.add-todo { margin-top: 16px; }
+.add-todo .btn { margin-top: 12px; }
+.more-links { margin-top: 18px; }
+.home { max-width: 680px; }
 </style>
 {% endblock %}
 {% block content %}
+{% set n = tasks | length %}
+<div class="home">
 <section class="hero compact">
   <p class="eyebrow">{{ eyebrow }}</p>
   <h1 class="headline">{{ greeting }}{% if first_name %}, {{ first_name }}{% endif %}.</h1>
-  <p class="triage">{% if editing and not goals %}Start with two goals for today: one for your people, one for your area.{% else %}Here's what you're leading today.{% endif %}{% if unread %} <a class="textlink" href="{{ url_for('shift.announcements') }}">{{ unread }} new announcement{{ 's' if unread != 1 }}</a>{% endif %}</p>
+  <p class="triage">{% if my_leader_id %}{% if n %}<b>{{ n }}</b> to-do{{ 's' if n != 1 }} on your list.{% else %}You're all caught up.{% endif %}{% else %}{% if n %}<b>{{ n }}</b> to-do{{ 's' if n != 1 }} you handed out still open.{% else %}Every to-do you handed out is done.{% endif %}{% endif %}</p>
 </section>
 
-<div class="home{{ ' solo' if not tasks and not team_total }}">
-  <section class="sec purpose" id="goals" aria-labelledby="goals-head">
-    <div class="sec-head"><h2 id="goals-head">Today's goals</h2>{% if goals and not editing %}<a class="more" href="{{ url_for('shift.today', edit='goals') }}#goals">Edit</a>{% endif %}</div>
-
-    {% if editing %}
-    {% set lead = goals.get('leadership') %}{% set ops = goals.get('operational') %}
-    <form class="card goal-form" method="post" action="{{ url_for('shift.today_goals_save') }}">
-      {% if not goals %}<p class="lede">Coming in with a purpose: set them now, tick them off as you go.</p>{% endif %}
-      <label class="field" for="g-leadership">Leadership goal <small>Who will you grow or support today, and how?</small></label>
-      <textarea id="g-leadership" name="leadership" maxlength="{{ goal_max }}" rows="2" placeholder="e.g. Coach one team member on the Core 4">{{ lead.body if lead }}</textarea>
-      <label class="field" for="g-operational">Operational goal <small>What will you move in your area today?</small></label>
-      <textarea id="g-operational" name="operational" maxlength="{{ goal_max }}" rows="2" placeholder="e.g. Keep lunch drive-thru under 4:30 a car">{{ ops.body if ops }}</textarea>
-      <label class="field" for="g-area">Your area of ownership</label>
-      <input type="text" id="g-area" name="area" maxlength="{{ area_max }}" list="g-areas" value="{{ area }}" placeholder="e.g. Drive-Thru" autocomplete="off">
-      <datalist id="g-areas">{% for a in areas %}<option value="{{ a }}">{% endfor %}</datalist>
-      <div class="actions">
-        <button class="btn btn-primary" type="submit">{{ icon('target', 'sm') }}{{ 'Save goals' if goals else "Set today's goals" }}</button>
-        {% if goals %}<a class="textlink" href="{{ url_for('shift.today') }}#goals">Cancel</a>{% endif %}
-      </div>
-      <p class="private">{% if my_leader_id %}Only you and the Operator see these.{% else %}Only you see these. Your leaders' are under Your leaders.{% endif %} Leave a goal blank to clear it. <a class="textlink" href="{{ url_for('shift.goals') }}">Past days</a></p>
-    </form>
-    {% else %}
-    <div class="card list">
-      {% for kind in ('leadership', 'operational') %}
-      {% set g = goals.get(kind) %}
-      {% if g %}
-      <div class="goal{{ ' done' if g.done_at }}">
-        <div class="goal-main">
-          <span class="goal-kind">{{ icon('users' if kind == 'leadership' else 'target') }}{{ 'Leadership' if kind == 'leadership' else 'Operational' }}{% if kind == 'operational' and g.area %} · {{ g.area }}{% endif %}</span>
-          <span class="goal-text">{{ g.body }}</span>
-          {% if g.done_at %}<span class="badge b-green">{{ icon('check', 'xs') }}Done</span>{% endif %}
-        </div>
-        <form class="tick-form" method="post" action="{{ url_for('shift.today_goal_done', goal_id=g.id) }}">
-          <input type="hidden" name="done" value="{{ '0' if g.done_at else '1' }}">
-          <button class="tick{{ ' on' if g.done_at }}" type="submit" aria-label="{{ 'Mark not done' if g.done_at else 'Mark done' }}: {{ g.body }}">{% if g.done_at %}{{ icon('check') }}{% endif %}</button>
-        </form>
-      </div>
-      {% else %}
-      <a class="row add-goal" href="{{ url_for('shift.today', edit='goals') }}#goals">
-        <span class="lead-ico">{{ icon('plus') }}</span>
-        <span class="row-main"><span class="row-title">Add {{ 'a leadership' if kind == 'leadership' else 'an operational' }} goal</span></span>{{ icon('chev', 'chev') }}
-      </a>
-      {% endif %}
-      {% endfor %}
+<section class="sec todos" aria-labelledby="todo-head">
+  <div class="sec-head"><h2 id="todo-head">{{ 'Your to-dos' if my_leader_id else 'To-dos you handed out' }}</h2></div>
+  {% if tasks %}
+  <div class="card list">
+    {% for t in tasks %}
+    <div class="row todo-row">
+      <form class="tick-form" method="post" action="{{ url_for('shift.todo_toggle', task_id=t.id) }}">
+        <input type="hidden" name="done" value="1"><input type="hidden" name="back" value="today">
+        <button class="tick" type="submit" aria-label="Mark done: {{ t.title }}"></button>
+      </form>
+      <a class="row-main" href="{{ url_for('shift.todo_leader', leader_id=t.leader_id) }}#task-{{ t.id }}">
+        <span class="row-title">{{ t.title }}</span>
+        <span class="row-meta">{% if not my_leader_id %}{{ t.leader_name }} · {% endif %}{% if t.due_date == day %}<span class="due-red">Due today</span>{% elif t.overdue %}<span class="due-red">Overdue · was due {{ short_date(t.due_date) }}</span>{% elif t.due_date %}Due {{ short_date(t.due_date) }}{% else %}No due date{% endif %}{% if my_leader_id and t.assigned_by and t.assigned_by != shift_name %} · from {{ 'the Operator' if t.assigned_by == 'Operator' else t.assigned_by }}{% endif %}</span>
+      </a>{{ icon('chev', 'chev') }}
     </div>
-    {% endif %}
-    {% if not editing %}
-    <p class="since">{% if yesterday_set %}Yesterday you hit <b>{{ yesterday_done }} of {{ yesterday_set }}</b>. {% endif %}<a class="textlink" href="{{ url_for('shift.goals') }}">Past days</a></p>
-    {% endif %}
-  </section>
-
-  {% if tasks or team_total %}
-  <div class="side">
-    {% if team_total %}
-    <section class="sec purpose" aria-labelledby="team-head">
-      <div class="sec-head"><h2 id="team-head">Your leaders</h2></div>
-      <a class="card list team-row" href="{{ url_for('shift.goals') }}#daily">
-        <span class="row">
-          <span class="lead-ico{{ ' green' if team_set == team_total }}">{{ icon('users') }}</span>
-          <span class="row-main">
-            <span class="row-title">{{ team_set }} of {{ team_total }} leader{{ 's' if team_total != 1 }} set today's goals</span>
-            <span class="row-meta">See what each one is leading on</span>
-          </span>{{ icon('chev', 'chev') }}
-        </span>
-      </a>
-    </section>
-    {% endif %}
-
-    {% if tasks %}
-    <section class="sec purpose" aria-labelledby="todo-head">
-      <div class="sec-head"><h2 id="todo-head">{{ 'Your to-dos' if my_leader_id else 'To-dos you handed out' }}</h2>
-        <a class="more" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) if my_leader_id else url_for('shift.oneonone') ~ '#todos' }}">All {{ task_total }}</a></div>
-      <div class="card list">
-        {% for t in tasks %}
-        <div class="row todo-row">
-          <form class="tick-form" method="post" action="{{ url_for('shift.todo_toggle', task_id=t.id) }}">
-            <input type="hidden" name="done" value="1"><input type="hidden" name="back" value="today">
-            <button class="tick" type="submit" aria-label="Mark done: {{ t.title }}"></button>
-          </form>
-          <a class="row-main" href="{{ url_for('shift.todo_leader', leader_id=t.leader_id) }}#task-{{ t.id }}">
-            <span class="row-title">{{ t.title }}</span>
-            <span class="row-meta">{% if not my_leader_id %}{{ t.leader_name }} · {% endif %}{% if t.due_date == day %}<span class="due-red">Due today</span>{% elif t.overdue %}<span class="due-red">Overdue · was due {{ short_date(t.due_date) }}</span>{% elif t.due_date %}Due {{ short_date(t.due_date) }}{% else %}No due date{% endif %}{% if my_leader_id and t.assigned_by and t.assigned_by != shift_name %} · from {{ 'the Operator' if t.assigned_by == 'Operator' else t.assigned_by }}{% endif %}</span>
-          </a>{{ icon('chev', 'chev') }}
-        </div>
-        {% endfor %}
-      </div>
-    </section>
-    {% endif %}
+    {% endfor %}
   </div>
+  {% else %}
+  <div class="empty">{% if my_leader_id %}Nothing on your list right now.{% else %}Nothing you handed out is still open.{% endif %}</div>
   {% endif %}
-</div>
 
-<section class="sec later" aria-labelledby="tiles-head">
-  <div class="sec-head"><h2 id="tiles-head">Your Team Hub</h2></div>
-  {% set meetings = (nav.tabs | selectattr('key', 'equalto', 'meetings') | first) if nav else none %}
-  {# The four the team uses most, big; then what's on shift, small. #}
-  <div class="tiles">
-    <a class="tile" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) if my_leader_id else url_for('shift.todo') }}"><span class="tile-art">{{ art('todos') }}{% if todo_overdue %}<span class="count" aria-hidden="true">{{ todo_overdue }}</span>{% endif %}</span><span class="tile-name">To-dos</span><span class="tile-meta">{% if todo_open %}{{ todo_open }} open{% if todo_overdue %} · {{ todo_overdue }} overdue{% endif %}{% else %}{{ 'All caught up' if my_leader_id else 'Assign one' }}{% endif %}</span></a>
-    {% if hub_on %}
-    <a class="tile" href="{{ url_for('hub.library') }}"><span class="tile-art">{{ art('procedures') }}</span><span class="tile-name">Systems &amp; Procedures</span><span class="tile-meta">{% if to_read %}{{ to_read | length }} to read{% else %}Up to date{% endif %}</span></a>
+  {% if my_leader_id %}
+  <details class="compose add-todo">
+    <summary>{{ icon('plus', 'sm') }} Add a to-do</summary>
+    <form method="post" action="{{ url_for('shift.todo_assign', leader_id=my_leader_id) }}" class="card compose-form">
+      <input type="hidden" name="back" value="today">
+      <label class="field" for="t-title">To-do</label>
+      <input type="text" id="t-title" name="title" required placeholder="e.g. Restock the DT headset batteries">
+      <label class="field" for="t-due">Due date</label>
+      <input type="date" id="t-due" name="due_date">
+      <button class="btn btn-primary" type="submit">Add</button>
+    </form>
+  </details>
+  {% endif %}
+
+  <div class="card list more-links">
+    {% if not my_leader_id %}
+    <a class="row compact" href="{{ url_for('shift.todo') }}"><span class="lead-ico">{{ icon('plus') }}</span>
+      <span class="row-main"><span class="row-title">Assign a to-do</span></span>{{ icon('chev', 'chev') }}</a>
     {% endif %}
-    <a class="tile" href="{{ url_for('shift.oneonone') }}"><span class="tile-art">{{ art('meetings') }}</span><span class="tile-name">Meetings</span><span class="tile-meta">{% if meetings and meetings.count %}{{ meetings.count }} open topic{{ 's' if meetings.count != 1 }}{% else %}Nothing open{% endif %}</span></a>
-    <a class="tile" href="{{ url_for('shift.development') }}"><span class="tile-art">{{ art('ld') }}</span><span class="tile-name">Leadership Development</span><span class="tile-meta">{% if course.total is defined %}{{ course.done }} of {{ course.total }} lessons{% else %}{{ course.leaders }} leader{{ 's' if course.leaders != 1 }} in the course{% endif %}</span></a>
-  </div>
-  <h3 class="eyebrow on-shift" id="shift-head">On shift</h3>
-  <div class="tiles small" aria-labelledby="shift-head">
-    <a class="tile" href="{{ url_for('shift.checklists') }}"><span class="tile-art">{{ art('checklists') }}</span><span class="tile-name">Checklists</span><span class="tile-meta">{% if due %}{{ due | length }} due now{% else %}All done for now{% endif %}</span></a>
-    <a class="tile" href="{{ url_for('shift.recovery') }}"><span class="tile-art">{{ art('recovery') }}{% if recoveries_open %}<span class="count" aria-hidden="true">{{ recoveries_open }}</span>{% endif %}</span><span class="tile-name">Guest Recovery</span><span class="tile-meta">{% if recoveries_open %}{{ recoveries_open }} open{% if recoveries_back %} · {{ recoveries_back }} coming back{% endif %}{% elif recoveries_back %}{{ recoveries_back }} coming back{% else %}Log a guest{% endif %}</span></a>
-    <a class="tile" href="{{ url_for('shift.equipment') }}"><span class="tile-art">{{ art('equipment') }}{% if repairs_to_call %}<span class="count" aria-hidden="true">{{ repairs_to_call }}</span>{% endif %}</span><span class="tile-name">Equipment</span><span class="tile-meta">{% if repairs_to_call %}{{ repairs_to_call }} to call in{% if repairs_waiting %} · {{ repairs_waiting }} awaiting repair{% endif %}{% elif repairs_waiting %}{{ repairs_waiting }} awaiting repair{% else %}All working{% endif %}</span></a>
+    <a class="row compact" href="{{ url_for('shift.todo') }}"><span class="lead-ico">{{ icon('users') }}</span>
+      <span class="row-main"><span class="row-title">Every leader's to-dos</span></span>{{ icon('chev', 'chev') }}</a>
   </div>
 </section>
+</div>
 {% endblock %}

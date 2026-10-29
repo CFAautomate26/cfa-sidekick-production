@@ -33,7 +33,7 @@
   <a class="row-main" href="{{ url_for('shift.admin_template_edit', template_id=t.id) }}">
     <span class="row-title">{{ t.name }}</span>
     <span class="row-meta">{{ FREQUENCY_LABELS.get(t.frequency, 'Daily') }}{% if t.frequency == 'weekly' and t.due_weekday is not none %} ({{ WEEKDAY_LABELS[t.due_weekday][:3] }}){% endif %}
-      · {{ DAYPART_LABELS.get(t.daypart, t.daypart) }} · {{ t.area }} · {{ t.item_count }} items</span>
+      · {{ DAYPART_LABELS.get(t.daypart, t.daypart) }} · {{ t.area }} · {{ CHECKLIST_SIDE_LABELS.get(t.side, 'Front and back') }} · {{ t.item_count }} items</span>
   </a>
   <form method="post" action="{{ url_for('shift.admin_template_toggle', template_id=t.id) }}">
     <input type="hidden" name="active" value="{{ '0' if t.active else '1' }}">
