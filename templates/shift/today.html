@@ -74,7 +74,7 @@
         <button class="btn btn-primary" type="submit">{{ icon('target', 'sm') }}{{ 'Save goals' if goals else "Set today's goals" }}</button>
         {% if goals %}<a class="textlink" href="{{ url_for('shift.today') }}#goals">Cancel</a>{% endif %}
       </div>
-      <p class="private">{% if my_leader_id %}Only you and the Operator see these.{% else %}Only you see these. Your leaders' are under Your leaders.{% endif %} Leave a goal blank to clear it.</p>
+      <p class="private">{% if my_leader_id %}Only you and the Operator see these.{% else %}Only you see these. Your leaders' are under Your leaders.{% endif %} Leave a goal blank to clear it. <a class="textlink" href="{{ url_for('shift.goals') }}">Past days</a></p>
     </form>
     {% else %}
     <div class="card list">

@@ -12,7 +12,6 @@ should attach a persistent disk and point SHIFT_DB_PATH at it, e.g.
 """
 
 import json
-import math
 import os
 import re
 import secrets
@@ -43,8 +42,8 @@ DAYPART_LABELS = {
     "dinner": "Dinner (5–close)",
     "allday": "All day",
 }
-# Checklists can also run all day (station cleaning lists); lineups, notes
-# and the current-daypart guess stay on the four real dayparts.
+# Checklists can also run all day (station cleaning lists); notes and the
+# current-daypart guess stay on the four real dayparts.
 CHECKLIST_DAYPARTS = DAYPARTS + ["allday"]
 FREQUENCIES = ["daily", "weekly", "monthly"]
 FREQUENCY_LABELS = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
@@ -186,7 +185,7 @@ CREATE TABLE IF NOT EXISTS team_members (
 
 -- NOTE: COLLATE NOCASE case-folds ASCII only, so "José" and "josé" count as
 -- different names. Accepted limitation — worst case is a duplicate roster
--- entry, and lineups keep working.
+-- entry.
 
 -- People who can log in to the shift app. Separate from team_members: the
 -- roster is who gets positioned on the floor; leaders are who run the app.
@@ -2348,7 +2347,7 @@ def get_member(member_id: int) -> dict | None:
 def active_leader_named(name: str) -> dict | None:
     """The active leader login with this name (case-insensitive), if any.
     Matched against `leaders`, never team_members.role — nothing writes
-    role='leader' there, and lineup_assign resets it to 'team'."""
+    role='leader' there (add_member writes 'team')."""
     name = " ".join((name or "").split())
     if not name:
         return None

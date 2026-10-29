@@ -293,11 +293,6 @@ def _valid_date(value: str | None) -> str:
     return shift_db.today_local()
 
 
-def _valid_daypart(value: str | None) -> str:
-    value = (value or "").strip().lower()
-    return value if value in shift_db.DAYPARTS else shift_db.current_daypart()
-
-
 def _valid_checklist_daypart(value: str | None) -> str:
     value = (value or "").strip().lower()
     return value if value in shift_db.CHECKLIST_DAYPARTS else shift_db.current_daypart()
