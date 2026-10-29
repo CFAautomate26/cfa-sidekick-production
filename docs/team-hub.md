@@ -29,7 +29,13 @@ roster and history are in the ☰ menu; admin leaders also see Manage pages and 
 logins & checklist templates; the Operator also sees Backups, Team Hub
 access (clock-in numbers) and Categories.
 
-Bottom tabs — leaders: Today · Checklists · To-dos · Procedures · Meetings;
+The team's four main things are To-dos, Systems & Procedures, Meetings
+(1:1s) and Leadership Development: they're a leader's bottom tabs with
+Today, the four big tiles on Today, and the first words in the ☰ menu.
+Checklists, Guest recovery and Equipment sit in Today's smaller "On shift"
+row (and the ☰ menu).
+
+Bottom tabs — leaders: Today · To-dos · Procedures · Meetings · Leadership;
 team members: Home · Procedures · To read · Me. On the office computer the
 tabs become a row under the logo.
 

@@ -9,9 +9,11 @@ deployment. Team Hub's look, navigation and sign-in are described in
 - **Today** — a calm home: a greeting, **today's two goals** (a
   leadership goal and an operational goal for the leader's area of
   ownership, set when they sign in and ticked off as they hit them), their
-  open to-dos, and a tile into every section (Guest Recovery's and
-  Equipment's tiles show a red count while a guest is still waiting to be
-  reached or a breakdown hasn't been called in). Checklists, guests,
+  open to-dos, then big tiles for the four things the team uses most
+  (To-dos, Systems & Procedures, Meetings, Leadership Development) and a
+  smaller "On shift" row (Checklists, Guest Recovery, Equipment — those two
+  show a red count while a guest is still waiting to be reached or a
+  breakdown hasn't been called in). Checklists, guests,
   repairs, notes and announcements live on their own pages;
   Today only carries a quiet count on each tile and one link when an
   announcement is unread. Daily goals are private to each leader and the Operator (like

@@ -30,6 +30,10 @@ Canada.
   (links only where that role may go — routes stay the gate;
   `tests/test_roles.py` checks every page × role). The app's front page is
   `/hub/` (one manifest, scope `/`); a leader's home is Today (`/shift/`).
+  The four main sections — To-dos, Systems & Procedures, Meetings,
+  Leadership Development — are a leader's tabs (with Today) and Today's
+  big tiles; Checklists, Guest recovery and Equipment are the "On shift"
+  row.
   Guide: [docs/team-hub.md](docs/team-hub.md).
 - `shift_app.py` + `shift_db.py` — the leader tools at `/shift` (formerly "Shift Lead")
   (Huddle-style: daily/weekly/monthly checklists with who-did-what stamps,

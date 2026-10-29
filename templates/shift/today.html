@@ -30,6 +30,7 @@
 .add-goal .row-title { color: var(--nav); font-size: 1rem; }
 .since { font-size: var(--fs-small); color: var(--text-muted); margin-top: 10px; }
 .since b { color: var(--text-strong); }
+.on-shift { margin: 26px 0 10px; }
 /* The goal-setting form */
 .goal-form { padding: 6px 16px 18px; }
 .goal-form .lede { font-size: 0.9375rem; color: var(--text-muted); line-height: 1.45; margin: 12px 0 2px; }
@@ -148,18 +149,22 @@
 </div>
 
 <section class="sec later" aria-labelledby="tiles-head">
-  <div class="sec-head"><h2 id="tiles-head">Everything in Team Hub</h2></div>
+  <div class="sec-head"><h2 id="tiles-head">Your Team Hub</h2></div>
   {% set meetings = (nav.tabs | selectattr('key', 'equalto', 'meetings') | first) if nav else none %}
-  <div class="tiles small">
-    <a class="tile" href="{{ url_for('shift.checklists') }}"><span class="tile-art">{{ art('checklists') }}</span><span class="tile-name">Checklists</span><span class="tile-meta">{% if due %}{{ due | length }} due now{% else %}All done for now{% endif %}</span></a>
+  {# The four the team uses most, big; then what's on shift, small. #}
+  <div class="tiles">
     <a class="tile" href="{{ url_for('shift.todo_leader', leader_id=my_leader_id) if my_leader_id else url_for('shift.todo') }}"><span class="tile-art">{{ art('todos') }}{% if todo_overdue %}<span class="count" aria-hidden="true">{{ todo_overdue }}</span>{% endif %}</span><span class="tile-name">To-dos</span><span class="tile-meta">{% if todo_open %}{{ todo_open }} open{% if todo_overdue %} · {{ todo_overdue }} overdue{% endif %}{% else %}{{ 'All caught up' if my_leader_id else 'Assign one' }}{% endif %}</span></a>
-    <a class="tile" href="{{ url_for('shift.recovery') }}"><span class="tile-art">{{ art('recovery') }}{% if recoveries_open %}<span class="count" aria-hidden="true">{{ recoveries_open }}</span>{% endif %}</span><span class="tile-name">Guest Recovery</span><span class="tile-meta">{% if recoveries_open %}{{ recoveries_open }} open{% if recoveries_back %} · {{ recoveries_back }} coming back{% endif %}{% elif recoveries_back %}{{ recoveries_back }} coming back{% else %}Log a guest{% endif %}</span></a>
-    <a class="tile" href="{{ url_for('shift.equipment') }}"><span class="tile-art">{{ art('equipment') }}{% if repairs_to_call %}<span class="count" aria-hidden="true">{{ repairs_to_call }}</span>{% endif %}</span><span class="tile-name">Equipment</span><span class="tile-meta">{% if repairs_to_call %}{{ repairs_to_call }} to call in{% if repairs_waiting %} · {{ repairs_waiting }} awaiting repair{% endif %}{% elif repairs_waiting %}{{ repairs_waiting }} awaiting repair{% else %}All working{% endif %}</span></a>
     {% if hub_on %}
     <a class="tile" href="{{ url_for('hub.library') }}"><span class="tile-art">{{ art('procedures') }}</span><span class="tile-name">Systems &amp; Procedures</span><span class="tile-meta">{% if to_read %}{{ to_read | length }} to read{% else %}Up to date{% endif %}</span></a>
     {% endif %}
     <a class="tile" href="{{ url_for('shift.oneonone') }}"><span class="tile-art">{{ art('meetings') }}</span><span class="tile-name">Meetings</span><span class="tile-meta">{% if meetings and meetings.count %}{{ meetings.count }} open topic{{ 's' if meetings.count != 1 }}{% else %}Nothing open{% endif %}</span></a>
     <a class="tile" href="{{ url_for('shift.development') }}"><span class="tile-art">{{ art('ld') }}</span><span class="tile-name">Leadership Development</span><span class="tile-meta">{% if course.total is defined %}{{ course.done }} of {{ course.total }} lessons{% else %}{{ course.leaders }} leader{{ 's' if course.leaders != 1 }} in the course{% endif %}</span></a>
+  </div>
+  <h3 class="eyebrow on-shift" id="shift-head">On shift</h3>
+  <div class="tiles small" aria-labelledby="shift-head">
+    <a class="tile" href="{{ url_for('shift.checklists') }}"><span class="tile-art">{{ art('checklists') }}</span><span class="tile-name">Checklists</span><span class="tile-meta">{% if due %}{{ due | length }} due now{% else %}All done for now{% endif %}</span></a>
+    <a class="tile" href="{{ url_for('shift.recovery') }}"><span class="tile-art">{{ art('recovery') }}{% if recoveries_open %}<span class="count" aria-hidden="true">{{ recoveries_open }}</span>{% endif %}</span><span class="tile-name">Guest Recovery</span><span class="tile-meta">{% if recoveries_open %}{{ recoveries_open }} open{% if recoveries_back %} · {{ recoveries_back }} coming back{% endif %}{% elif recoveries_back %}{{ recoveries_back }} coming back{% else %}Log a guest{% endif %}</span></a>
+    <a class="tile" href="{{ url_for('shift.equipment') }}"><span class="tile-art">{{ art('equipment') }}{% if repairs_to_call %}<span class="count" aria-hidden="true">{{ repairs_to_call }}</span>{% endif %}</span><span class="tile-name">Equipment</span><span class="tile-meta">{% if repairs_to_call %}{{ repairs_to_call }} to call in{% if repairs_waiting %} · {{ repairs_waiting }} awaiting repair{% endif %}{% elif repairs_waiting %}{{ repairs_waiting }} awaiting repair{% else %}All working{% endif %}</span></a>
   </div>
 </section>
 {% endblock %}

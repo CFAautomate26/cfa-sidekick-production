@@ -453,10 +453,26 @@ def test_lineups_and_goals_are_out_of_the_menu_and_tabs(client, clock):
     login_leader(client)
     page = today_page(client)
     tabs = page[page.index('<nav class="tabbar"'):page.index("</nav>", page.index('<nav class="tabbar"'))]
+    # Today and the four the team uses most
     assert [t for t in re.findall(r"<span>([^<]+)</span>", tabs)] == \
-        ["Today", "Checklists", "To-dos", "Procedures", "Meetings"]
+        ["Today", "To-dos", "Procedures", "Meetings", "Leadership"]
     menu = client.get("/shift/more").data.decode()
     assert "Lineups" not in menu and ">Goals<" not in menu and "Goals</span>" not in menu
+    words = re.findall(r'<span class="w">([^<]+)', menu)
+    assert [w.strip() for w in words] == ["Today", "To-dos", "Systems &amp; Procedures",
+                                          "Meetings", "Leadership Development", "Checklists"]
+
+
+def test_the_four_are_big_tiles_and_shift_tools_small(client, clock):
+    maya = make_leader(client)
+    login_leader(client)
+    tiles = section(today_page(client), "tiles-head")
+    big, small = tiles.split('id="shift-head"')
+    for href in (f"/shift/todo/{maya}", "/hub/library", "/shift/oneonone", "/shift/development"):
+        assert f'href="{href}"' in big and f'href="{href}"' not in small, href
+    for href in ("/shift/checklists", "/shift/recovery", "/shift/equipment"):
+        assert f'href="{href}"' in small and f'href="{href}"' not in big, href
+    assert '<div class="tiles">' in big and '<div class="tiles small"' in small
 
 
 def todos_tile(client):
