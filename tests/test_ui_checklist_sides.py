@@ -118,6 +118,10 @@ def test_only_admins_set_who_sees_what(client, team):
     assert "Grace sees back of house checklists (and the ones for both)." in resp.data.decode()
     client.post(f"/shift/admin/leaders/{team['Grace']}/checklists", data={"view": "kitchen"})
     assert shift_db.get_leader(team["Grace"])["checklist_side"] == "boh"   # unknown: unchanged
+    resp = client.post(f"/shift/admin/leaders/{team['Jabina']}/checklists", data={"view": "all"},
+                       follow_redirects=True)
+    assert "Jabina sees every checklist." in resp.data.decode()
+    client.post(f"/shift/admin/leaders/{team['Jabina']}/checklists", data={"view": "boh"})
     admin = page(client, "/shift/admin")
     row = admin[admin.index(f'id="leader-{team["Grace"]}"'):]
     row = row[:row.index('id="leader-', 20)] if 'id="leader-' in row[20:] else row

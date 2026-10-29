@@ -89,12 +89,13 @@ deployment. Team Hub's look, navigation and sign-in are described in
 - **Announcements** — Operator/admin posts; every leader taps **Got it**, and
   admins see exactly who has acknowledged.
 - **History** — any past day's checklists (who did what) and notes.
-- **Leader to-dos** (`/shift/todo`; every leader's lists, linked from the
-  home and the ☰ menu) — any leader assigns tasks to any leader (title,
-  details, due date; stamped with who assigned it); each leader's open
-  to-dos are their home screen the moment they sign in (the To-dos tab
-  counts them; the Operator's counts every leader's), they check
-  them off there or from their to-do page (stamped who/when; only the assignee or
+- **Leader to-dos** — each leader's open to-dos are their home screen
+  (`/shift/`, the To-dos tab) the moment they sign in, and the tab counts
+  them; the Operator's home and count are the open ones they handed out.
+  *Every leader's to-dos* at the bottom of the home (also on Meetings and
+  Admin) opens `/shift/todo`, where any leader assigns tasks to any leader
+  (title, details, due date; stamped with who assigned it). Leaders tick
+  them off on the home or their to-do page (stamped who/when; only the assignee or
   an admin can complete or reopen a task, and only admins delete), and
   everyone sees open/overdue counts per leader with a full completed
   history. When a leader completes a task, the

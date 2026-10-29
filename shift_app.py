@@ -2173,9 +2173,9 @@ def admin_leader_checklists(leader_id):
     leader = shift_db.get_leader(leader_id)
     view = request.form.get("view", "")
     if leader and shift_db.set_leader_checklist_view(leader_id, view):
-        flash(f"{leader['name']} sees "
-              f"{shift_db.CHECKLIST_VIEW_LABELS[view].lower()} checklists"
-              f"{'' if view == 'all' else ' (and the ones for both)'}.")
+        flash(f"{leader['name']} sees every checklist." if view == "all" else
+              f"{leader['name']} sees {shift_db.CHECKLIST_VIEW_LABELS[view].lower()}"
+              " checklists (and the ones for both).")
     return redirect(url_for("shift.admin") + f"#leader-{leader_id}")
 
 

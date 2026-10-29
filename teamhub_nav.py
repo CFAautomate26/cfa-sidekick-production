@@ -235,9 +235,11 @@ def leader_nav(kind: str, name: str, role: str, leader_id: int | None) -> dict:
               "recoveries": len(open_recs), "coming_back": len(coming_back),
               "repairs_to_call": to_call, "repairs_waiting": awaiting,
               "meetings": _meetings_count(kind, leader_id),
-              # A leader's own open to-dos; the Operator's, every leader's.
-              "todos": shift_db.open_task_counts(
-                  None if kind == "operator" else leader_id)[0]}
+              # What each home lists: a leader's own open to-dos; the
+              # Operator's, the open ones they handed out.
+              "todos": (shift_db.open_task_counts(assigned_by=name)
+                        if kind == "operator" else
+                        shift_db.open_task_counts(leader_id))[0]}
     if kind == "operator" or role == "admin":
         counts["drafts"] = _hub_drafts()
     return nav_for(kind, name, role, counts)

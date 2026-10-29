@@ -2040,9 +2040,11 @@ def delete_task(task_id: int) -> None:
         conn.execute("DELETE FROM leader_tasks WHERE id=?", (task_id,))
 
 
-def open_task_counts(leader_id: int | None = None) -> tuple[int, int]:
-    """(open, overdue) to-dos for one leader, or with None for every active
-    leader — the To-dos tab and ☰ count. Overdue as leader_task_summary
+def open_task_counts(leader_id: int | None = None,
+                     assigned_by: str | None = None) -> tuple[int, int]:
+    """(open, overdue) to-dos for one leader, the ones `assigned_by` handed
+    out (the Operator's To-dos tab and ☰ count — what their home lists), or
+    with neither every active leader's. Overdue as leader_task_summary
     counts it (a due date before today)."""
     q = ("SELECT COUNT(*), COALESCE(SUM(t.due_date < ?), 0) FROM leader_tasks t "
          "JOIN leaders ld ON ld.id = t.leader_id "
@@ -2051,6 +2053,9 @@ def open_task_counts(leader_id: int | None = None) -> tuple[int, int]:
     if leader_id is not None:
         q += " AND t.leader_id = ?"
         args.append(leader_id)
+    if assigned_by is not None:
+        q += " AND t.assigned_by = ?"
+        args.append(" ".join(assigned_by.split()))
     with closing(connect()) as conn:
         row = conn.execute(q, args).fetchone()
     return row[0], row[1]

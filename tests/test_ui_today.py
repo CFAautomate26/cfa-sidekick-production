@@ -188,6 +188,8 @@ def test_operator_home_lists_the_to_dos_they_handed_out(client, clock):
     assert "Add a to-do" not in page                        # no list of their own
     assert '<a class="row compact" href="/shift/todo">' in mine and "Assign a to-do" in mine
     assert "Every leader&#39;s to-dos" in mine or "Every leader's to-dos" in mine
+    # the To-dos tab counts what the home lists, not Daniel's own reminder
+    assert '<span>To-dos</span><span class="count">2</span>' in page
 
 
 def test_nothing_open(client, clock):

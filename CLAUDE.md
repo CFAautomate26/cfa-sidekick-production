@@ -50,8 +50,9 @@ Canada.
   a to-dos-only home (`/shift/`: greeting, the leader's open to-dos with
   tick-off and an add box; the Operator's lists the open ones they handed
   out; it still starts the day's checklist runs for the scorecard),
-  per-leader assigned to-dos under `/shift/todo` (any leader assigns; the
-  To-dos tab, also inline on Meetings),
+  per-leader assigned to-dos (the To-dos tab is the home; every leader's
+  lists are under `/shift/todo`, linked from the home and Meetings — any
+  leader assigns),
   1:1 meeting agendas under `/shift/oneonone` (private to each leader +
   the Operator master login — not other admins; plus 1:1 threads with any
   team-roster member under `/shift/oneonone/member/<id>`, table
