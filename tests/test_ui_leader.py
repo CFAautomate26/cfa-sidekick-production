@@ -233,46 +233,6 @@ def test_lead_still_cannot_open_someone_elses_development(client):
 
 # --- Lineups & Setups ---------------------------------------------------------
 
-def test_lineup_lists_open_positions_first_in_red(client):
-    login_operator(client)
-    day = shift_db.today_local()
-    positions = shift_db.active_positions()
-    filled = positions[0]
-    shift_db.assign_position(day, "lunch", filled["id"], "Marcus")
-    page = client.get(f"/shift/lineup?date={day}&daypart=lunch").data.decode()
-    eyebrow, headline = hero(page)
-    assert eyebrow.startswith("Lineups &amp; Setups · ") and headline == "Lunch lineup"
-    open_count = len(positions) - 1
-    assert f"<b>1</b> of <b>{len(positions)}</b> positions filled · <b>{open_count}</b> open" in page
-    assert f'<span class="badge b-red">{open_count} open</span>' in page
-    assert page.count('<div class="who">Open — fill</div>') == open_count
-    # Open section comes before the filled one; Marcus sits under "Who's where"
-    assert page.index('id="open"') < page.index('id="filled"') < page.index('class="assignee">Marcus')
-    assert f'<div class="slot open" id="pos-{filled["id"]}">' not in page
-    # Same forms, same fields
-    assert 'name="member_name"' in page and 'name="position_id"' in page
-    assert 'action="/shift/lineup/assign"' in page and 'action="/shift/lineup/unassign/' in page
-
-
-def test_lineup_empty_daypart_still_offers_copies(client):
-    login_operator(client)
-    day = shift_db.today_local()
-    pos = shift_db.active_positions()[0]
-    shift_db.assign_position(day, "breakfast", pos["id"], "Marcus")
-    page = client.get(f"/shift/lineup?date={day}&daypart=lunch").data.decode()
-    assert "Nobody's on it yet" in page
-    assert "Copy from breakfast" in page and 'action="/shift/lineup/copy"' in page
-    assert 'id="filled"' not in page
-
-
-def test_lineup_day_label_names_the_weekday(client):
-    login_operator(client)
-    page = client.get("/shift/lineup?date=2026-10-23&daypart=dinner").data.decode()
-    assert "Lineups &amp; Setups · Fri, Oct 23" in page
-    page = client.get("/shift/lineup?date=2024-02-29&daypart=dinner").data.decode()
-    assert "Thu, Feb 29" in page
-
-
 # --- every restyled page: compact hero, no emoji chrome -------------------------
 
 # Emoji that used to be page chrome (shout-out values keep theirs: that's content)
@@ -281,13 +241,9 @@ CHROME_EMOJI = ["🐮", "📁", "🏆", "⧉", "📌", "🌟", "🎓", "✅", "�
 
 def test_restyled_pages_use_the_compact_hero(client):
     shift_db.add_leader("Maya", "4721", "admin")
-    goal = shift_db.create_goal("OSAT 80%", "", "OSAT", "%", 80, "up", "monthly", "",
-                                "Operator")
     login_operator(client)
     expected = {
-        "/shift/lineup": "Lineups &amp; Setups",
-        "/shift/goals": "Goals",
-        f"/shift/goals/{goal}": "Goals",
+        "/shift/goals": "Today",                          # Daily goals: Today's, over time
         "/shift/notes": "Shift notes",
         "/shift/announcements": "Announcements",
         "/shift/recovery": "Guest recovery",
@@ -342,36 +298,6 @@ def test_admin_keeps_every_leader_form(client):
 
 
 # --- Goals ------------------------------------------------------------------------
-
-def test_goals_split_store_and_personal_with_a_lock_line(client):
-    shift_db.add_leader("Maya", "4721", "lead")
-    shift_db.create_goal("Drive-thru under 4:30", "", "Avg DT time", "sec", 270, "down",
-                         "weekly", "", "Operator")
-    shift_db.create_goal("Solo breakfast open", "", "", "", None, "up", "one-time", "",
-                         "Operator", leader_id=leader_id("Maya"))
-    login_leader(client)
-    page = client.get("/shift/goals").data.decode()
-    assert "<b>1</b> store goal" in page and "<b>1</b> personal" in page
-    assert page.index("Store goals") < page.index("Drive-thru under 4:30") \
-        < page.index("Personal goals") < page.index("Solo breakfast open")
-    assert "Only you and the Operator see these." in page
-    for field in ("title", "why", "metric", "unit", "target_value", "direction", "period",
-                  "due_date", "leader_id"):
-        assert f'name="{field}"' in page, field
-
-
-def test_goal_detail_shows_latest_number_against_target(client):
-    login_operator(client)
-    gid = shift_db.create_goal("OSAT 80%", "Guests first.", "OSAT", "%", 80, "up",
-                               "monthly", "2026-11-14", "Operator")
-    shift_db.add_goal_update(gid, 77, "", "Maya")
-    page = client.get(f"/shift/goals/{gid}").data.decode()
-    assert hero(page)[1] == "OSAT 80%"
-    assert "due Nov 14" in page and "target <b>80%</b>" in page
-    assert '<span class="num">77<small>%</small></span>' in page
-    assert "logged" in page and "by Maya" in page
-    assert 'name="value"' in page and 'name="note"' in page and 'name="status"' in page
-
 
 # --- Logbooks -----------------------------------------------------------------------
 

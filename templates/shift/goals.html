@@ -1,13 +1,8 @@
 {% extends "shift/base.html" %}
-{% from "shift/_leader_ui.html" import ui_styles, month_day with context %}
-{% block title %}Goals{% endblock %}
+{% from "shift/_leader_ui.html" import ui_styles with context %}
+{% block title %}Daily goals{% endblock %}
 {% block head %}{{ ui_styles() }}
 <style>
-.goal-row { align-items: center; }
-.goal-row .bar { margin-top: 8px; }
-.goal-row .num { font-size: 1.5rem; line-height: 1; text-align: right; }
-.goal-row .num .pct { font-size: 0.875rem; color: var(--text-muted); margin-left: 1px; letter-spacing: 0; }
-.goal-row .num small { display: block; font-size: 0.75rem; color: var(--text-muted); letter-spacing: 0; margin-top: 3px; font-weight: 700; }
 .daily-row { display: block; padding: 13px 16px; }
 .daily-row + .daily-row { border-top: 1px solid var(--rule); }
 .daily-who { font-weight: 700; color: var(--text-strong); font-size: 1rem; }
@@ -18,24 +13,9 @@
 .daily-line .t { min-width: 0; overflow-wrap: anywhere; }
 .daily-line .t b { font-size: 0.75rem; text-transform: uppercase; letter-spacing: var(--track-eyebrow); color: var(--text-muted); margin-right: 4px; }
 .daily-line.unset { color: var(--text-muted); }
+.narrow { max-width: 720px; }
 </style>
 {% endblock %}
-
-{% macro goal_row(g) %}
-<a class="row goal-row" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}">
-  <span class="row-main">
-    <span class="row-title">{{ g.title }}{% if g.leader_name and shift_is_operator %} <span class="badge b-navy">{{ icon('user') }}{{ g.leader_name }}</span>{% endif %}</span>
-    {% if g.progress_pct is not none %}
-    <span class="bar navy {{ 'done' if g.progress_pct >= 100 }}"><span style="width: {{ g.progress_pct }}%"></span></span>
-    <span class="row-meta">{{ g.metric ~ ' · ' if g.metric }}target {{ g.target_value | num }}{{ g.unit if g.unit == '%' else ' ' ~ g.unit }} · {{ 'lower' if g.direction == 'down' else 'higher' }} is better</span>
-    {% else %}
-    <span class="row-meta tags"><span>{{ g.metric or (g.period | capitalize) }}{% if g.due_date %} · due {{ month_day(g.due_date) }}{% endif %}</span>{% if g.target_value is not none %}<span class="badge b-tan">No numbers yet</span>{% endif %}</span>
-    {% endif %}
-  </span>
-  {% if g.latest_value is not none %}<span class="num">{{ g.latest_value | num }}{% if g.unit == '%' %}<span class="pct">%</span>{% endif %}{% if g.unit != '%' %}<small>{{ g.unit or 'latest' }}</small>{% endif %}</span>{% endif %}
-  {{ icon('chev', 'chev') }}
-</a>
-{% endmacro %}
 
 {% macro daily_lines(lead, ops, show_area=true) %}
 {% for kind, g in (('leadership', lead), ('operational', ops)) %}
@@ -46,79 +26,20 @@
 {% endmacro %}
 
 {% block content %}
-{% set store = goals | rejectattr('leader_id') | list %}
-{% set personal = goals | selectattr('leader_id') | list %}
+<p class="crumbs"><a href="{{ url_for('shift.today') }}">← Today</a></p>
 <section class="hero compact">
-  <p class="eyebrow">Goals</p>
-  <h1 class="headline">{{ status | capitalize }} goals</h1>
-  <p class="triage"><b>{{ store | length }}</b> store goal{{ 's' if store | length != 1 }}{% if personal %} · <b>{{ personal | length }}</b> personal{% endif %}</p>
-  <nav class="seg fit" aria-label="Goal status">
-    <a href="{{ url_for('shift.goals', status='active') }}"{% if status == 'active' %} class="on" aria-current="page"{% endif %}>Active</a>
-    <a href="{{ url_for('shift.goals', status='achieved') }}"{% if status == 'achieved' %} class="on" aria-current="page"{% endif %}>Achieved</a>
-    <a href="{{ url_for('shift.goals', status='archived') }}"{% if status == 'archived' %} class="on" aria-current="page"{% endif %}>Archived</a>
-  </nav>
+  <p class="eyebrow">Today</p>
+  <h1 class="headline">Daily goals</h1>
+  <p class="triage">One for your people, one for your area — set on Today.</p>
 </section>
 
-<div class="split">
-<details class="feature cream composer" {{ 'open' if request.args.get('new') or request.args.get('leader_id') }}>
-  <summary><span class="plus">{{ icon('plus') }}</span><span class="grow">New goal</span>{{ icon('chev', 'chev') }}</summary>
-  <form method="post" action="{{ url_for('shift.goal_create') }}">
-    <label class="field" for="g-title">Goal</label>
-    <input type="text" id="g-title" name="title" required placeholder="e.g. Drive-thru under 4 minutes at lunch">
-    <label class="field" for="g-why">Why it matters / what winning looks like</label>
-    <textarea id="g-why" name="why" placeholder="Optional"></textarea>
-    <div class="two">
-      <div>
-        <label class="field" for="g-metric">Metric</label>
-        <input type="text" id="g-metric" name="metric" placeholder="e.g. Avg DT time">
-      </div>
-      <div>
-        <label class="field" for="g-unit">Unit</label>
-        <input type="text" id="g-unit" name="unit" placeholder="sec">
-      </div>
-    </div>
-    <div class="two">
-      <div>
-        <label class="field" for="g-target">Target number</label>
-        <input type="number" step="any" id="g-target" name="target_value" inputmode="decimal" placeholder="Blank = yes/no goal">
-      </div>
-      <div>
-        <label class="field" for="g-dir">Better is</label>
-        <select id="g-dir" name="direction">
-          <option value="up">Higher</option>
-          <option value="down">Lower</option>
-        </select>
-      </div>
-    </div>
-    <div class="two">
-      <div>
-        <label class="field" for="g-period">Rhythm</label>
-        <select id="g-period" name="period">
-          {% for p in periods %}<option value="{{ p }}" {{ 'selected' if p == 'weekly' }}>{{ p }}</option>{% endfor %}
-        </select>
-      </div>
-      <div>
-        <label class="field" for="g-due">Target date</label>
-        <input type="date" id="g-due" name="due_date">
-      </div>
-    </div>
-    <label class="field" for="g-leader">For a leader (optional)</label>
-    <select id="g-leader" name="leader_id">
-      <option value="">— whole store —</option>
-      {% for l in leaders %}<option value="{{ l.id }}" {{ 'selected' if request.args.get('leader_id') == l.id|string }}>{{ l.name }}</option>{% endfor %}
-    </select>
-    <p class="hint">A personal goal is visible only to that leader and the Operator.</p>
-    <button class="btn btn-primary block" type="submit">Create goal</button>
-  </form>
-</details>
-
-<div class="feed">
-{% if status == 'active' %}
+<div class="narrow">
 <section class="sec" id="daily" aria-labelledby="daily-head">
-  <div class="sec-head"><h2 id="daily-head">Daily goals</h2><a class="more" href="{{ url_for('shift.today', edit='goals') }}#goals">{{ 'Edit yours' if daily_mine else 'Set yours' }}</a></div>
+  {% set team_view = shift_is_operator and daily_team %}
+  {% set edit_link %}<a class="more" href="{{ url_for('shift.today', edit='goals') }}#goals">{{ 'Edit yours' if daily_mine else 'Set yours' }}</a>{% endset %}
+  <div class="sec-head"><h2 id="daily-head">{{ 'Your leaders today' if team_view else 'Yours' }}</h2>{% if not team_view %}{{ edit_link }}{% endif %}</div>
   <p class="lockline">{{ icon('lock') }}{% if shift_is_operator %}Each leader's are between them and you.{% else %}Only you and the Operator see these.{% endif %}</p>
-  {% if shift_is_operator and daily_team %}
-  <h3 class="eyebrow" style="margin: 14px 0 8px;">Your leaders today</h3>
+  {% if team_view %}
   <div class="card list">
     {% for t in daily_team %}
     <div class="daily-row">
@@ -127,8 +48,8 @@
     </div>
     {% endfor %}
   </div>
+  <div class="sec-head" style="margin-top: 22px;"><h3 class="eyebrow" style="margin: 0;">Your own</h3>{{ edit_link }}</div>
   {% endif %}
-  <h3 class="eyebrow" style="margin: 18px 0 8px;">{{ 'Your own' if shift_is_operator else 'Yours' }}</h3>
   <div class="card list">
     <div class="daily-row">
       <span class="daily-who">Today<small>{{ short_date(day) }}</small></span>
@@ -142,30 +63,5 @@
     {% endfor %}
   </div>
 </section>
-{% endif %}
-
-<section class="sec">
-  <div class="sec-head"><h2>Store goals</h2></div>
-  {% if store %}
-  <div class="card list">
-    {% for g in store %}{{ goal_row(g) }}{% endfor %}
-  </div>
-  {% else %}
-  <div class="empty">No {{ status }} store goals.
-    {% if status == 'active' %}Add one above — a good first one: a drive-thru time or CEM score target for the month.{% endif %}
-  </div>
-  {% endif %}
-</section>
-
-{% if personal %}
-<section class="sec">
-  <div class="sec-head"><h2>Personal goals</h2></div>
-  <p class="lockline">{{ icon('lock') }}{% if shift_is_operator %}Each one is between that leader and you.{% else %}Only you and the Operator see these.{% endif %}</p>
-  <div class="card list">
-    {% for g in personal %}{{ goal_row(g) }}{% endfor %}
-  </div>
-</section>
-{% endif %}
-</div>
 </div>
 {% endblock %}

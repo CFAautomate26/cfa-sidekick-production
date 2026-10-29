@@ -18,8 +18,6 @@ home-screen icons and every old link keep working.
 | **Today** (leaders) / **Home** (team members) | everyone | Leaders: a calm start — today's leadership goal and operational goal (private to them and the Operator), their open to-dos, and a tile into each section. Team members: their required reading, the categories, what's new. |
 | **Systems & Procedures** | everyone (filtered) | HR, FOH Operations, BOH Operations, Leadership Development (leaders only) — pages, required reading, search, editor tools. |
 | **Checklists** | leaders | Daypart lists, station cleaning sheets, scorecard, past days. |
-| **Lineups & Setups** | leaders | The position lineup per daypart. |
-| **Goals** | leaders | Store goals and updates. |
 | **Meetings** | leaders | Your 1:1 agenda with the Operator, 1:1s with your team, to-dos. Private to each leader and the Operator. |
 | **To-dos** | leaders | Every leader's to-do list: assign one, see open and overdue, check yours off. A tile on Today and a word in the ☰ menu. |
 | **Leadership Development** | leaders | The 48-lesson course, plus the leadership library pages. |
@@ -31,7 +29,13 @@ roster and history are in the ☰ menu; admin leaders also see Manage pages and 
 logins & checklist templates; the Operator also sees Backups, Team Hub
 access (clock-in numbers) and Categories.
 
-Bottom tabs — leaders: Today · Checklists · Lineups · Procedures · Meetings;
+The team's four main things are To-dos, Systems & Procedures, Meetings
+(1:1s) and Leadership Development: they're a leader's bottom tabs with
+Today, the four big tiles on Today, and the first words in the ☰ menu.
+Checklists, Guest recovery and Equipment sit in Today's smaller "On shift"
+row (and the ☰ menu).
+
+Bottom tabs — leaders: Today · To-dos · Procedures · Meetings · Leadership;
 team members: Home · Procedures · To read · Me. On the office computer the
 tabs become a row under the logo.
 

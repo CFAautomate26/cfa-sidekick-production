@@ -21,14 +21,13 @@
     <p class="lockline">{{ icon('lock') }}Only you and the Operator see this agenda</p>
     <h2 class="f-title">Your agenda with the Operator</h2>
     <p class="meta">{% if my_last_met %}Last 1:1 on {{ day(my_last_met) }}{% else %}No 1:1 logged yet{% endif %} · add topics as they come up</p>
-    {{ stats(me.id, course_done, course_total, open_tasks | length, goal_count,
-             '#todos', url_for('shift.oneonone_leader', leader_id=me.id) ~ '#goals', True) }}
+    {{ stats(me.id, course_done, course_total, open_tasks | length, '#todos') }}
   </div>
   {{ topic_rows(agenda, 'shift.oneonone_topic_toggle', 'shift.oneonone_topic_delete',
                 action_url=url_for('shift.oneonone_action', leader_id=me.id), back=True) }}
   {{ add_topic(url_for('shift.oneonone_topic_add', leader_id=me.id), 'Add a topic for your next 1:1', back=True) }}
   <div class="foot-links">
-    <a href="{{ url_for('shift.oneonone_leader', leader_id=me.id) }}">Past 1:1s and goals{{ icon('chev') }}</a>
+    <a href="{{ url_for('shift.oneonone_leader', leader_id=me.id) }}">Past 1:1s{{ icon('chev') }}</a>
     {% if agenda %}<span>To-do + puts a topic on your to-dos, which other leaders can see.</span>{% endif %}
   </div>
 </article>

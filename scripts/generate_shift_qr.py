@@ -101,10 +101,10 @@ def centred_text(draw, y, text, font, fill, width):
 
 SHIFT_TEXT = {
     "eyebrow": "LEADERSHIP TEAM",
-    "title": "SHIFT LEAD APP",
-    "body": ("Checklists, lineups, goals and shift notes —",
-             "everything you need to run the shift,",
-             "right on your phone."),
+    "title": "TEAM HUB",
+    "body": ("To-dos, procedures, 1:1s and Leadership",
+             "Development — everything you need to",
+             "lead the shift, right on your phone."),
     "hints": ("Sign in with your PIN, then Add to Home Screen",
               "No PIN yet? Ask the Operator."),
 }

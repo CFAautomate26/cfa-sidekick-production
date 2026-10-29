@@ -13,12 +13,14 @@ from flask import current_app, request, url_for
 import shift_db
 
 # (key, icon, label, endpoint) — labels are a word from the section's name.
+# A leader's tabs are Today and the four things the team uses most:
+# to-dos, Systems & Procedures, 1:1 meetings and Leadership Development.
 LEADER_TABS = [
     ("today", "home", "Today", "shift.today"),
-    ("checklists", "clip", "Checklists", "shift.checklists"),
-    ("lineups", "users", "Lineups", "shift.lineup"),
+    ("todos", "checkcircle", "To-dos", "shift.todo"),
     ("procedures", "book", "Procedures", "hub.library"),
     ("meetings", "chat", "Meetings", "shift.oneonone"),
+    ("development", "cap", "Leadership", "shift.development"),
 ]
 MEMBER_TABS = [
     ("home", "home", "Home", "hub.home"),
@@ -34,8 +36,7 @@ _SECTION_OF = {
     "shift.run_detail": "checklists", "shift.history": "checklists",
     "shift.admin_templates": "checklists", "shift.admin_template_new": "checklists",
     "shift.admin_template_edit": "checklists",
-    "shift.lineup": "lineups",
-    "shift.goals": "goals", "shift.goal_detail": "goals",
+    "shift.goals": "today",                     # Daily goals: Today's, over time
     "shift.oneonone": "meetings", "shift.oneonone_leader": "meetings",
     "shift.oneonone_member": "meetings",
     "shift.todo": "todos", "shift.todo_leader": "todos",
@@ -113,7 +114,7 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
         tabs = [tab(*t, count=counts.get("to_read", 0) if t[0] == "toread" else 0)
                 for t in MEMBER_TABS]
     else:
-        tabs = [tab(*t, count=counts.get("meetings", 0) if t[0] == "meetings" else 0)
+        tabs = [tab(*t, count=counts.get(t[0], 0) if t[0] in ("meetings", "todos") else 0)
                 for t in LEADER_TABS if up or t[3] != "hub.library"]
 
     big: list[dict] = []
@@ -135,15 +136,13 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
     else:
         def word(label, key, endpoint, count=0):
             return {"label": label, "url": _url(endpoint), "count": count, "on": key == current}
-        big.append(word("Today", "today", "shift.today"))
+        big += [word("Today", "today", "shift.today"),
+                word("To-dos", "todos", "shift.todo", counts.get("todos", 0))]
         if up:
             big.append(word("Systems & Procedures", "procedures", "hub.library"))
-        big += [word("Checklists", "checklists", "shift.checklists"),
-                word("Lineups & Setups", "lineups", "shift.lineup"),
-                word("Goals", "goals", "shift.goals"),
-                word("Meetings", "meetings", "shift.oneonone", counts.get("meetings", 0)),
-                word("To-dos", "todos", "shift.todo", counts.get("todos", 0)),
-                word("Leadership Development", "development", "shift.development")]
+        big += [word("Meetings", "meetings", "shift.oneonone", counts.get("meetings", 0)),
+                word("Leadership Development", "development", "shift.development"),
+                word("Checklists", "checklists", "shift.checklists")]
         recoveries, unread = counts.get("recoveries", 0), counts.get("unread", 0)
         coming_back = counts.get("coming_back", 0)
         to_call, awaiting = counts.get("repairs_to_call", 0), counts.get("repairs_waiting", 0)

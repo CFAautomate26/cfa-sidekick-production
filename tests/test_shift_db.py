@@ -26,12 +26,18 @@ def isolated_db(tmp_path, monkeypatch):
     yield
 
 
+def _active_positions():
+    with shift_db.closing(shift_db.connect()) as conn:
+        return conn.execute("SELECT COUNT(*) FROM positions WHERE active=1").fetchone()[0]
+
+
 def test_init_seeds_templates_and_positions(isolated_db):
     templates = shift_db.all_templates()
     assert len(templates) == SEEDED_LISTS
     assert all(t["item_count"] > 0 for t in templates)
-    positions = shift_db.active_positions()
-    assert len(positions) == len(shift_db.SEED_POSITIONS)
+    # Lineups are gone from the app; their positions are still seeded and
+    # kept, like every table, so backups and restores stay whole.
+    assert _active_positions() == len(shift_db.SEED_POSITIONS)
 
 
 def test_init_is_idempotent(isolated_db):
@@ -127,81 +133,6 @@ def test_critical_remaining_counts(isolated_db):
     assert boh["critical_remaining"] == 4
 
 
-def test_goal_lifecycle_and_progress(isolated_db):
-    gid = shift_db.create_goal(
-        title="Drive-thru under 4 minutes", why="Guest experience", metric="Avg DT time",
-        unit="sec", target_value=240, direction="down", period="weekly",
-        due_date="", created_by="Joshua",
-    )
-    goals = shift_db.goals_by_status("active")
-    assert goals[0]["latest_value"] is None
-    assert goals[0]["progress_pct"] is None
-
-    shift_db.add_goal_update(gid, 300, "Lunch rush avg", "Joshua")
-    g, updates = shift_db.goal_with_updates(gid)
-    assert g["latest_value"] == 300
-    assert g["progress_pct"] == 80  # 240/300
-    assert len(updates) == 1
-
-    shift_db.add_goal_update(gid, 230, "Beat it", "Joshua")
-    g, _ = shift_db.goal_with_updates(gid)
-    assert g["progress_pct"] == 100
-
-    shift_db.set_goal_status(gid, "achieved")
-    assert not shift_db.goals_by_status("active")
-    assert shift_db.goals_by_status("achieved")[0]["id"] == gid
-
-
-def test_goal_progress_direction_up(isolated_db):
-    gid = shift_db.create_goal("CEM Taste score", "", "CEM Taste", "%", 70,
-                               "up", "monthly", "", "Joshua")
-    shift_db.add_goal_update(gid, 35, "", "Joshua")
-    g, _ = shift_db.goal_with_updates(gid)
-    assert g["progress_pct"] == 50
-
-
-def test_goal_note_only_update_keeps_last_value(isolated_db):
-    gid = shift_db.create_goal("Window times", "", "Avg window", "sec", 90,
-                               "down", "weekly", "", "J")
-    shift_db.add_goal_update(gid, 100, "", "J")
-    shift_db.add_goal_update(gid, None, "Coached the window team", "J")
-    g, updates = shift_db.goal_with_updates(gid)
-    assert len(updates) == 2
-    assert g["latest_value"] == 100
-
-
-def test_lineup_assign_unassign_and_duplicates(isolated_db):
-    pos = shift_db.active_positions()[0]
-    shift_db.assign_position("2026-09-19", "lunch", pos["id"], "Marcus")
-    shift_db.assign_position("2026-09-19", "lunch", pos["id"], "marcus")  # dup, case-insens.
-    lineup = shift_db.lineup_for("2026-09-19", "lunch")
-    assert len(lineup[pos["id"]]) == 1
-
-    shift_db.unassign(lineup[pos["id"]][0]["id"])
-    assert not shift_db.lineup_for("2026-09-19", "lunch")
-
-
-def test_copy_lineup_from_previous_day(isolated_db):
-    positions = shift_db.active_positions()
-    shift_db.assign_position("2026-09-18", "lunch", positions[0]["id"], "Marcus")
-    shift_db.assign_position("2026-09-18", "lunch", positions[1]["id"], "Sarah")
-    shift_db.assign_position("2026-09-19", "lunch", positions[0]["id"], "Marcus")  # already set
-
-    assert shift_db.previous_lineup_date("2026-09-19", "lunch") == "2026-09-18"
-    copied = shift_db.copy_lineup("2026-09-18", "lunch", "2026-09-19", "lunch")
-    assert copied == 1  # only Sarah was new
-    lineup = shift_db.lineup_for("2026-09-19", "lunch")
-    assert len(lineup) == 2
-
-
-def test_copy_lineup_across_dayparts(isolated_db):
-    positions = shift_db.active_positions()
-    shift_db.assign_position("2026-09-19", "lunch", positions[0]["id"], "Marcus")
-    copied = shift_db.copy_lineup("2026-09-19", "lunch", "2026-09-19", "dinner")
-    assert copied == 1
-    assert len(shift_db.lineup_for("2026-09-19", "dinner")) == 1
-
-
 def test_roster_add_reactivate_dedupe(isolated_db):
     assert shift_db.add_member("  Sarah   Jones ")
     assert not shift_db.add_member("   ")
@@ -252,11 +183,6 @@ def test_ack_missing_announcement_is_graceful(isolated_db):
     shift_db.add_announcement("Real", "J", False, "")
     a = shift_db.active_announcements(today="2026-09-19")[0]
     assert shift_db.ack_announcement(a["id"], "Maya") is True
-
-
-def test_assign_unknown_position_is_graceful(isolated_db):
-    assert shift_db.assign_position("2026-09-19", "lunch", 999999, "Maya") is False
-    assert not shift_db.lineup_for("2026-09-19", "lunch")
 
 
 def test_get_note_and_get_leader(isolated_db):
@@ -344,7 +270,7 @@ def test_export_import_roundtrip(isolated_db):
 def _table_counts():
     return {
         "templates": len(shift_db.all_templates(include_inactive=True)),
-        "positions": len(shift_db.active_positions()),
+        "positions": _active_positions(),
         "notes": len(shift_db.notes_feed()),
     }
 
@@ -1562,28 +1488,6 @@ def test_oneonone_summary_and_badge(isolated_db):
     assert shift_db.open_topic_count(None) == 0         # Operator session
 
 
-def test_goals_leader_tag_filters(isolated_db):
-    shift_db.add_leader("Maya", "4721")
-    maya = shift_db.leaders()[0]
-    store = shift_db.create_goal("DT under 4", "", "DT", "sec", 240, "down",
-                                 "weekly", "", "Operator")
-    personal = shift_db.create_goal("Solo breakfast open", "", "", "", None,
-                                    "up", "monthly", "", "Operator",
-                                    leader_id=maya["id"])
-    bogus = shift_db.create_goal("Ghost-tagged", "", "", "", None, "up",
-                                 "weekly", "", "Operator", leader_id=999999)
-
-    all_ids = {g["id"] for g in shift_db.goals_by_status("active")}
-    assert all_ids == {store, personal, bogus}
-    store_ids = {g["id"] for g in shift_db.goals_by_status("active", store_only=True)}
-    assert store_ids == {store, bogus}                  # bogus tag stored as NULL
-    maya_goals = shift_db.goals_by_status("active", leader_id=maya["id"])
-    assert [g["id"] for g in maya_goals] == [personal]
-    assert maya_goals[0]["leader_name"] == "Maya"
-    g, _ = shift_db.goal_with_updates(personal)
-    assert g["leader_name"] == "Maya"
-
-
 def test_migration_adds_goals_leader_id(tmp_path, monkeypatch):
     import sqlite3
     monkeypatch.setattr(shift_db, "DB_PATH", str(tmp_path / "old.db"))
@@ -1602,31 +1506,34 @@ def test_migration_adds_goals_leader_id(tmp_path, monkeypatch):
     conn.close()
     shift_db.init_db()
     shift_db.init_db()   # idempotent
-    goals = shift_db.goals_by_status("active")
-    assert goals[0]["title"] == "Pre-upgrade" and goals[0]["leader_id"] is None
+    with shift_db.closing(shift_db.connect()) as conn:   # Goals left the app; the rows stay
+        goal = conn.execute("SELECT title, leader_id FROM goals").fetchone()
+    assert (goal["title"], goal["leader_id"]) == ("Pre-upgrade", None)
 
 
 def test_oneonone_and_shoutouts_survive_export_import(isolated_db):
     shift_db.add_leader("Maya", "4721")
     maya = shift_db.leaders()[0]
     shift_db.add_oneonone_topic(maya["id"], "Carry me", "Maya")
-    gid = shift_db.create_goal("Personal", "", "", "", None, "up", "weekly",
-                               "", "Operator", leader_id=maya["id"])
+    with shift_db.closing(shift_db.connect()) as conn, conn:   # a goal row from before
+        gid = conn.execute(                                       # Goals left the app
+            "INSERT INTO goals (title, created_at, leader_id) VALUES (?, ?, ?)",
+            ("Personal", "2026-10-01 09:00", maya["id"])).lastrowid
     sid = shift_db.add_shoutout("Avery", "speed", "Flew through the rush",
                                 "Maya", share=True)
     raw = shift_db.export_json()
 
     shift_db.delete_topic(shift_db.oneonone_for_leader(maya["id"])[0][0]["id"])
     shift_db.delete_shoutout(sid)
-    shift_db.set_goal_status(gid, "archived")
     # The restore's DELETE FROM leaders must not abort on the tagged goal
     assert shift_db.import_json(raw) is None
 
     agenda, _ = shift_db.oneonone_for_leader(maya["id"])
     assert agenda[0]["topic"] == "Carry me"
     assert shift_db.shoutout_feed()[0]["member_name"] == "Avery"
-    assert shift_db.goals_by_status("active",
-                                    leader_id=maya["id"])[0]["id"] == gid
+    with shift_db.closing(shift_db.connect()) as conn:
+        assert conn.execute("SELECT leader_id FROM goals WHERE id=?",
+                            (gid,)).fetchone()[0] == maya["id"]
 
 
 # --- team-member 1:1s (Operator-only) ---------------------------------------

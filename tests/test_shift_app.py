@@ -169,20 +169,8 @@ def test_ack_deleted_announcement_route_is_graceful(client):
     assert resp.status_code == 302  # flash + redirect, not a 500
 
 
-def test_assign_stale_position_route_is_graceful(client):
-    login_operator(client)
-    resp = client.post("/shift/lineup/assign", data={
-        "date": shift_db.today_local(), "daypart": "lunch",
-        "position_id": "999999", "member_name": "Maya",
-    })
-    assert resp.status_code == 302  # flash + redirect, not a 500
-    assert not shift_db.lineup_for(shift_db.today_local(), "lunch")
-
-
 def test_invalid_optional_dates_are_blanked(client):
     login_operator(client)
-    client.post("/shift/goals", data={"title": "G", "due_date": "garbage"})
-    assert shift_db.goals_by_status("active")[0]["due_date"] is None
     client.post("/shift/announcements", data={"body": "A", "expires_on": "nonsense"})
     assert shift_db.active_announcements()[0]["expires_on"] is None
 
@@ -473,72 +461,7 @@ def test_run_detail_renders(client):
 
 # --- lineup ----------------------------------------------------------------
 
-def test_lineup_assign_unassign(client):
-    login_operator(client)
-    pos = shift_db.active_positions()[0]
-    today = shift_db.today_local()
-    client.post("/shift/lineup/assign", data={
-        "date": today, "daypart": "lunch", "position_id": pos["id"],
-        "member_name": "Marcus",
-    })
-    lineup = shift_db.lineup_for(today, "lunch")
-    assert lineup[pos["id"]][0]["member_name"] == "Marcus"
-    # Typed names join the roster for autosuggest
-    assert any(m["name"] == "Marcus" for m in shift_db.roster())
-
-    aid = lineup[pos["id"]][0]["id"]
-    client.post(f"/shift/lineup/unassign/{aid}", data={"date": today, "daypart": "lunch"})
-    assert not shift_db.lineup_for(today, "lunch")
-
-
-def test_lineup_copy_route(client):
-    login_operator(client)
-    pos = shift_db.active_positions()[0]
-    today = shift_db.today_local()
-    shift_db.assign_position("2020-01-01", "lunch", pos["id"], "Sarah")
-    client.post("/shift/lineup/copy", data={
-        "from_date": "2020-01-01", "from_daypart": "lunch",
-        "to_date": today, "to_daypart": "lunch",
-    })
-    assert shift_db.lineup_for(today, "lunch")
-
-
-def test_lineup_page_renders(client):
-    login_operator(client)
-    assert client.get("/shift/lineup").status_code == 200
-    assert client.get("/shift/lineup?daypart=nonsense&date=garbage").status_code == 200
-
-
 # --- goals -----------------------------------------------------------------
-
-def test_goal_create_update_status(client):
-    login_operator(client)
-    resp = client.post("/shift/goals", data={
-        "title": "DT under 4 min", "metric": "Avg DT", "unit": "sec",
-        "target_value": "240", "direction": "down", "period": "weekly",
-    })
-    assert resp.status_code == 302
-    goal = shift_db.goals_by_status("active")[0]
-
-    client.post(f"/shift/goals/{goal['id']}/update", data={"value": "300", "note": "lunch"})
-    g, updates = shift_db.goal_with_updates(goal["id"])
-    assert g["latest_value"] == 300 and len(updates) == 1
-
-    client.post(f"/shift/goals/{goal['id']}/status", data={"status": "achieved"})
-    assert shift_db.goals_by_status("achieved")
-
-    assert client.get(f"/shift/goals/{goal['id']}").status_code == 200
-    assert client.get("/shift/goals?status=achieved").status_code == 200
-
-
-def test_goal_update_requires_content(client):
-    login_operator(client)
-    client.post("/shift/goals", data={"title": "Tidy walk-in", "period": "one-time"})
-    goal = shift_db.goals_by_status("active")[0]
-    client.post(f"/shift/goals/{goal['id']}/update", data={"value": "", "note": ""})
-    _, updates = shift_db.goal_with_updates(goal["id"])
-    assert not updates
-
 
 # --- notes -----------------------------------------------------------------
 
@@ -898,62 +821,6 @@ def test_more_badge_shows_my_agenda_count(client):
     client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "A"})
     client.post(f"/shift/oneonone/{maya['id']}/topics", data={"topic": "B"})
     assert b'Meetings <span class="count">2</span>' in client.get("/shift/more").data
-
-
-def test_goal_leader_tag_via_route(client):
-    make_leader(client)
-    maya = shift_db.leaders()[0]
-    login_operator(client)
-    client.post("/shift/goals", data={"title": "Solo breakfast open",
-                                      "period": "monthly",
-                                      "leader_id": str(maya["id"])})
-    client.post("/shift/goals", data={"title": "Store goal", "period": "weekly",
-                                      "leader_id": "not-a-number"})
-    tagged = shift_db.goals_by_status("active", leader_id=maya["id"])
-    assert [g["title"] for g in tagged] == ["Solo breakfast open"]
-    # Tagged goals ride on the 1:1 page; store goals are on Goals for everyone
-    assert b"Solo breakfast open" not in client.get("/shift/").data
-    assert b"Store goal" in client.get("/shift/goals").data
-    assert b"Solo breakfast open" in client.get(f"/shift/oneonone/{maya['id']}").data
-
-
-def test_tagged_goals_private_to_leader_and_operator(client):
-    make_leader(client)
-    make_leader(client, name="Devon", pin="8888")
-    make_leader(client, name="Dana", pin="5555", role="admin")
-    maya = next(l for l in shift_db.leaders() if l["name"] == "Maya")
-    login_operator(client)
-    client.post("/shift/goals", data={"title": "Confidence on window",
-                                      "period": "monthly",
-                                      "leader_id": str(maya["id"])})
-    gid = shift_db.goals_by_status("active", leader_id=maya["id"])[0]["id"]
-    client.post("/shift/logout")
-
-    # Another lead — and even an admin-role leader — can't see or touch it
-    for name, pin in [("Devon", "8888"), ("Dana", "5555")]:
-        login_leader(client, name=name, pin=pin)
-        assert b"Confidence on window" not in client.get("/shift/goals").data
-        assert client.get(f"/shift/goals/{gid}",
-                          follow_redirects=False).status_code == 302
-        client.post(f"/shift/goals/{gid}/status", data={"status": "archived"})
-        assert shift_db.goal_with_updates(gid)[0]["status"] == "active"
-        client.post(f"/shift/goals/{gid}/update", data={"note": "snooping"})
-        assert not shift_db.goal_with_updates(gid)[1]
-        # A lead can't tag a goal to someone else — it lands store-wide
-        client.post("/shift/goals", data={"title": f"Planted by {name}",
-                                          "period": "weekly",
-                                          "leader_id": str(maya["id"])})
-        planted = [g for g in shift_db.goals_by_status("active")
-                   if g["title"] == f"Planted by {name}"]
-        assert planted[0]["leader_id"] is None
-        client.post("/shift/logout")
-
-    # Maya herself sees and updates it
-    login_leader(client)
-    assert b"Confidence on window" in client.get("/shift/goals").data
-    assert client.get(f"/shift/goals/{gid}").status_code == 200
-    client.post(f"/shift/goals/{gid}/update", data={"note": "getting there"})
-    assert shift_db.goal_with_updates(gid)[1][0]["note"] == "getting there"
 
 
 def test_backups_and_pin_resets_are_operator_only(client):
@@ -2127,26 +1994,6 @@ def test_scheduled_backup_endpoint(client):
     assert resp.status_code == 200
     payload = json.loads(resp.data)
     assert payload["format"] == 1
-
-
-def test_goal_numbers_must_be_finite(client):
-    login_operator(client)
-    client.post("/shift/goals", data={"title": "DT time", "period": "weekly",
-                                      "target_value": "270", "direction": "down"})
-    goal = shift_db.goals_by_status("active")[0]
-    for bad in ("inf", "-inf", "Infinity", "1e400", "nan"):
-        client.post(f"/shift/goals/{goal['id']}/update", data={"value": bad})
-    assert shift_db.goal_with_updates(goal["id"])[1] == []
-    client.post("/shift/goals", data={"title": "Huge", "period": "weekly",
-                                      "target_value": "1e400", "direction": "down"})
-    assert client.get("/shift/").status_code == 200            # never a redirect loop
-    assert client.get("/shift/goals").status_code == 200
-    with shift_db.connect() as conn:                            # even if one slipped in
-        conn.execute("INSERT INTO goal_updates (goal_id, value, note, recorded_by, "
-                     "recorded_at) VALUES (?, 1e400, '', 'x', '2026-01-01 09:00')",
-                     (goal["id"],))
-    assert client.get("/shift/").status_code == 200
-    assert client.get(f"/shift/goals/{goal['id']}").status_code == 200
 
 
 def test_operator_meetings_badge_counts_own_team_threads(client):

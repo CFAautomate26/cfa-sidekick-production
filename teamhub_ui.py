@@ -81,12 +81,6 @@ ART = {
                   f'<rect x="26" y="7" width="20" height="10" rx="3" fill="{N}"/>'
                   f'<path d="M23 31l4 4 7.5-8M23 48l4 4 7.5-8" fill="none" stroke="{R}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>'
                   f'<path d="M40 32h10M40 49h10" stroke="{N}" stroke-width="3" stroke-linecap="round"/>',
-    "lineup": f'<circle cx="17" cy="29" r="7" fill="{W}" stroke="{N}" stroke-width="3"/><path d="M5 56c0-8.5 5-13.5 12-13.5S29 47.5 29 56z" fill="{W}" stroke="{N}" stroke-width="3" stroke-linejoin="round"/>'
-              f'<circle cx="55" cy="29" r="7" fill="{W}" stroke="{N}" stroke-width="3"/><path d="M43 56c0-8.5 5-13.5 12-13.5S67 47.5 67 56z" fill="{W}" stroke="{N}" stroke-width="3" stroke-linejoin="round"/>'
-              f'<circle cx="36" cy="24" r="9" fill="{R}"/><path d="M20 60c0-10.5 6.5-17 16-17s16 6.5 16 17z" fill="{R}"/>',
-    "goals": f'<circle cx="33" cy="39" r="24" fill="{W}" stroke="{N}" stroke-width="3"/><circle cx="33" cy="39" r="14.5" fill="{W}" stroke="{N}" stroke-width="3"/>'
-             f'<circle cx="33" cy="39" r="6.5" fill="{R}"/><path d="M33 39 60 12" stroke="{N}" stroke-width="3.2" stroke-linecap="round"/>'
-             f'<path d="M51.5 10.5 60 12l1.5 8.5" fill="none" stroke="{N}" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>',
     "meetings": f'<path d="M10 12h32a5 5 0 0 1 5 5v18a5 5 0 0 1-5 5H24l-9 8v-8h-5a5 5 0 0 1-5-5V17a5 5 0 0 1 5-5z" fill="{W}" stroke="{N}" stroke-width="3" stroke-linejoin="round"/>'
                 f'<path d="M30 30h29a5 5 0 0 1 5 5v15a5 5 0 0 1-5 5h-3v9l-9.5-9H30a5 5 0 0 1-5-5V35a5 5 0 0 1 5-5z" fill="{R}"/>'
                 f'<circle cx="36.5" cy="42.5" r="2.6" fill="{W}"/><circle cx="44.5" cy="42.5" r="2.6" fill="{W}"/><circle cx="52.5" cy="42.5" r="2.6" fill="{W}"/>',

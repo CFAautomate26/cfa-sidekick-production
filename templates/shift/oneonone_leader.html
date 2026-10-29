@@ -17,7 +17,7 @@
     <p class="lockline">{{ icon('lock') }}{% if own %}Only you and the Operator see this agenda{% else %}Only {{ leader.name }} and you see this agenda{% endif %}</p>
     <h2 class="f-title">To talk about</h2>
     <p class="meta">Tick a topic once you've talked about it. Tap it to note what you decided.</p>
-    {{ stats(leader.id, course_done, course_total, open_tasks | length, goals | length, '#actions', '#goals', own) }}
+    {{ stats(leader.id, course_done, course_total, open_tasks | length, '#actions') }}
   </div>
   {{ topic_rows(agenda, 'shift.oneonone_topic_toggle', 'shift.oneonone_topic_delete',
                 action_url=url_for('shift.oneonone_action', leader_id=leader.id)) }}
@@ -26,27 +26,6 @@
 </article>
 
 <div class="meet-col side">
-<section class="sec" id="goals">
-  <div class="sec-head"><h2>{{ 'Your goals' if own else leader.name ~ "'s goals" }}</h2>
-    <a class="more" href="{{ url_for('shift.goals', leader_id=leader.id) }}">Set a goal</a></div>
-  {% if goals %}
-  <div class="card list">
-    {% for g in goals %}
-    <a class="row" href="{{ url_for('shift.goal_detail', goal_id=g.id) }}"><span class="lead-ico">{{ icon('target') }}</span>
-      <span class="row-main"><span class="row-title">{{ g.title }}</span>
-        {% if g.progress_pct is not none %}
-        <span class="bar navy{{ ' done' if g.progress_pct >= 100 }}"><span style="width: {{ g.progress_pct }}%"></span></span>
-        <span class="row-meta">{{ g.latest_value | num }} {{ g.unit }} · target {{ g.target_value | num }} {{ g.unit }} · {{ g.progress_pct }}%</span>
-        {% else %}
-        <span class="row-meta">{{ g.period | capitalize }}{% if g.due_date %} · due {{ day(g.due_date) }}{% endif %} · tap to log progress</span>
-        {% endif %}</span>
-      {{ icon('chev', 'chev') }}</a>
-    {% endfor %}
-  </div>
-  {% else %}
-  <p class="sec-note">No goals yet. Goals tagged to {{ 'you' if own else leader.name }} show here and on Goals.</p>
-  {% endif %}
-</section>
 
 <section class="sec" id="course">
   <div class="sec-head"><h2>Leadership course</h2></div>

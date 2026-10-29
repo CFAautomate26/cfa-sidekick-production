@@ -13,7 +13,7 @@
 .agenda .f-title { margin-top: 8px; }
 .agenda .meta { font-size: 0.875rem; color: var(--text-muted); margin-top: 4px; }
 .agenda .lockline { margin: 0; }
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
 .stat-chip { background: #fff; border-radius: var(--r-xl); padding: 10px 12px; min-width: 0; display: block; }
 .stat-chip b { display: block; font-size: 1.375rem; line-height: 1; color: var(--text-strong); letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums; }
@@ -110,7 +110,7 @@ details.list-more .letter { padding: 10px 16px 4px; font-size: 0.75rem; font-wei
   .meet-grid.op > #leaders { grid-column: 1; grid-row: 1; margin-top: 22px; }
   .meet-grid.op > #team { grid-column: 2; grid-row: 1 / span 2; margin-top: 22px; }
   .meet-grid.op > #todos { grid-column: 1; grid-row: 2; }
-  /* A leader's agenda: agenda then past 1:1s left; goals, course, to-dos right */
+  /* A leader's agenda: agenda then past 1:1s left; course, to-dos right */
   .meet-grid.agenda-page > .agenda { grid-column: 1; grid-row: 1; }
   .meet-grid.agenda-page > .side { grid-column: 2; grid-row: 1 / span 2; }
   .meet-grid.agenda-page > .past-col { grid-column: 1; grid-row: 2; }
@@ -137,12 +137,11 @@ details.list-more .letter { padding: 10px 16px 4px; font-size: 0.75rem; font-wei
 {% else %}Pay, discipline, medical or personal matters go to the Operator directly, never into Team Hub.{% endif %}</span></p>
 {% endmacro %}
 
-{# Stats chips on an agenda card: course lessons, open to-dos, goals. #}
-{% macro stats(leader_id, course_done, course_total, todo_count, goal_count, todos_href, goals_href, own) %}
+{# Stats chips on an agenda card: course lessons, open to-dos. #}
+{% macro stats(leader_id, course_done, course_total, todo_count, todos_href) %}
 <div class="stats">
   <a class="stat-chip" href="{{ url_for('shift.development_leader', leader_id=leader_id) }}"><b>{{ course_done }}{% if course_total %}<small>/{{ course_total }}</small>{% endif %}</b><span>Course lessons</span></a>
   <a class="stat-chip" href="{{ todos_href }}"><b>{{ todo_count }}</b><span>Open to-dos</span></a>
-  <a class="stat-chip" href="{{ goals_href }}"><b>{{ goal_count }}</b><span>{{ 'Your goals' if own else 'Goals' }}</span></a>
 </div>
 {% endmacro %}
 

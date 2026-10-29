@@ -2,8 +2,8 @@
 
 A phone-first Huddle-style tool for the leadership team, mounted at /shift:
 daily shift checklists (opening/transition/closing with who-did-what
-accountability), position lineups per daypart, goal setting & tracking,
-shift notes, and announcements with "Got it" acknowledgments.
+accountability), each leader's two goals for the day, to-dos, shift
+notes, and announcements with "Got it" acknowledgments.
 
 Auth: each leader gets a personal PIN (managed in /shift/admin); the
 Operator signs in as "Operator" with the SHIFT_ADMIN_PIN env var. Sessions
@@ -14,7 +14,6 @@ Setup guide: docs/shift-leading-app.md
 """
 
 import hmac
-import math
 import os
 import re
 import threading
@@ -274,18 +273,6 @@ def _nav() -> dict:
                                   session.get("shift_role", ""), leader_id)
 
 
-@shift_bp.app_template_filter("num")
-def fmt_num(value):
-    """Render 240.0 as 240 but keep real decimals (3.5 stays 3.5)."""
-    if value is None:
-        return ""
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return value
-    return str(int(f)) if f.is_integer() else f"{f:g}"
-
-
 def admin_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -304,11 +291,6 @@ def _valid_date(value: str | None) -> str:
         except ValueError:
             pass
     return shift_db.today_local()
-
-
-def _valid_daypart(value: str | None) -> str:
-    value = (value or "").strip().lower()
-    return value if value in shift_db.DAYPARTS else shift_db.current_daypart()
 
 
 def _valid_checklist_daypart(value: str | None) -> str:
@@ -443,9 +425,6 @@ def today():
 
     due = _due_now(runs, daypart, day)
     unread = sum(1 for a in shift_db.active_announcements(reader=name) if not a["acked"])
-    active_goals = shift_db.goals_by_status("active")
-    goal_count = sum(1 for g in active_goals
-                     if not g["leader_id"] or _can_view_oneonone(g["leader_id"]))
     if leader_id:
         modules = shift_db.course_overview(leader_id)
         course = {"done": sum(m["done"] for m in modules),
@@ -478,10 +457,8 @@ def today():
         my_leader_id=leader_id,
         unread=unread,
         due=due,
-        lineup=_lineup_grid(shift_db.active_positions(), shift_db.lineup_for(day, daypart)),
         to_read=_hub_to_read(),
         hub_on=teamhub_nav.hub_up(),
-        goal_count=goal_count,
         course=course,
         recoveries_open=len(open_recs),
         recoveries_back=len(coming_back),
@@ -643,19 +620,6 @@ def _short_date(iso: str | None) -> str:
     except ValueError:
         return iso or ""
     return f"{d.strftime('%a, %b')} {d.day}"
-
-
-def _lineup_grid(positions: list[dict], lineup: dict, cap: int = 8) -> dict:
-    """The daypart's lineup (Today's Lineups tile counts from it): open
-    positions (active, nobody on them) first, then who's where, capped."""
-    filled = [p for p in positions if lineup.get(p["id"])]
-    gaps = [p for p in positions if not lineup.get(p["id"])]
-    cells = ([{"pos": p["name"], "open": True, "who": ""} for p in gaps]
-             + [{"pos": p["name"], "open": False,
-                 "who": ", ".join(a["member_name"] for a in lineup[p["id"]])}
-                for p in filled])
-    return {"started": bool(filled), "cells": cells[:cap], "total": len(positions),
-            "filled": len(filled), "open": len(gaps)}
 
 
 def _hub_to_read() -> list[dict]:
@@ -912,188 +876,30 @@ def toggle_item(item_id):
 
 
 # ---------------------------------------------------------------------------
-# Lineup / setup sheet
+# Daily goals
 # ---------------------------------------------------------------------------
+# Lineups and the Goals section (store goals with targets) came out of the
+# app in October 2026: lineups live on the floor's setup sheets and goal
+# setting happens in person. Their tables stay, and stay in backups; old
+# links and home-screen shortcuts land on Today.
 
 @shift_bp.route("/lineup")
-def lineup():
-    day = _valid_date(request.args.get("date"))
-    daypart = _valid_daypart(request.args.get("daypart"))
-    positions = shift_db.active_positions()
-    areas: dict[str, list[dict]] = {}
-    for p in positions:
-        areas.setdefault(p["area"], []).append(p)
-    prev_date = shift_db.previous_lineup_date(day, daypart)
-    prev_daypart = None
-    idx = shift_db.DAYPARTS.index(daypart)
-    if idx > 0 and shift_db.lineup_for(day, shift_db.DAYPARTS[idx - 1]):
-        prev_daypart = shift_db.DAYPARTS[idx - 1]
-    suggest = sorted(
-        {m["name"] for m in shift_db.roster()} | set(shift_db.recent_lineup_names()),
-        key=str.lower,
-    )
-    return render_template(
-        "shift/lineup.html", day=day, daypart=daypart, areas=areas,
-        assignments=shift_db.lineup_for(day, daypart),
-        prev_date=prev_date, prev_daypart=prev_daypart, suggest=suggest,
-    )
+@shift_bp.route("/goals/<int:goal_id>")
+def retired_page(goal_id=None):
+    return redirect(url_for("shift.today"))
 
-
-@shift_bp.route("/lineup/assign", methods=["POST"])
-def lineup_assign():
-    day = _valid_date(request.form.get("date"))
-    daypart = _valid_daypart(request.form.get("daypart"))
-    name = " ".join((request.form.get("member_name") or "").split())
-    try:
-        position_id = int(request.form.get("position_id", ""))
-    except ValueError:
-        position_id = 0
-    if name and position_id:
-        if shift_db.assign_position(day, daypart, position_id, name):
-            # Names typed here quietly join the roster so autosuggest learns.
-            shift_db.add_member(name)
-        else:
-            flash("That position no longer exists — reload the lineup.")
-    return redirect(url_for("shift.lineup", date=day, daypart=daypart))
-
-
-@shift_bp.route("/lineup/unassign/<int:assignment_id>", methods=["POST"])
-def lineup_unassign(assignment_id):
-    day = _valid_date(request.form.get("date"))
-    daypart = _valid_daypart(request.form.get("daypart"))
-    shift_db.unassign(assignment_id)
-    return redirect(url_for("shift.lineup", date=day, daypart=daypart))
-
-
-@shift_bp.route("/lineup/copy", methods=["POST"])
-def lineup_copy():
-    to_date = _valid_date(request.form.get("to_date"))
-    to_daypart = _valid_daypart(request.form.get("to_daypart"))
-    from_date = _valid_date(request.form.get("from_date"))
-    from_daypart = _valid_daypart(request.form.get("from_daypart"))
-    copied = shift_db.copy_lineup(from_date, from_daypart, to_date, to_daypart)
-    flash(f"Copied {copied} assignment{'s' if copied != 1 else ''}."
-          if copied else "Nothing new to copy.")
-    return redirect(url_for("shift.lineup", date=to_date, daypart=to_daypart))
-
-
-# ---------------------------------------------------------------------------
-# Goals
-# ---------------------------------------------------------------------------
 
 @shift_bp.route("/goals")
 def goals():
-    status = request.args.get("status", "active")
-    if status not in ("active", "achieved", "archived"):
-        status = "active"
-    # Leader-tagged goals are 1:1 material: each is listed only for its
-    # leader and the Operator. Store-wide goals stay shared.
-    visible = [g for g in shift_db.goals_by_status(status)
-               if not g["leader_id"] or _can_view_oneonone(g["leader_id"])]
-    taggable = [l for l in shift_db.leaders()
-                if _is_operator() or l["id"] == session.get("shift_leader_id")]
-    # Daily goals are private to each leader + the Operator (like 1:1s): a
-    # leader sees their own week; the Operator also sees every leader today.
+    """Today's two goals over time, private like 1:1s: a leader sees their
+    own today and last week; the Operator also sees every leader today."""
     day = shift_db.today_local()
     leader_id = session.get("shift_leader_id")
-    return render_template("shift/goals.html", status=status,
-                           goals=visible,
-                           periods=shift_db.GOAL_PERIODS,
-                           leaders=taggable,
-                           day=day,
+    return render_template("shift/goals.html", day=day,
                            daily_mine=shift_db.daily_goals(leader_id, day),
                            daily_history=shift_db.daily_goal_history(leader_id, day),
                            daily_team=shift_db.team_daily_goals(day) if _is_operator() else [],
                            short_date=_short_date)
-
-
-@shift_bp.route("/goals", methods=["POST"])
-def goal_create():
-    title = (request.form.get("title") or "").strip()
-    if not title:
-        flash("A goal needs a title.")
-        return redirect(url_for("shift.goals"))
-    target_raw = (request.form.get("target_value") or "").strip()
-    try:
-        target = float(target_raw) if target_raw else None
-    except ValueError:
-        target = None
-    if target is not None and not math.isfinite(target):
-        target = None
-    period = (request.form.get("period") or "weekly").strip()
-    if period not in shift_db.GOAL_PERIODS:
-        period = "weekly"
-    direction = "down" if request.form.get("direction") == "down" else "up"
-    goal_id = shift_db.create_goal(
-        title=title,
-        why=(request.form.get("why") or "").strip(),
-        metric=(request.form.get("metric") or "").strip(),
-        unit=(request.form.get("unit") or "").strip(),
-        target_value=target,
-        direction=direction,
-        period=period,
-        due_date=_optional_date(request.form.get("due_date")),
-        created_by=current_name(),
-        leader_id=_taggable_leader_id(request.form.get("leader_id")),
-    )
-    return redirect(url_for("shift.goal_detail", goal_id=goal_id))
-
-
-def _taggable_leader_id(raw: str | None) -> int | None:
-    """A leader tag the current session may set: the Operator tags anyone,
-    a leader only themselves; anything else becomes a store-wide goal."""
-    lid = _optional_int(raw)
-    return lid if lid is not None and _can_view_oneonone(lid) else None
-
-
-def _goal_hidden(goal: dict) -> bool:
-    return bool(goal.get("leader_id")
-                and not _can_view_oneonone(goal["leader_id"]))
-
-
-@shift_bp.route("/goals/<int:goal_id>")
-def goal_detail(goal_id):
-    goal, updates = shift_db.goal_with_updates(goal_id)
-    if not goal or _goal_hidden(goal):
-        flash("That goal doesn't exist."
-              if not goal else
-              "That's a personal goal — it's between that leader and the Operator.")
-        return redirect(url_for("shift.goals"))
-    return render_template("shift/goal_detail.html", goal=goal, updates=updates)
-
-
-@shift_bp.route("/goals/<int:goal_id>/update", methods=["POST"])
-def goal_update(goal_id):
-    goal, _ = shift_db.goal_with_updates(goal_id)
-    if not goal or _goal_hidden(goal):
-        flash("That goal doesn't exist or isn't yours to update.")
-        return redirect(url_for("shift.goals"))
-    value_raw = (request.form.get("value") or "").strip()
-    note = (request.form.get("note") or "").strip()
-    try:
-        value = float(value_raw) if value_raw else None
-    except ValueError:
-        value = math.nan
-    if value is not None and not math.isfinite(value):
-        flash("The progress number wasn't a number.")
-        return redirect(url_for("shift.goal_detail", goal_id=goal_id))
-    if value is None and not note:
-        flash("Add a number or a note.")
-        return redirect(url_for("shift.goal_detail", goal_id=goal_id))
-    shift_db.add_goal_update(goal_id, value, note, current_name())
-    return redirect(url_for("shift.goal_detail", goal_id=goal_id))
-
-
-@shift_bp.route("/goals/<int:goal_id>/status", methods=["POST"])
-def goal_status(goal_id):
-    goal, _ = shift_db.goal_with_updates(goal_id)
-    if not goal or _goal_hidden(goal):
-        flash("That goal doesn't exist or isn't yours to change.")
-        return redirect(url_for("shift.goals"))
-    status = request.form.get("status", "")
-    if status in ("active", "achieved", "archived"):
-        shift_db.set_goal_status(goal_id, status)
-    return redirect(url_for("shift.goal_detail", goal_id=goal_id))
 
 
 # ---------------------------------------------------------------------------
@@ -1872,7 +1678,6 @@ def oneonone():
         my_last_met=history[0]["date"] if history else None,
         course_done=sum(m["done"] for m in modules),
         course_total=sum(m["total"] for m in modules),
-        goal_count=len(shift_db.goals_by_status("active", leader_id=leader_id)),
         open_tasks=shift_db.tasks_for_leader(leader_id)[0],
         # Your own to-dos already show under Yours.
         assigned=[t for t in shift_db.tasks_assigned_by(current_name())
@@ -1897,7 +1702,6 @@ def oneonone_leader(leader_id):
     return render_template(
         "shift/oneonone_leader.html",
         leader=leader, agenda=agenda, history=history,
-        goals=shift_db.goals_by_status("active", leader_id=leader_id),
         course_done=sum(m["done"] for m in modules),
         course_total=sum(m["total"] for m in modules),
         open_tasks=shift_db.tasks_for_leader(leader_id)[0],
@@ -2198,8 +2002,7 @@ def shoutouts():
     tag = request.args.get("value")
     if tag not in shift_db.SHOUTOUT_VALUES:
         tag = None
-    suggest = sorted({m["name"] for m in shift_db.roster()}
-                     | set(shift_db.recent_lineup_names()), key=str.lower)
+    suggest = sorted({m["name"] for m in shift_db.roster()}, key=str.lower)
     return render_template(
         "shift/shoutouts.html",
         feed=shift_db.shoutout_feed(value_tag=tag),
@@ -2446,11 +2249,8 @@ def history():
         run.update(total=len(items), done=sum(1 for i in items if i["done"]))
         runs.append((run, [i for i in items if i["done"]
                            and shift_db.business_date(i["done_at"]) == day]))
-    lineups = {dp: shift_db.lineup_for(day, dp) for dp in shift_db.DAYPARTS}
-    lineups = {dp: v for dp, v in lineups.items() if v}
     return render_template(
-        "shift/history.html", day=day, runs=runs, lineups=lineups,
-        positions={p["id"]: p for p in shift_db.active_positions()},
+        "shift/history.html", day=day, runs=runs,
         notes=shift_db.notes_for_date(day),
         recent=shift_db.recent_dates(7),
     )

@@ -142,9 +142,9 @@ def test_leader_meetings_page(client, store):
     total = shift_db.course_lesson_count()
     assert f"<b>1<small>/{total}</small></b><span>Course lessons</span>" in mine
     assert "<b>1</b><span>Open to-dos</span>" in mine
-    assert "<b>1</b><span>Your goals</span>" in mine
+    assert "<span>Your goals</span>" not in mine and "Solo breakfast open" not in mine
     assert "added by you" in mine and "added by the Operator" in mine
-    # The full agenda (history, goals) is one tap away
+    # The full agenda (past 1:1s) is one tap away
     assert f'href="/shift/oneonone/{maya}"' in mine
 
     team = section(page, "team", "todos")
@@ -301,12 +301,12 @@ def test_agenda_page_for_leader_and_operator(client, store):
     assert "Saturday coverage" in page and "Past 1:1s" in page
     assert "Start the lobby sweep at 9:30" in page
     assert f'action="/shift/oneonone/{maya}/action"' in page and "To-do +" in page
-    assert 'id="agenda"' in page and 'id="actions"' in page and 'id="goals"' in page
+    assert 'id="agenda"' in page and 'id="actions"' in page and 'id="goals"' not in page
     assert 'name="back"' not in page             # its forms keep their own redirects
     login(client)
     page = client.get(f"/shift/oneonone/{maya}").data.decode()
     assert "1:1 with Maya" in page and "Only Maya and you see this agenda" in page
-    assert "Maya&#39;s goals" in page
+    assert "Maya&#39;s goals" not in page and "Solo breakfast open" not in page
 
 
 def test_member_thread_page(client, store):
