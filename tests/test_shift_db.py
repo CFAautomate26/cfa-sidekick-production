@@ -2722,6 +2722,13 @@ def test_leader_checklist_view(isolated_db):
     assert not shift_db.set_leader_checklist_view(grace, "patio")
     assert not shift_db.set_leader_checklist_view(9999, "boh")
     assert shift_db.get_leader(grace)["checklist_side"] == "foh"
+    # only if they still see what the page showed — one statement, no race
+    assert not shift_db.set_leader_checklist_view(grace, "boh", expected="all")
+    assert shift_db.set_leader_checklist_view(grace, "boh", expected="foh")
+    with shift_db.closing(shift_db.connect()) as conn, conn:     # a hand edit
+        conn.execute("UPDATE leaders SET checklist_side='FOH' WHERE id=?", (grace,))
+    assert shift_db.set_leader_checklist_view(grace, "foh", expected="all")   # read as all
+    assert shift_db.get_leader(grace)["checklist_side"] == "foh"
 
 
 def test_restore_fills_in_missing_or_unknown_sides(isolated_db):

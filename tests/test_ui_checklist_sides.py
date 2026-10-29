@@ -172,6 +172,58 @@ def test_an_old_open_page_never_undoes_someone_elses_pick(client, team):
     assert "Saved: Neha → Both." in resp and "someone else" not in resp
 
 
+def picks_on_the_page(client):
+    who = page(client, WHO)
+    form = dict(re.findall(r'name="((?:was|epoch)[^"]*)" value="([^"]*)"', who))
+    form.update(re.findall(r'name="(view-\d+)" value="(\w+)" checked', who))
+    return form
+
+
+def test_a_page_opened_before_a_restore_saves_nothing(client, team):
+    login(client)
+    form = picks_on_the_page(client)
+    assert "epoch" in form
+    assert shift_db.import_json(shift_db.export_json()) is None   # a restore, meanwhile
+    form[f"view-{team['Neha']}"] = "boh"
+    resp = client.post(WHO, data=form, follow_redirects=True).data.decode()
+    assert "A backup was restored since you opened this page, so nothing was saved." in resp
+    assert views()["Neha"] == "all"
+    form = picks_on_the_page(client)                               # reloaded: saves
+    form[f"view-{team['Neha']}"] = "boh"
+    assert "Saved: Neha → Back." in client.post(WHO, data=form, follow_redirects=True).data.decode()
+
+
+def test_an_unknown_stored_pick_reads_as_both_and_can_be_changed(client, team):
+    with shift_db.closing(shift_db.connect()) as conn, conn:     # a hand edit of the DB
+        conn.execute("UPDATE leaders SET checklist_side='FOH' WHERE id=?", (team["Grace"],))
+    login(client)
+    form = picks_on_the_page(client)
+    assert form[f"view-{team['Grace']}"] == "all" and form[f"was-{team['Grace']}"] == "all"
+    form[f"view-{team['Grace']}"] = "boh"
+    resp = client.post(WHO, data=form, follow_redirects=True).data.decode()
+    assert "Saved: Grace → Back." in resp and "someone else" not in resp
+    assert views()["Grace"] == "boh"
+
+
+def test_two_saves_at_once_never_both_say_saved(client, team, monkeypatch):
+    """The other admin's save lands between this save's read and its write:
+    the write finds their pick and reports it instead of overwriting it."""
+    login(client)
+    form = picks_on_the_page(client)
+    real = shift_db.leaders
+
+    def read_then_other_admin_saves(*a, **k):
+        rows = real(*a, **k)
+        shift_db.set_leader_checklist_view(team["Grace"], "boh")
+        return rows
+    monkeypatch.setattr(shift_db, "leaders", read_then_other_admin_saves)
+    form[f"view-{team['Grace']}"] = "all"
+    resp = client.post(WHO, data=form, follow_redirects=True).data.decode()
+    monkeypatch.setattr(shift_db, "leaders", real)
+    assert "changed by someone else since you opened this page: Grace." in resp
+    assert "Saved:" not in resp and views()["Grace"] == "boh"
+
+
 def test_only_active_leaders_are_listed_or_set(client, team):
     login(client)
     client.post(f"/shift/admin/leaders/{team['Jabina']}/toggle", data={"active": "0"})

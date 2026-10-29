@@ -2177,20 +2177,29 @@ def admin_checklist_views():
     saved in one go. Only the picks changed on this page are written (each
     row posts the pick it showed as was-<id>), and one someone else changed
     since the page opened is left alone and named, so an old open copy can't
-    quietly undo another admin's pick."""
+    quietly undo another admin's pick. A page opened before a backup restore
+    writes nothing — the restore can renumber leader ids."""
     leaders = shift_db.leaders()
+    for l in leaders:                    # an unknown stored value reads as Both
+        if l["checklist_side"] not in shift_db.CHECKLIST_VIEWS:
+            l["checklist_side"] = "all"
     if request.method == "POST":
+        if request.form.get("epoch", "") != shift_db.session_epoch():
+            flash("A backup was restored since you opened this page, so nothing was "
+                  "saved. Check the picks below and save again.")
+            return redirect(url_for("shift.admin_checklist_views"))
         saved, clashed = [], []
         for l in leaders:
-            now = l["checklist_side"] or "all"
+            now = l["checklist_side"]
             view = request.form.get(f"view-{l['id']}")
             was = request.form.get(f"was-{l['id']}") or now
             if not view or view in (was, now):      # untouched here, or already so
                 continue
-            if now != was:
-                clashed.append(l["name"])
-            elif shift_db.set_leader_checklist_view(l["id"], view):
+            if now == was and shift_db.set_leader_checklist_view(l["id"], view,
+                                                                 expected=was):
                 saved.append(f"{l['name']} → {_VIEW_WORDS[view]}")
+            elif view in shift_db.CHECKLIST_VIEWS:
+                clashed.append(l["name"])
         if saved:
             flash(f"Saved: {', '.join(saved)}.")
         if clashed:
@@ -2199,12 +2208,10 @@ def admin_checklist_views():
         if not saved and not clashed:
             flash("Nothing changed.")
         return redirect(url_for("shift.admin_checklist_views"))
-    for l in leaders:
-        if l["checklist_side"] not in shift_db.CHECKLIST_VIEWS:
-            l["checklist_side"] = "all"
     lists = shift_db.all_templates()
     return render_template(
         "shift/admin_checklist_views.html", leaders=leaders, view_words=_VIEW_WORDS,
+        epoch=shift_db.session_epoch(),
         names_by_view={v: [l["name"] for l in leaders if l["checklist_side"] == v]
                        for v in shift_db.CHECKLIST_VIEWS},
         lists_by_side={s: [t["name"] for t in lists if t["side"] == s]
