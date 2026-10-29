@@ -35,9 +35,11 @@
 
 <div class="narrow">
 <section class="sec" id="daily" aria-labelledby="daily-head">
-  <div class="sec-head"><h2 id="daily-head">{{ 'Your leaders today' if shift_is_operator and daily_team else 'Yours' }}</h2><a class="more" href="{{ url_for('shift.today', edit='goals') }}#goals">{{ 'Edit yours' if daily_mine else 'Set yours' }}</a></div>
+  {% set team_view = shift_is_operator and daily_team %}
+  {% set edit_link %}<a class="more" href="{{ url_for('shift.today', edit='goals') }}#goals">{{ 'Edit yours' if daily_mine else 'Set yours' }}</a>{% endset %}
+  <div class="sec-head"><h2 id="daily-head">{{ 'Your leaders today' if team_view else 'Yours' }}</h2>{% if not team_view %}{{ edit_link }}{% endif %}</div>
   <p class="lockline">{{ icon('lock') }}{% if shift_is_operator %}Each leader's are between them and you.{% else %}Only you and the Operator see these.{% endif %}</p>
-  {% if shift_is_operator and daily_team %}
+  {% if team_view %}
   <div class="card list">
     {% for t in daily_team %}
     <div class="daily-row">
@@ -46,7 +48,7 @@
     </div>
     {% endfor %}
   </div>
-  <h3 class="eyebrow" style="margin: 18px 0 8px;">Your own</h3>
+  <div class="sec-head" style="margin-top: 22px;"><h3 class="eyebrow" style="margin: 0;">Your own</h3>{{ edit_link }}</div>
   {% endif %}
   <div class="card list">
     <div class="daily-row">
