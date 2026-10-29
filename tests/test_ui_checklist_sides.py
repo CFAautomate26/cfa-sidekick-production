@@ -1,7 +1,8 @@
 """Checklists by side of the store: each list is front of house, back of
 house or both; each leader sees front, back or every list (the Operator
-always sees every list) — set under Admin › Leader logins. Not a lock:
-"Show all" is one tap away, and a list's own page always opens."""
+always sees every list) — set for every leader at once on Admin › Who sees
+which checklists. Not a lock: "Show all" is one tap away, and a list's own
+page always opens."""
 
 import re
 from datetime import datetime
@@ -36,13 +37,20 @@ def team(client):
     """Neha (director, every list), Grace (front), Jabina (back)."""
     login(client)
     ids = {}
-    for name, pin, role, view in (("Neha", "1111", "admin", "all"), ("Grace", "2222", "lead", "foh"),
-                                  ("Jabina", "3333", "lead", "boh")):
+    for name, pin, role in (("Neha", "1111", "admin"), ("Grace", "2222", "lead"),
+                            ("Jabina", "3333", "lead")):
         client.post("/shift/admin/leaders/add", data={"name": name, "pin": pin, "role": role})
         ids[name] = next(l["id"] for l in shift_db.leaders() if l["name"] == name)
-        client.post(f"/shift/admin/leaders/{ids[name]}/checklists", data={"view": view})
+    client.post(WHO, data={f"view-{ids['Grace']}": "foh", f"view-{ids['Jabina']}": "boh"})
     client.post("/shift/logout")
     return ids
+
+
+WHO = "/shift/admin/checklist-views"
+
+
+def views():
+    return {l["name"]: l["checklist_side"] for l in shift_db.leaders(include_inactive=True)}
 
 
 def page(client, url):
@@ -108,24 +116,71 @@ def test_a_hidden_list_still_opens(client, team):
     assert "BOH Opening" in page(client, f"/shift/checklists/run/{boh['id']}")
 
 
+def test_every_leader_on_one_page(client, team):
+    login(client)
+    who = page(client, WHO)
+    for name in ("Neha", "Grace", "Jabina"):
+        assert f'<legend class="sr">Checklists {name} sees</legend>' in who
+    grace = who[who.index(f'id="who-{team["Grace"]}"'):]
+    grace = grace[:grace.index("</fieldset>")]
+    assert '<input type="radio" name="view-%d" value="foh" checked>' % team["Grace"] in grace
+    assert grace.count(" checked") == 1
+    flat = " ".join(who.split())
+    assert "Front of house</span> <span class=\"row-meta\">Grace</span>" in flat
+    assert "Back of house</span> <span class=\"row-meta\">Jabina</span>" in flat
+    assert "Both</span> <span class=\"row-meta\">Neha</span>" in flat
+    assert "the 10 front-of-house lists and the 5 shared ones" in flat
+    assert "<li>Drive Thru — Daily</li>" in who and "<li>Machines — Daily</li>" in who
+    assert "the 14 back-of-house lists" in flat
+
+
+def test_one_save_sets_everyone(client, team):
+    login(client)
+    resp = client.post(WHO, data={f"view-{team['Neha']}": "foh", f"view-{team['Grace']}": "all",
+                                  f"view-{team['Jabina']}": "boh"}, follow_redirects=True)
+    assert "Saved: Grace → Both, Neha → Front." in resp.data.decode()           # Jabina didn't change
+    assert views() == {"Neha": "foh", "Grace": "all", "Jabina": "boh"}
+    resp = client.post(WHO, data={f"view-{team['Neha']}": "foh"}, follow_redirects=True)
+    assert "Nothing changed." in resp.data.decode()
+    client.post(WHO, data={f"view-{team['Neha']}": "kitchen", f"view-{team['Grace']}": ""})
+    assert views() == {"Neha": "foh", "Grace": "all", "Jabina": "boh"}   # unknown: unchanged
+
+
+def test_only_active_leaders_are_listed_or_set(client, team):
+    login(client)
+    client.post(f"/shift/admin/leaders/{team['Jabina']}/toggle", data={"active": "0"})
+    assert "Jabina" not in page(client, WHO)
+    client.post(WHO, data={f"view-{team['Jabina']}": "foh"})
+    assert views()["Jabina"] == "boh"
+
+
 def test_only_admins_set_who_sees_what(client, team):
     as_(client, "Grace")
-    resp = client.post(f"/shift/admin/leaders/{team['Grace']}/checklists", data={"view": "all"})
-    assert resp.status_code == 302 and shift_db.get_leader(team["Grace"])["checklist_side"] == "foh"
+    resp = client.get(WHO)
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/shift/")
+    client.post(WHO, data={f"view-{team['Grace']}": "all"})
+    assert views()["Grace"] == "foh"
+    assert "Who sees which checklists" not in page(client, "/shift/checklists")
     as_(client, "Neha")                                          # an admin leader may
-    resp = client.post(f"/shift/admin/leaders/{team['Grace']}/checklists", data={"view": "boh"},
-                       follow_redirects=True)
-    assert "Grace sees back of house checklists (and the ones for both)." in resp.data.decode()
-    client.post(f"/shift/admin/leaders/{team['Grace']}/checklists", data={"view": "kitchen"})
-    assert shift_db.get_leader(team["Grace"])["checklist_side"] == "boh"   # unknown: unchanged
-    resp = client.post(f"/shift/admin/leaders/{team['Jabina']}/checklists", data={"view": "all"},
-                       follow_redirects=True)
-    assert "Jabina sees every checklist." in resp.data.decode()
-    client.post(f"/shift/admin/leaders/{team['Jabina']}/checklists", data={"view": "boh"})
+    client.post(WHO, data={f"view-{team['Grace']}": "boh"})
+    assert views()["Grace"] == "boh"
+    assert 'href="/shift/admin/checklist-views"' in page(client, "/shift/checklists")
     admin = page(client, "/shift/admin")
-    row = admin[admin.index(f'id="leader-{team["Grace"]}"'):]
-    row = row[:row.index('id="leader-', 20)] if 'id="leader-' in row[20:] else row
-    assert '<option value="boh" selected>Sees back of house</option>' in row
+    assert 'href="/shift/admin/checklist-views"' in admin
+    assert (f'href="/shift/admin/checklist-views#who-{team["Grace"]}">Sees back of house</a>'
+            in admin)
+
+
+def test_names_are_escaped(client):
+    login(client)
+    client.post("/shift/admin/leaders/add", data={"name": "<b>Sam</b>", "pin": "4444"})
+    who = page(client, WHO)
+    assert "<b>Sam</b>" not in who and "&lt;b&gt;Sam&lt;/b&gt;" in who
+
+
+def test_no_leaders_yet(client):
+    login(client)
+    assert "No active leaders yet" in page(client, WHO)
 
 
 def test_each_list_has_a_side_in_the_template_editor(client, team):

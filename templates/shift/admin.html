@@ -7,8 +7,6 @@
 .leader.off .row-title { color: var(--text-muted); text-decoration: line-through; }
 .pinform { display: flex; gap: 6px; align-items: center; }
 .pinform input[type=text] { width: 7.5rem; min-height: 38px; padding: 6px 12px; }
-.viewform { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
-.viewform select { width: auto; max-width: 100%; min-height: 38px; padding: 6px 30px 6px 12px; }
 .backup .btn-primary { min-width: 0; }
 .backup hr { border: 0; border-top: 1px solid var(--rule); margin: 18px 0 4px; }
 .backup input[type=file] { margin-top: 6px; font-size: 0.9375rem; max-width: 100%; }
@@ -57,13 +55,9 @@
             <input type="hidden" name="role" value="{{ 'lead' if l.role == 'admin' else 'admin' }}">
             <button class="linkbtn nav" type="submit">{{ 'Make lead' if l.role == 'admin' else 'Make admin' }}</button>
           </form>
-          <form method="post" action="{{ url_for('shift.admin_leader_checklists', leader_id=l.id) }}" class="viewform">
-            <label class="sr" for="view-{{ l.id }}">Checklists {{ l.name }} sees</label>
-            <select id="view-{{ l.id }}" name="view">
-              {% for v in CHECKLIST_VIEWS %}<option value="{{ v }}" {{ 'selected' if (l.checklist_side or 'all') == v }}>Sees {{ CHECKLIST_VIEW_LABELS[v] | lower }}</option>{% endfor %}
-            </select>
-            <button class="btn btn-secondary sm" type="submit">Save</button>
-          </form>
+          {% if l.active %}
+          <a class="linkbtn nav" href="{{ url_for('shift.admin_checklist_views') }}#who-{{ l.id }}">Sees {{ CHECKLIST_VIEW_LABELS.get(l.checklist_side, 'Every checklist') | lower }}</a>
+          {% endif %}
           <form method="post" action="{{ url_for('shift.admin_leader_toggle', leader_id=l.id) }}">
             <input type="hidden" name="active" value="{{ '0' if l.active else '1' }}">
             <button class="linkbtn" type="submit">{{ 'Deactivate' if l.active else 'Reactivate' }}</button>
@@ -109,6 +103,11 @@
 <section class="sec">
   <div class="sec-head"><h2>Checklists &amp; development</h2></div>
   <div class="card list">
+    <a class="row" href="{{ url_for('shift.admin_checklist_views') }}">
+      <span class="lead-ico">{{ icon('users') }}</span>
+      <span class="row-main"><span class="row-title">Who sees which checklists</span>
+        <span class="row-meta">Every leader on one page: both, front of house or back of house.</span></span>{{ icon('chev', 'chev') }}
+    </a>
     <a class="row" href="{{ url_for('shift.admin_templates') }}">
       <span class="lead-ico">{{ icon('sliders') }}</span>
       <span class="row-main"><span class="row-title">Edit checklist templates</span>

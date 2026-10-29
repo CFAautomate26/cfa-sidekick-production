@@ -2165,18 +2165,34 @@ def admin_leader_role(leader_id):
     return redirect(url_for("shift.admin"))
 
 
-@shift_bp.route("/admin/leaders/<int:leader_id>/checklists", methods=["POST"])
+# The one-word picks on Who sees which checklists, in the order shown.
+_VIEW_WORDS = {"all": "Both", "foh": "Front", "boh": "Back"}
+
+
+@shift_bp.route("/admin/checklist-views", methods=["GET", "POST"])
 @admin_required
-def admin_leader_checklists(leader_id):
-    """Which side's checklists a leader sees: every list, front of house or
-    back of house (plus the lists that are both)."""
-    leader = shift_db.get_leader(leader_id)
-    view = request.form.get("view", "")
-    if leader and shift_db.set_leader_checklist_view(leader_id, view):
-        flash(f"{leader['name']} sees every checklist." if view == "all" else
-              f"{leader['name']} sees {shift_db.CHECKLIST_VIEW_LABELS[view].lower()}"
-              " checklists (and the ones for both).")
-    return redirect(url_for("shift.admin") + f"#leader-{leader_id}")
+def admin_checklist_views():
+    """Who sees which checklists: every active leader on one page with Both
+    (every list), Front or Back (that side's lists plus the ones for both),
+    saved in one go. Only the leaders whose pick changed are written."""
+    leaders = shift_db.leaders()
+    if request.method == "POST":
+        changed = [f"{l['name']} → {_VIEW_WORDS[view]}" for l in leaders
+                   if (view := request.form.get(f"view-{l['id']}"))
+                   and view != (l["checklist_side"] or "all")
+                   and shift_db.set_leader_checklist_view(l["id"], view)]
+        flash(f"Saved: {', '.join(changed)}." if changed else "Nothing changed.")
+        return redirect(url_for("shift.admin_checklist_views"))
+    for l in leaders:
+        if l["checklist_side"] not in shift_db.CHECKLIST_VIEWS:
+            l["checklist_side"] = "all"
+    lists = shift_db.all_templates()
+    return render_template(
+        "shift/admin_checklist_views.html", leaders=leaders, view_words=_VIEW_WORDS,
+        names_by_view={v: [l["name"] for l in leaders if l["checklist_side"] == v]
+                       for v in shift_db.CHECKLIST_VIEWS},
+        lists_by_side={s: [t["name"] for t in lists if t["side"] == s]
+                       for s in shift_db.CHECKLIST_SIDES})
 
 
 def _parse_items(raw: str) -> list[tuple[str, bool]]:

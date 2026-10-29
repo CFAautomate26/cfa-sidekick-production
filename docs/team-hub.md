@@ -49,10 +49,13 @@ lists (and the ones for both, like sanitizer & spindles) instead of
 scrolling past the kitchen's. It's a view, not a lock: **Show all** sits
 right under the heading, and a list's own page always opens.
 
-- **Who sees what:** Admin → *Leader logins* → each leader's
-  "Sees every checklist / front of house / back of house" (Operator and
-  admin leaders). New and existing leaders see every checklist until it's
-  set; the Operator login always does.
+- **Who sees what:** Admin → *Who sees which checklists* (also at the
+  bottom of Checklists, for the Operator and admin leaders) lists every
+  active leader with **Both / Front / Back** — tap one for each, then one
+  Save. The top of the page shows who's on each side now, and *What's on
+  each side* lists the checklists. New and existing leaders start on Both;
+  the Operator login always sees every list. Each leader's row under
+  *Leader logins* shows their pick and links there.
 - **Which side a list is on:** Admin → *Checklist templates* → a list →
   "Who sees it". The built-in lists were sorted by their area (Front
   Counter, Dining Room, Drive Thru, Washrooms → front; Kitchen, Machines,

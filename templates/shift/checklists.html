@@ -267,6 +267,8 @@ details.fold > a.row { background: var(--gray-050); }
   {% if shift_is_admin %}
   <a class="row compact" href="{{ url_for('shift.admin_templates') }}"><span class="lead-ico">{{ icon('sliders') }}</span>
     <span class="row-main"><span class="row-title">Edit checklist templates</span><span class="row-meta">Admin leaders + Operator</span></span>{{ icon('chev', 'chev') }}</a>
+  <a class="row compact" href="{{ url_for('shift.admin_checklist_views') }}"><span class="lead-ico">{{ icon('users') }}</span>
+    <span class="row-main"><span class="row-title">Who sees which checklists</span><span class="row-meta">Both, front or back for each leader</span></span>{{ icon('chev', 'chev') }}</a>
   {% endif %}
 </div>
 </div>

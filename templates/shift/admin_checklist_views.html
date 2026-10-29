@@ -1,0 +1,88 @@
+{% extends "shift/base.html" %}
+{# Who sees which checklists: every active leader with Both / Front / Back
+   radio pills (no JS — plain radios styled as a segmented control) and one
+   Save. Front and Back still include the lists that are both. #}
+{% block title %}Who sees which checklists{% endblock %}
+{% block head %}
+<style>
+.who-sum { margin-top: 18px; }
+.who-sum .row-title { font-size: 0.9375rem; }
+.who .row { flex-wrap: wrap; row-gap: 10px; }
+.who .row-main { min-width: 0; }
+.pick { flex: 1 1 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0;
+  padding: 3px; border: 0; border-radius: var(--r-full); box-shadow: inset 0 0 0 1px var(--gray-400); min-width: 0; }
+.pick label { position: relative; display: block; cursor: pointer; }
+.pick input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.pick span { display: block; padding: 9px 4px; border-radius: var(--r-full); text-align: center;
+  font-size: 0.875rem; font-weight: 700; color: var(--nav); }
+.pick input:checked + span { background: var(--nav); color: #fff; }
+.pick input:focus-visible + span { box-shadow: var(--focus); }
+.legend { margin: 14px 0 0; padding: 0; list-style: none; font-size: var(--fs-small); color: var(--text-muted); }
+.legend li + li { margin-top: 4px; }
+.legend b { color: var(--text-strong); }
+.sides { margin-top: 12px; font-size: var(--fs-small); }
+.sides summary { cursor: pointer; font-weight: 700; color: var(--nav); }
+.sides h3 { font-size: 0.9375rem; margin: 14px 0 4px; }
+.sides ul { margin: 0; padding-left: 18px; color: var(--text-muted); }
+.save { margin-top: 18px; }
+@media (min-width: 720px) {
+  .who .row { flex-wrap: nowrap; }
+  .pick { flex: 0 0 300px; }
+  .btn.block.save { width: auto; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">Checklists · Admin</p>
+  <h1 class="headline">Who sees which checklists</h1>
+  <p class="triage">Pick <b>Both</b>, <b>Front</b> or <b>Back</b> for each leader, then Save. It sets what their Checklists page opens to — they can still tap Show all.</p>
+  <ul class="legend">
+    <li><b>Both</b> — every checklist.</li>
+    <li><b>Front</b> — the {{ lists_by_side.foh | length }} front-of-house lists and the {{ lists_by_side.both | length }} shared ones.</li>
+    <li><b>Back</b> — the {{ lists_by_side.boh | length }} back-of-house lists and the {{ lists_by_side.both | length }} shared ones.</li>
+  </ul>
+  <details class="sides">
+    <summary>What's on each side</summary>
+    {% for side, label in [('foh', 'Front of house'), ('boh', 'Back of house'), ('both', 'Shared (front and back)')] %}
+    <h3>{{ label }}</h3>
+    {% if lists_by_side[side] %}<ul>{% for name in lists_by_side[side] %}<li>{{ name }}</li>{% endfor %}</ul>{% else %}<p class="sec-note">None.</p>{% endif %}
+    {% endfor %}
+    <p class="sec-note" style="margin-top:12px;">Move a list to the other side in <a href="{{ url_for('shift.admin_templates') }}">Checklist templates</a> (“Who sees it”).</p>
+  </details>
+</section>
+
+{% if leaders %}
+<div class="card list who-sum" aria-label="Who's on each side now">
+  {% for key, label in [('foh', 'Front of house'), ('boh', 'Back of house'), ('all', 'Both')] %}
+  <div class="row compact"><span class="row-main"><span class="row-title">{{ label }}</span>
+    <span class="row-meta">{{ names_by_view[key] | join(', ') if names_by_view[key] else 'Nobody yet' }}</span></span></div>
+  {% endfor %}
+</div>
+
+<form method="post" action="{{ url_for('shift.admin_checklist_views') }}">
+  <section class="sec" aria-labelledby="who-head">
+    <div class="sec-head"><h2 id="who-head">Leaders</h2></div>
+    <div class="card list who">
+      {% for l in leaders %}
+      <div class="row" id="who-{{ l.id }}">
+        <span class="av" aria-hidden="true">{{ l.name[:1] | upper }}</span>
+        <span class="row-main"><span class="row-title">{{ l.name }}</span>
+          <span class="row-meta">{{ 'Admin' if l.role == 'admin' else 'Lead' }}</span></span>
+        <fieldset class="pick">
+          <legend class="sr">Checklists {{ l.name }} sees</legend>
+          {% for v, word in view_words.items() %}
+          <label><input type="radio" name="view-{{ l.id }}" value="{{ v }}"{{ ' checked' if l.checklist_side == v }}><span>{{ word }}</span></label>
+          {% endfor %}
+        </fieldset>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="sec-note" style="margin-top:10px;">The Operator login always sees every checklist. New leaders start on Both.</p>
+    <button class="btn btn-primary block save" type="submit">Save</button>
+  </section>
+</form>
+{% else %}
+<div class="empty" style="margin-top:22px;">No active leaders yet — add them under <a href="{{ url_for('shift.admin') }}">Leader logins</a>.</div>
+{% endif %}
+{% endblock %}
