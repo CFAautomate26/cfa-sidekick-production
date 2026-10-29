@@ -2179,12 +2179,13 @@ def admin_checklist_views():
     since the page opened is left alone and named, so an old open copy can't
     quietly undo another admin's pick. A page opened before a backup restore
     writes nothing — the restore can renumber leader ids."""
-    leaders = shift_db.leaders()
+    epoch = shift_db.session_epoch()     # before the rows: a restore between reads
+    leaders = shift_db.leaders()         # leaves the page with the old epoch
     for l in leaders:                    # an unknown stored value reads as Both
         if l["checklist_side"] not in shift_db.CHECKLIST_VIEWS:
             l["checklist_side"] = "all"
     if request.method == "POST":
-        if request.form.get("epoch", "") != shift_db.session_epoch():
+        if request.form.get("epoch", "") != epoch:
             flash("A backup was restored since you opened this page, so nothing was "
                   "saved. Check the picks below and save again.")
             return redirect(url_for("shift.admin_checklist_views"))
@@ -2195,8 +2196,8 @@ def admin_checklist_views():
             was = request.form.get(f"was-{l['id']}") or now
             if not view or view in (was, now):      # untouched here, or already so
                 continue
-            if now == was and shift_db.set_leader_checklist_view(l["id"], view,
-                                                                 expected=was):
+            if now == was and shift_db.set_leader_checklist_view(
+                    l["id"], view, expected=was, name=l["name"]):
                 saved.append(f"{l['name']} → {_VIEW_WORDS[view]}")
             elif view in shift_db.CHECKLIST_VIEWS:
                 clashed.append(l["name"])
@@ -2211,7 +2212,7 @@ def admin_checklist_views():
     lists = shift_db.all_templates()
     return render_template(
         "shift/admin_checklist_views.html", leaders=leaders, view_words=_VIEW_WORDS,
-        epoch=shift_db.session_epoch(),
+        epoch=epoch,
         names_by_view={v: [l["name"] for l in leaders if l["checklist_side"] == v]
                        for v in shift_db.CHECKLIST_VIEWS},
         lists_by_side={s: [t["name"] for t in lists if t["side"] == s]

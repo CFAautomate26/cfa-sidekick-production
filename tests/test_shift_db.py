@@ -2724,7 +2724,8 @@ def test_leader_checklist_view(isolated_db):
     assert shift_db.get_leader(grace)["checklist_side"] == "foh"
     # only if they still see what the page showed — one statement, no race
     assert not shift_db.set_leader_checklist_view(grace, "boh", expected="all")
-    assert shift_db.set_leader_checklist_view(grace, "boh", expected="foh")
+    assert not shift_db.set_leader_checklist_view(grace, "boh", expected="foh", name="Neha")
+    assert shift_db.set_leader_checklist_view(grace, "boh", expected="foh", name="Grace")
     with shift_db.closing(shift_db.connect()) as conn, conn:     # a hand edit
         conn.execute("UPDATE leaders SET checklist_side='FOH' WHERE id=?", (grace,))
     assert shift_db.set_leader_checklist_view(grace, "foh", expected="all")   # read as all
