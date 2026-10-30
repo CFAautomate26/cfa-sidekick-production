@@ -2751,13 +2751,14 @@ def test_restore_fills_in_missing_or_unknown_sides(isolated_db):
 
 def _rerun_view_picks():
     with shift_db.closing(shift_db.connect()) as conn, conn:
-        conn.execute("DELETE FROM meta WHERE key=?", (shift_db.CHECKLIST_VIEW_PICKS_KEY,))
+        conn.executemany("DELETE FROM meta WHERE key=?",
+                         [(key,) for key, _ in shift_db.CHECKLIST_VIEW_PICKS])
     shift_db.init_db()
 
 
 def test_operators_checklist_picks_land_on_the_right_logins(isolated_db, capsys):
     for name in ("Aron", "Jubina", "Sarath Kanna", "Avery", "Grace F", "Pru", "Samira",
-                 "NeHa", "Riya", "Sam", "Keira"):
+                 "NeHa", "Riya", "Sam", "Keira", "Sammy"):
         shift_db.add_leader(name, "4721")
     ids = {l["name"]: l["id"] for l in shift_db.leaders()}
     with shift_db.closing(shift_db.connect()) as conn, conn:   # remembered from a Slack pull
@@ -2766,11 +2767,13 @@ def test_operators_checklist_picks_land_on_the_right_logins(isolated_db, capsys)
     views = {l["name"]: l["checklist_side"] for l in shift_db.leaders()}
     assert views == {"Aron": "boh", "Jubina": "boh", "Sarath Kanna": "boh",
                      "Avery": "foh", "Grace F": "foh", "Pru": "foh", "Samira": "foh",
-                     "NeHa": "all", "Riya": "all", "Sam": "all", "Keira": "all"}
+                     "NeHa": "all", "Riya": "all", "Sam": "all", "Keira": "all",
+                     "Sammy": "foh"}
     log = capsys.readouterr().out
     assert "Aron → back of house (exact)" in log and "Grace F → front of house (first)" in log
     assert "Sarath Kanna → back of house (exact)" in log
     assert "Pru → front of house (remembered)" in log and "NeHa → every checklist (exact)" in log
+    assert "Sammy → front of house (first)" in log
     assert "not set" not in log
 
 
@@ -2794,8 +2797,46 @@ def test_operators_checklist_picks_apply_once_and_log_misses(isolated_db, capsys
 
 def test_operators_checklist_picks_on_a_fresh_install(isolated_db):
     with shift_db.closing(shift_db.connect()) as conn:          # marked done, nothing set
-        assert conn.execute("SELECT 1 FROM meta WHERE key=?",
-                            (shift_db.CHECKLIST_VIEW_PICKS_KEY,)).fetchone()
+        for key, _ in shift_db.CHECKLIST_VIEW_PICKS:
+            assert conn.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone()
     shift_db.add_leader("Aron", "4721")
     shift_db.init_db()
     assert shift_db.leaders()[0]["checklist_side"] == "all"
+
+
+def test_foh_and_boh_named_lists_are_on_their_side():
+    assert shift_db.side_from_name("FOH Opening") == "foh"
+    assert shift_db.side_from_name("boh closing") == "boh"
+    assert shift_db.side_from_name("  Back of house deep clean") == "boh"
+    assert shift_db.side_from_name("Front of House — Patio") == "foh"
+    assert shift_db.side_from_name("Bohemian patio") is None
+    assert shift_db.side_from_name("Afternoon Reset") is None
+    assert shift_db.side_for("All", "BOH Opening") == "boh"          # the name wins
+    assert shift_db.side_for("Kitchen", "FOH Closing") == "foh"
+    assert shift_db.side_for("Kitchen", "Fryer filter") == "boh"     # else the area
+
+
+def test_foh_and_boh_lists_move_to_their_side_once(isolated_db, capsys):
+    ids = {t["name"]: t["id"] for t in shift_db.all_templates()}
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("UPDATE checklist_templates SET side='both', area='All' WHERE id=?",
+                     (ids["FOH Opening"],))
+        conn.execute("UPDATE checklist_templates SET side='foh' WHERE id=?",
+                     (ids["BOH Closing"],))
+        conn.execute("DELETE FROM meta WHERE key='checklist_sides_by_name_2026_10_30'")
+    shift_db.init_db()
+    sides = {t["name"]: t["side"] for t in shift_db.all_templates()}
+    assert sides["FOH Opening"] == "foh" and sides["BOH Closing"] == "boh"
+    assert sides["FOH Closing"] == "foh" and sides["BOH Opening"] == "boh"
+    assert sides["Afternoon Reset"] == "both"                        # not named for a side
+    log = capsys.readouterr().out
+    assert "FOH/BOH lists by name — FOH Opening → front of house; BOH Closing → back of house" in log
+    front = next(line for line in log.splitlines() if "Front of house lists (" in line)
+    assert "FOH Opening" in front and "FOH Closing" in front and "BOH" not in front
+    back = next(line for line in log.splitlines() if "Back of house lists (" in line)
+    assert "BOH Opening" in back and "BOH Closing" in back and "Machines — Daily" in back
+    with shift_db.closing(shift_db.connect()) as conn, conn:     # the Operator's later call
+        conn.execute("UPDATE checklist_templates SET side='both' WHERE id=?",
+                     (ids["FOH Opening"],))
+    shift_db.init_db()
+    assert shift_db.template_with_items(ids["FOH Opening"])[0]["side"] == "both"

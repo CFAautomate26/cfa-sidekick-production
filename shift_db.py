@@ -70,10 +70,21 @@ _BACK_AREAS = {"kitchen", "machines", "boards", "produce", "breading & raw", "br
                "prep", "back of house", "boh"}
 
 
+def side_from_name(name: str | None) -> str | None:
+    """A list named for its side ("FOH Opening", "BOH Closing", "Back of
+    house deep clean") is on that side, whatever its area says."""
+    m = re.match(r"\s*(foh|front of house|boh|back of house)\b", name or "", re.I)
+    if not m:
+        return None
+    return "foh" if m.group(1).lower() in ("foh", "front of house") else "boh"
+
+
 def side_for(area: str | None, name: str | None = "") -> str:
-    """A list's side from its area (the Operator can change it after). The
-    posted Food Safety Daily Commitment sheet is front-counter and drive-thru
-    stations, whatever its area says."""
+    """A list's side from its name, else its area (the Operator can change
+    it after). The posted Food Safety Daily Commitment sheet is front-counter
+    and drive-thru stations, whatever its area says."""
+    if by_name := side_from_name(name):
+        return by_name
     a = (area or "").strip().lower()
     if a in _FRONT_AREAS or (name or "").lower().startswith("food safety commitment"):
         return "foh"
@@ -82,24 +93,29 @@ def side_for(area: str | None, name: str | None = "") -> str:
     return "both"
 
 
-# Who sees which checklists as the Operator set it out on 2026-10-30, by
-# Slack user id on the pinned roster (shift_roster_seed.py). Applied ONCE
-# (meta key below) to the active login each person matches the way the
-# roster pull matches (_match_leaders: exact name, the remembered Slack
-# account, or a unique first name); anyone not matched is logged and left
-# for Admin › Who sees which checklists. Later changes there stand.
-CHECKLIST_VIEW_PICKS_KEY = "checklist_views_set_2026_10_30"
-CHECKLIST_VIEW_PICKS = {
-    "U09N8FNAZJS": "boh",   # Aron
-    "U07ABBMJQP3": "boh",   # Jubina
-    "U065957A30S": "boh",   # Sarath
-    "U0ACAFKPF8B": "foh",   # Avery
-    "U0AA2EC3KGV": "foh",   # Grace
-    "U09BRLFHRUK": "foh",   # Pru
-    "U08T2RGTTDE": "foh",   # Samira
-    "U064X0QJ5FZ": "all",   # Neha
-    "U09EE5MJ4R2": "all",   # Riya
-}
+# Who sees which checklists as the Operator set it out, by Slack user id on
+# the pinned roster (shift_roster_seed.py). Each batch is applied ONCE (its
+# meta key) to the active login each person matches the way the roster pull
+# matches (_match_leaders: exact name, the remembered Slack account, or a
+# unique first name); anyone not matched is logged and left for Admin › Who
+# sees which checklists. Later changes there stand. Add a batch, never edit
+# one that has shipped.
+CHECKLIST_VIEW_PICKS = [
+    ("checklist_views_set_2026_10_30", {
+        "U09N8FNAZJS": "boh",   # Aron
+        "U07ABBMJQP3": "boh",   # Jubina
+        "U065957A30S": "boh",   # Sarath
+        "U0ACAFKPF8B": "foh",   # Avery
+        "U0AA2EC3KGV": "foh",   # Grace
+        "U09BRLFHRUK": "foh",   # Pru
+        "U08T2RGTTDE": "foh",   # Samira
+        "U064X0QJ5FZ": "all",   # Neha
+        "U09EE5MJ4R2": "all",   # Riya
+    }),
+    ("checklist_views_set_2026_10_30_sammy", {
+        "U06F8JRJLLQ": "foh",   # Sammy
+    }),
+]
 
 
 def sides_for_view(view: str | None) -> tuple[str, ...] | None:
@@ -844,6 +860,7 @@ def init_db() -> None:
             _seed_cleaning(conn)
             _seed_schedule_log(conn)
             _seed_hub(conn)
+            _seed_sides_by_name(conn)
             _seed_checklist_view_picks(conn)
             conn.commit()
         except BaseException:
@@ -1096,32 +1113,56 @@ def _seed_list_additions(conn) -> None:
 
 
 def _seed_checklist_view_picks(conn) -> None:
-    """Once: set who sees which checklists from CHECKLIST_VIEW_PICKS, logging
-    each login set (and how it was matched) and anyone not found. A
-    database with no active leaders yet (a fresh install) just marks it done."""
-    if conn.execute("SELECT 1 FROM meta WHERE key=?",
-                    (CHECKLIST_VIEW_PICKS_KEY,)).fetchone():
-        return
+    """Each CHECKLIST_VIEW_PICKS batch once: set who sees which checklists,
+    logging each login set (and how it was matched) and anyone not found.
+    A database with no active leaders yet (a fresh install) just marks it
+    done."""
     import shift_roster_seed
-    leaders = [dict(r) for r in conn.execute(
-        "SELECT id, name, slack_id FROM leaders WHERE active=1")]
-    if leaders:
-        people = _slack_keys([p for p in shift_roster_seed.PEOPLE
-                              if p["slack_id"] in CHECKLIST_VIEW_PICKS])
-        matched = _match_leaders(leaders, people)
-        done = []
-        for p in people:
-            view = CHECKLIST_VIEW_PICKS[p["slack_id"]]
-            if p["slack_id"] not in matched:
-                done.append(f"{p['name']}: no login found, not set")
-                continue
-            leader, how = matched[p["slack_id"]]
-            conn.execute("UPDATE leaders SET checklist_side=? WHERE id=?",
-                         (view, leader["id"]))
-            done.append(f"{leader['name']} → {CHECKLIST_VIEW_LABELS[view].lower()} ({how})")
-        print(f"shift_db: who sees which checklists — {'; '.join(done)}")
-    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)",
-                 (CHECKLIST_VIEW_PICKS_KEY, now_stamp()))
+    for key, picks in CHECKLIST_VIEW_PICKS:
+        if conn.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone():
+            continue
+        leaders = [dict(r) for r in conn.execute(
+            "SELECT id, name, slack_id FROM leaders WHERE active=1")]
+        if leaders:
+            people = _slack_keys([p for p in shift_roster_seed.PEOPLE
+                                  if p["slack_id"] in picks])
+            matched = _match_leaders(leaders, people)
+            done = []
+            for p in people:
+                view = picks[p["slack_id"]]
+                if p["slack_id"] not in matched:
+                    done.append(f"{p['name']}: no login found, not set")
+                    continue
+                leader, how = matched[p["slack_id"]]
+                conn.execute("UPDATE leaders SET checklist_side=? WHERE id=?",
+                             (view, leader["id"]))
+                done.append(f"{leader['name']} → {CHECKLIST_VIEW_LABELS[view].lower()} ({how})")
+            print(f"shift_db: who sees which checklists — {'; '.join(done)}")
+        conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, now_stamp()))
+
+
+def _seed_sides_by_name(conn) -> None:
+    """Once: FOH- and BOH-named lists ("FOH Opening", "BOH Closing", …) on
+    their side whatever their area says, then log where every active list
+    sits — the deploy log is the record of what each side sees."""
+    key = "checklist_sides_by_name_2026_10_30"
+    if conn.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone():
+        return
+    moved = []
+    for t in conn.execute("SELECT id, name, side FROM checklist_templates").fetchall():
+        side = side_from_name(t["name"])
+        if side and t["side"] != side:
+            conn.execute("UPDATE checklist_templates SET side=? WHERE id=?", (side, t["id"]))
+            moved.append(f"{t['name']} → {CHECKLIST_SIDE_LABELS[side].lower()}")
+    by_side: dict[str, list[str]] = {s: [] for s in CHECKLIST_SIDES}
+    for t in conn.execute("SELECT name, side FROM checklist_templates WHERE active=1 "
+                          "ORDER BY sort, id"):
+        by_side.setdefault(t["side"], []).append(t["name"])
+    print(f"shift_db: FOH/BOH lists by name — {'; '.join(moved) or 'all already on their side'}")
+    for side, names in by_side.items():
+        print(f"shift_db: {CHECKLIST_SIDE_LABELS.get(side, side)} lists ({len(names)}): "
+              f"{', '.join(names) or 'none'}")
+    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, now_stamp()))
 
 
 def _seed_closing_drains(conn) -> None:

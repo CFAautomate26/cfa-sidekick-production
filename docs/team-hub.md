@@ -60,8 +60,10 @@ right under the heading, and a list's own page always opens.
   "Who sees it". The built-in lists were sorted by their area (Front
   Counter, Dining Room, Drive Thru, Washrooms → front; Kitchen, Machines,
   Boards, Produce, Breading & Raw → back; anything else → both). The Food
-  Safety Commitment lists are front of house. A new list's side is worked
-  out from its area unless one is picked.
+  Safety Commitment lists are front of house, and any list whose name
+  starts with FOH or BOH (FOH Opening, BOH Closing…) is on that side
+  whatever its area. A new list's side is worked out the same way unless
+  one is picked.
 
 ## Signing in (one front door)
 
