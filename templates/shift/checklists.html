@@ -63,6 +63,24 @@ details.fold > a.row { background: var(--gray-050); }
   .cols > .col > :first-child { margin-top: 22px; }
   .cols + .cols > .col > :first-child { margin-top: 32px; }
 }
+/* One-tap sign-offs: the day as one list, each checked off right here */
+.signoffs { margin-top: 22px; }
+.signoffs .row { padding-left: 10px; }
+.tick-form { margin: -6px 0 -6px -4px; flex: 0 0 auto; }
+.tick { position: relative; width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 0;
+  cursor: pointer; padding: 0; }
+.tick::before { content: ""; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--gray-400); background: #fff; }
+.tick:hover::before { border-color: var(--ok); }
+.tick:focus-visible { outline: 3px solid var(--nav); outline-offset: -4px; border-radius: 50%; }
+.done-mark { width: 44px; height: 44px; display: grid; place-items: center; flex: 0 0 auto; margin: -6px 0 -6px -4px; color: var(--ok); }
+.done-mark .i { width: 30px; height: 30px; }
+.wait-mark { width: 44px; height: 44px; flex: 0 0 auto; margin: -6px 0 -6px -4px; }
+.signoffs .row-main { min-width: 0; color: inherit; }
+.signoffs .miss { color: var(--red-700); font-weight: 700; }
+.undo-form { flex: 0 0 auto; }
+.undo-form .linkbtn { background: none; border: 0; padding: 10px 4px; font: inherit; font-size: 0.875rem;
+  font-weight: 700; color: var(--nav); cursor: pointer; }
+.signoff-note { margin-top: 8px; font-size: var(--fs-small); color: var(--text-muted); }
 @media print {
   .seg, .score, .more-links, .now .cta, .past .textlink { display: none !important; }
   .card, .feature { break-inside: avoid; }
@@ -109,6 +127,14 @@ details.fold > a.row { background: var(--gray-050); }
 {# The day being looked at, and Show all, ride along on every link here. #}
 {% if is_today %}{% set day_args = {'lists': 'all'} if show_all else {} %}
 {% else %}{% set day_args = {'date': day, 'lists': 'all'} if show_all else {'date': day} %}{% endif %}
+{% if sign_off %}
+<section class="hero compact">
+  <p class="eyebrow">Checklists · {{ day_label }}</p>
+  <h1 class="headline">{{ "Today's checklists" if is_today else 'Checklists' }}</h1>
+  <p class="triage">{% if rows %}{% if done_count == rows | length %}All <b>{{ rows | length }}</b> checked off.{% else %}<b>{{ done_count }}</b> of <b>{{ rows | length }}</b> checked off.{% endif %}{% else %}No checklists{{ ' that day' if not is_today }}.{% endif %}</p>
+  <p class="signoff-note">Check each one off once the full checklist in the restaurant is done.</p>
+</section>
+{% else %}
 <section class="hero compact">
   <p class="eyebrow">Checklists · {{ day_label }}</p>
   <h1 class="headline">{{ part_name }} checklists</h1>
@@ -128,6 +154,7 @@ details.fold > a.row { background: var(--gray-050); }
     {% endfor %}
   </nav>
 </section>
+{% endif %}
 
 {% if filtered %}
 <p class="viewline">{{ icon('users') }}<span>{% if show_all %}Showing every list.{% else %}Your {{ view_label | lower }} lists.{% endif %}</span>
@@ -140,7 +167,41 @@ details.fold > a.row { background: var(--gray-050); }
   <a class="textlink" href="{{ url_for('shift.checklists', daypart=daypart) }}">Back to today</a></p>
 {% endif %}
 
-{% if not runs %}
+{% if sign_off %}
+{% if rows %}
+<div class="card list signoffs">
+  {% for r in rows %}
+  <div class="row" id="run-{{ r.id }}">
+    {% if r.finished %}<span class="done-mark" title="Checked off">{{ icon('checkcircle') }}</span>
+    {% elif r.item and r.can_edit %}
+    <form class="tick-form" method="post" action="{{ url_for('shift.toggle_item', item_id=r.item.id) }}">
+      <input type="hidden" name="done" value="1"><input type="hidden" name="back" value="checklists">
+      <button class="tick" type="submit" aria-label="Check off: {{ r.name }}"></button>
+    </form>
+    {% else %}<span class="wait-mark" aria-hidden="true"></span>{% endif %}
+    <a class="row-main" href="{{ url_for('shift.run_detail', run_id=r.id) }}">
+      <span class="row-title">{{ r.name }}</span>
+      <span class="row-meta">{{ r.daypart_name }} ·
+        {% if r.item %}{% if r.finished %}Done by {{ r.item.done_by }} · {{ check_stamp(r.item.done_at, r.run_date) }}{% elif r.late %}<span class="miss">Not checked off</span>{% else %}Not done yet{% endif %}
+        {%- else %}{% if r.finished %}Done{% elif r.done %}{{ r.done }} of {{ r.total }} done{% elif r.late %}<span class="miss">Not checked off</span>{% else %}Not started{% endif %}{% endif %}</span>
+    </a>
+    {% if r.finished and r.item and r.can_edit %}
+    <form class="undo-form" method="post" action="{{ url_for('shift.toggle_item', item_id=r.item.id) }}">
+      <input type="hidden" name="done" value="0"><input type="hidden" name="back" value="checklists">
+      <button class="linkbtn" type="submit" aria-label="Undo: {{ r.name }}">Undo</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty first-card">
+  {% if is_today %}No checklists yet. An admin adds them under Edit checklist
+  templates.{% else %}Nobody opened the app on {{ day_label }}, so no
+  checklists were run that day.{% endif %}
+</div>
+{% endif %}
+{% elif not runs %}
 <div class="empty first-card">
   {% if is_today %}No checklists yet. An admin adds them under Edit checklist
   templates.{% else %}Nobody opened the app on {{ day_label }}, so no
@@ -250,7 +311,7 @@ details.fold > a.row { background: var(--gray-050); }
 <a class="feature cool score" href="{{ url_for('shift.checklist_scorecard') }}">
   {% if score_pct is not none %}<span class="num">{{ score_pct }}<small>%</small></span>{% endif %}
   <span><span class="f-title">Scorecard</span>
-    <span class="f-body">{% if score_pct is not none %}Daily list items checked off over the last {{ score_days }} open day{{ 's' if score_days != 1 }}.{% else %}How consistently each list gets done.{% endif %}</span></span>
+    <span class="f-body">{% if score_pct is not none %}{{ 'Checklists' if sign_off else 'Daily list items' }} checked off over the last {{ score_days }} open day{{ 's' if score_days != 1 }}.{% else %}How consistently each list gets done.{% endif %}</span></span>
 </a>
 <div class="card list more-links">
   <a class="row compact" href="{{ url_for('shift.history') }}"><span class="lead-ico">{{ icon('history') }}</span>

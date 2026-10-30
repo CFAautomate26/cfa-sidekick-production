@@ -516,7 +516,11 @@ def checklists():
     progress block. Then the rest that's due now (critical first, with
     earlier dayparts' lists still owing critical items and the weekly and
     monthly lists that are due), the all-day station sheets, what's coming
-    up later today, and this week's and month's lists."""
+    up later today, and this week's and month's lists.
+
+    When every active list is a one-tap sign-off (shift_db.sign_off_mode)
+    the day is one list instead, opening to closing, each checked off right
+    here."""
     today = shift_db.today_local()
     day = _valid_date(request.args.get("date"))
     is_today = day == today
@@ -532,6 +536,9 @@ def checklists():
     show_all = request.args.get("lists") == "all"
     if sides and not show_all:
         runs = [r for r in runs if r["side"] in sides]
+    # Only worth a word when the view hides some list.
+    filtered = bool(sides) and any(t["side"] not in sides for t in shift_db.all_templates())
+    sign_off = shift_db.sign_off_mode()
     parts = shift_db.DAYPARTS
     now_part = shift_db.current_daypart()
     daypart = _valid_checklist_daypart(request.args.get("daypart"))
@@ -576,7 +583,18 @@ def checklists():
     allday = [r for r in daily if r["daypart"] == "allday"]
     mine = [r for r in daily if r["daypart"] == daypart]
     open_now, also_due, done_now, coming = None, [], [], []
-    if live:
+    rows = []
+    if sign_off:
+        rows = daily
+        items = shift_db.run_items([r["id"] for r in rows])
+        for r in rows:
+            its = items.get(r["id"], [])
+            r["item"] = its[0] if len(its) == 1 else None
+            r["can_edit"] = _can_edit_run(r)
+            # Not ticked and its time has gone: a past day, or an earlier daypart.
+            r["late"] = not r["finished"] and (day < today or (
+                is_today and r["daypart"] in parts and parts.index(r["daypart"]) < now_pos))
+    elif live:
         current = critical_first([r for r in mine if not r["finished"]])
         done_now = [r for r in mine if r["finished"]]
         leftovers = [r for r in daily if r["daypart"] in parts[:pos]
@@ -623,8 +641,9 @@ def checklists():
         allday_done=sum(r["done"] for r in allday),
         allday_total=sum(r["total"] for r in allday),
         score_pct=round(score_done / score_total * 100) if score_total else None,
-        score_days=score_days,
-        filtered=bool(sides), show_all=show_all,
+        score_days=score_days, sign_off=sign_off, rows=rows,
+        done_count=sum(1 for r in rows if r["finished"]),
+        filtered=filtered, show_all=show_all,
         view_label=shift_db.CHECKLIST_VIEW_LABELS.get(view, ""),
     )
 
@@ -692,15 +711,21 @@ def toggle_item(item_id):
         flash("That item doesn't exist.")
         return redirect(url_for("shift.checklists"))
     run, _ = shift_db.run_with_items(run_id)
+    # Ticked on the Checklists page (a one-tap sign-off): back to that day.
+    back = (url_for("shift.checklists", **(
+        {} if run["run_date"] == shift_db.today_local() else {"date": run["run_date"]}))
+        + f"#run-{run_id}" if request.form.get("back") == "checklists" else None)
     if not _can_edit_run(run):
         if request.form.get("ajax") == "1":
             return {"ok": False, "locked": True}, 403
         flash("That list is closed — its period has ended, so it can't be "
               "changed (the Operator can correct it).")
-        return redirect(url_for("shift.run_detail", run_id=run_id))
+        return redirect(back or url_for("shift.run_detail", run_id=run_id))
 
     shift_db.set_item_done(item_id, done, current_name())
 
+    if back:
+        return redirect(back)
     if request.form.get("ajax") == "1":
         run, items = shift_db.run_with_items(run_id)
         item = next(i for i in items if i["id"] == item_id)

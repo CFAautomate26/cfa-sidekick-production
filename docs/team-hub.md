@@ -17,7 +17,7 @@ home-screen icons and every old link keep working.
 |---|---|---|
 | **To-dos** (leaders' home) / **Home** (team members) | everyone | Leaders: their open to-dos and nothing else — tick one off right there, or add one; the Operator sees the ones they handed out. Team members: their required reading, the categories, what's new. |
 | **Systems & Procedures** | everyone (filtered) | HR, FOH Operations, BOH Operations, Leadership Development (leaders only) — pages, required reading, search, editor tools. |
-| **Checklists** | leaders | Daypart lists, station cleaning sheets, scorecard, past days. Each leader sees their side of the store — see *Checklists by side of the store* below. |
+| **Checklists** | leaders | The six one-tap checklists — FOH/BOH Opening, Changeover and Closing — ticked off right on the page once the paper list in the restaurant is done; every leader sees all six. Scorecard and past days below. (With detailed lists instead, the daypart lists and station sheets, filtered by side — see *Checklists by side of the store* below.) |
 | **Meetings** | leaders | Your 1:1 agenda with the Operator, 1:1s with your team, to-dos. Private to each leader and the Operator. |
 | **Every leader's to-dos** | leaders | `/shift/todo`: assign one to any leader, see open and overdue per leader, the completed history. |
 | **Leadership Development** | leaders | The 48-lesson course, plus the leadership library pages. |

@@ -780,6 +780,8 @@ def test_cleaning_seed_upgrades_an_existing_database(tmp_path, monkeypatch):
     conn.executescript("""
         CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         INSERT INTO meta VALUES ('seeded', '2026-09-01 09:00');
+        -- about the cleaning seed, not the later sign-off conversion
+        INSERT INTO meta VALUES ('sign_off_checklists_2026_10_30', '2026-10-30 00:00');
         CREATE TABLE checklist_templates (id INTEGER PRIMARY KEY, name TEXT NOT NULL,
             daypart TEXT NOT NULL, area TEXT NOT NULL DEFAULT 'All',
             sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);

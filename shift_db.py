@@ -735,6 +735,21 @@ LIST_ADDITIONS = [
      rf"\boffice\b.*\b{_CLEANING}|\b{_CLEANING}\w*\b.*\boffice\b"),
 ]
 
+# The Operator's checklists from October 30, 2026: six one-tap sign-offs.
+# The full checklists stay on paper in the restaurant; the app records that
+# each one was done (who, when) so the scorecard can measure it. Every
+# leader sees all six (side "both"). (name, daypart, area) in page order.
+SIGN_OFF_KEY = "sign_off_checklists_2026_10_30"
+SIGN_OFF_ITEM = "Done — the full checklist in the restaurant is complete"
+SIGN_OFF_LISTS = [
+    ("FOH Opening", "breakfast", "Front Counter"),
+    ("BOH Opening", "breakfast", "Kitchen"),
+    ("FOH Changeover", "lunch", "Front Counter"),
+    ("BOH Changeover", "lunch", "Kitchen"),
+    ("FOH Closing", "dinner", "Front Counter"),
+    ("BOH Closing", "dinner", "Kitchen"),
+]
+
 SEED_TEMPLATES = [
     ("FOH Opening", "breakfast", "Front Counter", [
         ("Registers + ServicePoint logged in and tested", False),
@@ -853,6 +868,7 @@ def init_db() -> None:
         conn.execute("BEGIN IMMEDIATE")
         try:
             _migrate(conn)
+            fresh = not conn.execute("SELECT 1 FROM meta WHERE key='seeded'").fetchone()
             _seed_base(conn)
             _seed_closing_drains(conn)
             _seed_list_additions(conn)
@@ -862,6 +878,7 @@ def init_db() -> None:
             _seed_hub(conn)
             _seed_sides_by_name(conn)
             _seed_checklist_view_picks(conn)
+            _seed_sign_off_lists(conn, fresh)
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -1139,6 +1156,84 @@ def _seed_checklist_view_picks(conn) -> None:
                 done.append(f"{leader['name']} → {CHECKLIST_VIEW_LABELS[view].lower()} ({how})")
             print(f"shift_db: who sees which checklists — {'; '.join(done)}")
         conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, now_stamp()))
+
+
+def _seed_sign_off_lists(conn, fresh: bool) -> None:
+    """Once, on the live store's database: the checklists become the six
+    SIGN_OFF_LISTS, each a single one-tap item, seen by every leader. An
+    active list with the same name is kept and converted (its history and
+    scorecard carry on; runs already started keep their items); a missing
+    one is created, owing nothing until the next day so a list added late
+    in the day isn't scored as missed; every other active list is retired
+    (its history stays, and it can be restored in Admin). A fresh install
+    keeps the detailed demo lists and just marks this done."""
+    if conn.execute("SELECT 1 FROM meta WHERE key=?", (SIGN_OFF_KEY,)).fetchone():
+        return
+    if not fresh:
+        keep, kept, made = set(), [], []
+        tomorrow = (date.fromisoformat(today_local()) + timedelta(days=1)).isoformat()
+        for sort, (name, daypart, area) in enumerate(SIGN_OFF_LISTS):
+            same = _active_lists_named(conn, name)
+            if same:
+                tid = same[0]["id"]
+                conn.execute(
+                    "UPDATE checklist_templates SET daypart=?, sort=?, side='both', "
+                    "frequency='daily', due_weekday=NULL WHERE id=?", (daypart, sort, tid))
+                conn.execute("DELETE FROM checklist_template_items WHERE template_id=?",
+                             (tid,))
+                _log_schedule(conn, tid)
+                kept.append(name)
+            else:
+                tid = conn.execute(
+                    "INSERT INTO checklist_templates (name, daypart, area, sort, "
+                    "frequency, side) VALUES (?,?,?,?,'daily','both')",
+                    (name, daypart, area, sort)).lastrowid
+                conn.execute(
+                    "INSERT INTO checklist_schedule_log (template_id, changed_on, "
+                    "frequency, active) VALUES (?,?,'daily',1)", (tid, tomorrow))
+                made.append(name)
+            conn.execute(
+                "INSERT INTO checklist_template_items (template_id, label, critical, "
+                "sort) VALUES (?,?,0,0)", (tid, SIGN_OFF_ITEM))
+            keep.add(tid)
+        retired = []
+        for t in conn.execute("SELECT id, name FROM checklist_templates WHERE active=1 "
+                              "ORDER BY sort, id").fetchall():
+            if t["id"] not in keep:
+                conn.execute("UPDATE checklist_templates SET active=0 WHERE id=?",
+                             (t["id"],))
+                _log_schedule(conn, t["id"])
+                retired.append(t["name"])
+        print(f"shift_db: checklists are now six one-tap sign-offs — kept: "
+              f"{', '.join(kept) or 'none'}; added: {', '.join(made) or 'none'}; "
+              f"retired ({len(retired)}): {', '.join(retired) or 'none'}")
+    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (SIGN_OFF_KEY, now_stamp()))
+
+
+def sign_off_mode() -> bool:
+    """True when every active checklist is a daily one-tap sign-off (a
+    single item) — the Checklists page then shows the day as one list."""
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            "SELECT t.frequency, (SELECT COUNT(*) FROM checklist_template_items i "
+            "WHERE i.template_id = t.id) AS n FROM checklist_templates t "
+            "WHERE t.active=1").fetchall()
+    return bool(rows) and all(r["frequency"] == "daily" and r["n"] == 1 for r in rows)
+
+
+def run_items(run_ids: list[int]) -> dict[int, list[dict]]:
+    """The items of several runs at once: {run_id: [items in order]}."""
+    if not run_ids:
+        return {}
+    marks = ",".join("?" * len(run_ids))
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            f"SELECT * FROM checklist_run_items WHERE run_id IN ({marks}) "
+            "ORDER BY run_id, sort, id", run_ids).fetchall()
+    out: dict[int, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["run_id"], []).append(dict(r))
+    return out
 
 
 def _seed_sides_by_name(conn) -> None:
