@@ -234,3 +234,58 @@ def test_sign_off_mode_needs_every_list_to_be_one_tap(client):
     shift_db.update_template(foh["id"], "FOH Opening", "breakfast", "Front Counter",
                              [("Doors", False), ("Tills", False)])
     assert not shift_db.sign_off_mode()                      # a detailed list
+
+
+def test_a_same_day_change_to_a_new_list_supersedes_its_start_tomorrow(client, clock):
+    clock["t"] = THURSDAY_LUNCH
+    convert()
+    boh = next(t for t in shift_db.all_templates() if t["name"] == "BOH Changeover")
+    shift_db.update_template(boh["id"], "BOH Changeover", "lunch", "Kitchen",
+                             [(shift_db.SIGN_OFF_ITEM, False)], frequency="weekly", due_weekday=4)
+    with shift_db.closing(shift_db.connect()) as conn:
+        log = [tuple(r) for r in conn.execute(
+            "SELECT changed_on, frequency, active FROM checklist_schedule_log "
+            "WHERE template_id=? ORDER BY changed_on, id", (boh["id"],))]
+    assert log == [("2026-10-22", "weekly", 1)]
+
+
+def test_the_score_counts_lists_not_old_items(client, clock):
+    clock["t"] = datetime(2026, 10, 21, 12, 7)               # Wednesday, still detailed
+    leader(client)
+    page(client)
+    wed = next(r for r in shift_db.runs_for_date("2026-10-21") if r["name"] == "FOH Opening")
+    _, items = shift_db.run_with_items(wed["id"])
+    for i in items:                                          # one long list, all done
+        shift_db.set_item_done(i["id"], True, "Grace")
+    clock["t"] = THURSDAY_LUNCH
+    convert()
+    page(client)                                             # Thursday: nothing signed off
+    clock["t"] = FRIDAY_LUNCH
+    html = page(client)
+    # Wednesday 1 of 4 lists done + Thursday 0 of 4 = 1 of 8, not ~9 of 40 items
+    assert '<span class="num">12<small>%</small></span>' in html
+    card = next(c for c in shift_db.checklist_scorecard() if c["name"] == "FOH Opening")
+    assert card["recent"]["pct"] == 50                       # Wed done, Thu missed: half
+
+
+def test_retired_weekly_lists_stay_off_the_sign_off_page(client):
+    leader(client)
+    page(client)
+    weekly = next(r for r in shift_db.runs_for_date("2026-10-23")
+                  if r["name"] == "Drive Thru — Weekly")
+    shift_db.set_item_done(shift_db.run_with_items(weekly["id"])[1][0]["id"], True, "Grace")
+    convert()
+    html = page(client)
+    assert "Drive Thru — Weekly" not in html and "Weekly &amp; monthly" not in html
+
+
+def test_show_all_still_appears_when_a_list_is_hidden(client):
+    convert()
+    shift_db.create_template("Patio check", "dinner", "Patio", [("Done", False)], side="foh")
+    leader(client, "Jabina", "3333", view="boh")
+    html = page(client)
+    assert "Patio check" not in html and "Your back of house lists." in html
+    html = page(client, "/shift/checklists?lists=all")
+    action = tick_form(html, "Patio check")
+    resp = client.post(action, data={"done": "1", "back": "checklists", "lists": "all"})
+    assert "/shift/checklists?lists=all#run-" in resp.headers["Location"]

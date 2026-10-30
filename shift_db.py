@@ -1391,7 +1391,11 @@ def _seed_schedule_log(conn) -> None:
 
 def _log_schedule(conn, template_id: int) -> None:
     """Record a list's schedule as of today if it differs from its last
-    logged one (call after changing frequency or active)."""
+    logged one (call after changing frequency or active). A change made
+    today supersedes one logged for a later day (a list added late in a
+    day only starts owing the next day — see _seed_sign_off_lists)."""
+    conn.execute("DELETE FROM checklist_schedule_log WHERE template_id=? AND changed_on > ?",
+                 (template_id, today_local()))
     t = conn.execute("SELECT frequency, active FROM checklist_templates WHERE id=?",
                      (template_id,)).fetchone()
     last = conn.execute(
@@ -1766,9 +1770,16 @@ def checklist_scorecard(today: str | None = None) -> list[dict]:
             if not rows:
                 return None
             total = sum(r["total"] for r in rows)
+            if t["item_count"] == 1:
+                # A one-tap sign-off: each period counts once, so days from
+                # before it was one item (a long detailed list) don't swamp it.
+                pct = round(sum(r["done"] / r["total"] for r in rows if r["total"])
+                            / len(rows) * 100)
+            else:
+                pct = round(sum(r["done"] for r in rows) / total * 100) if total else 0
             return {
                 "periods": len(rows),
-                "pct": round(sum(r["done"] for r in rows) / total * 100) if total else 0,
+                "pct": pct,
                 "complete": sum(1 for r in rows if r["complete"]),
                 "verified": sum(1 for r in rows if r["verified"] and r["checkable"]),
                 "verified_of": sum(1 for r in rows if r["checkable"]),

@@ -175,7 +175,7 @@ details.fold > a.row { background: var(--gray-050); }
     {% if r.finished %}<span class="done-mark" title="Checked off">{{ icon('checkcircle') }}</span>
     {% elif r.item and r.can_edit %}
     <form class="tick-form" method="post" action="{{ url_for('shift.toggle_item', item_id=r.item.id) }}">
-      <input type="hidden" name="done" value="1"><input type="hidden" name="back" value="checklists">
+      <input type="hidden" name="done" value="1"><input type="hidden" name="back" value="checklists">{% if show_all %}<input type="hidden" name="lists" value="all">{% endif %}
       <button class="tick" type="submit" aria-label="Check off: {{ r.name }}"></button>
     </form>
     {% else %}<span class="wait-mark" aria-hidden="true"></span>{% endif %}
@@ -187,7 +187,7 @@ details.fold > a.row { background: var(--gray-050); }
     </a>
     {% if r.finished and r.item and r.can_edit %}
     <form class="undo-form" method="post" action="{{ url_for('shift.toggle_item', item_id=r.item.id) }}">
-      <input type="hidden" name="done" value="0"><input type="hidden" name="back" value="checklists">
+      <input type="hidden" name="done" value="0"><input type="hidden" name="back" value="checklists">{% if show_all %}<input type="hidden" name="lists" value="all">{% endif %}
       <button class="linkbtn" type="submit" aria-label="Undo: {{ r.name }}">Undo</button>
     </form>
     {% endif %}

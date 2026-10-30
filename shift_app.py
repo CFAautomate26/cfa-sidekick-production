@@ -534,11 +534,15 @@ def checklists():
             if leader_id else "all")
     sides = shift_db.sides_for_view(view)
     show_all = request.args.get("lists") == "all"
+    sign_off = shift_db.sign_off_mode()
+    # Only worth a word when the view hides a list this page would show
+    # (that day's, or a live one); the sign-off page shows only live lists.
+    shown = ([r for r in runs if r["frequency"] == "daily" and r.get("scheduled", True)]
+             if sign_off else runs)
+    filtered = bool(sides) and any(
+        x["side"] not in sides for x in shown + shift_db.all_templates())
     if sides and not show_all:
         runs = [r for r in runs if r["side"] in sides]
-    # Only worth a word when the view hides some list.
-    filtered = bool(sides) and any(t["side"] not in sides for t in shift_db.all_templates())
-    sign_off = shift_db.sign_off_mode()
     parts = shift_db.DAYPARTS
     now_part = shift_db.current_daypart()
     daypart = _valid_checklist_daypart(request.args.get("daypart"))
@@ -616,12 +620,17 @@ def checklists():
     # The scorecard's headline number: daily-list items checked off over the
     # last 7 finished open days (lists lock when their day ends, so it's real).
     score_done = score_total = score_days = 0
+    # With one-tap sign-offs it counts lists checked off instead.
     for card in shift_db.checklist_scorecard():
         if card["frequency"] == "daily":
             recent = card["history"][:7]
             score_days = max(score_days, len(recent))
-            score_done += sum(h["done"] for h in recent)
-            score_total += sum(h["total"] for h in recent)
+            if sign_off:
+                score_done += sum(1 for h in recent if h["complete"])
+                score_total += len(recent)
+            else:
+                score_done += sum(h["done"] for h in recent)
+                score_total += sum(h["total"] for h in recent)
 
     lists = (([open_now] if open_now else []) + also_due) if live else mine
     return render_template(
@@ -634,8 +643,9 @@ def checklists():
         daypart_names={dp: short(dp) for dp in parts},
         mine=mine, open_now=open_now, open_items=open_items, open_more=open_more,
         also_due=also_due, done_now=done_now, allday=allday, coming=coming,
-        week=[r for r in runs if r["frequency"] == "weekly"],
-        month=[r for r in runs if r["frequency"] == "monthly"],
+        # Sign-offs are all daily: any weekly/monthly run is a retired list's.
+        week=[] if sign_off else [r for r in runs if r["frequency"] == "weekly"],
+        month=[] if sign_off else [r for r in runs if r["frequency"] == "monthly"],
         list_count=len(lists), finished_count=sum(1 for r in mine if r["finished"]),
         critical_left=sum(r["critical_remaining"] for r in lists),
         allday_done=sum(r["done"] for r in allday),
@@ -713,7 +723,8 @@ def toggle_item(item_id):
     run, _ = shift_db.run_with_items(run_id)
     # Ticked on the Checklists page (a one-tap sign-off): back to that day.
     back = (url_for("shift.checklists", **(
-        {} if run["run_date"] == shift_db.today_local() else {"date": run["run_date"]}))
+        {} if run["run_date"] == shift_db.today_local() else {"date": run["run_date"]}),
+        **({"lists": "all"} if request.form.get("lists") == "all" else {}))
         + f"#run-{run_id}" if request.form.get("back") == "checklists" else None)
     if not _can_edit_run(run):
         if request.form.get("ajax") == "1":
