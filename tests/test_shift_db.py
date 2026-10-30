@@ -2747,3 +2747,55 @@ def test_restore_fills_in_missing_or_unknown_sides(isolated_db):
     side = {t["name"]: t["side"] for t in shift_db.all_templates()}
     assert (side["BOH Opening"], side["FOH Opening"], side["FOH Closing"]) == \
         ("boh", "foh", "both")
+
+
+def _rerun_view_picks():
+    with shift_db.closing(shift_db.connect()) as conn, conn:
+        conn.execute("DELETE FROM meta WHERE key=?", (shift_db.CHECKLIST_VIEW_PICKS_KEY,))
+    shift_db.init_db()
+
+
+def test_operators_checklist_picks_land_on_the_right_logins(isolated_db, capsys):
+    for name in ("Aron", "Jubina", "Sarath Kanna", "Avery", "Grace F", "Pru", "Samira",
+                 "NeHa", "Riya", "Sam", "Keira"):
+        shift_db.add_leader(name, "4721")
+    ids = {l["name"]: l["id"] for l in shift_db.leaders()}
+    with shift_db.closing(shift_db.connect()) as conn, conn:   # remembered from a Slack pull
+        conn.execute("UPDATE leaders SET slack_id='U09BRLFHRUK' WHERE id=?", (ids["Pru"],))
+    _rerun_view_picks()
+    views = {l["name"]: l["checklist_side"] for l in shift_db.leaders()}
+    assert views == {"Aron": "boh", "Jubina": "boh", "Sarath Kanna": "boh",
+                     "Avery": "foh", "Grace F": "foh", "Pru": "foh", "Samira": "foh",
+                     "NeHa": "all", "Riya": "all", "Sam": "all", "Keira": "all"}
+    log = capsys.readouterr().out
+    assert "Aron → back of house (exact)" in log and "Grace F → front of house (first)" in log
+    assert "Sarath Kanna → back of house (exact)" in log
+    assert "Pru → front of house (remembered)" in log and "NeHa → every checklist (exact)" in log
+    assert "not set" not in log
+
+
+def test_operators_checklist_picks_apply_once_and_log_misses(isolated_db, capsys):
+    for name in ("Grace", "Grace Fraser", "Aron"):              # two Graces: no guessing
+        shift_db.add_leader(name, "4721")
+    shift_db.add_leader("Avery", "4721")
+    avery = next(l["id"] for l in shift_db.leaders() if l["name"] == "Avery")
+    shift_db.set_leader_active(avery, False)                     # inactive: not set
+    _rerun_view_picks()
+    views = {l["name"]: l["checklist_side"] for l in shift_db.leaders(include_inactive=True)}
+    assert views == {"Grace": "all", "Grace Fraser": "foh", "Aron": "boh", "Avery": "all"}
+    log = capsys.readouterr().out
+    assert "Avery Sharpe: no login found, not set" in log
+    assert "Samira Z: no login found, not set" in log
+    aron = next(l["id"] for l in shift_db.leaders() if l["name"] == "Aron")
+    shift_db.set_leader_checklist_view(aron, "all")              # changed later in Admin
+    shift_db.init_db()                                           # next boot: left alone
+    assert shift_db.get_leader(aron)["checklist_side"] == "all"
+
+
+def test_operators_checklist_picks_on_a_fresh_install(isolated_db):
+    with shift_db.closing(shift_db.connect()) as conn:          # marked done, nothing set
+        assert conn.execute("SELECT 1 FROM meta WHERE key=?",
+                            (shift_db.CHECKLIST_VIEW_PICKS_KEY,)).fetchone()
+    shift_db.add_leader("Aron", "4721")
+    shift_db.init_db()
+    assert shift_db.leaders()[0]["checklist_side"] == "all"
