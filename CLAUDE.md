@@ -35,7 +35,13 @@ Canada.
   rest are in the ☰ menu.
   Guide: [docs/team-hub.md](docs/team-hub.md).
 - `shift_app.py` + `shift_db.py` — the leader tools at `/shift` (formerly "Shift Lead")
-  (Huddle-style: daily/weekly/monthly checklists with who-did-what stamps,
+  (since Oct 30, 2026 the live store's checklists are six one-tap
+  sign-offs — FOH/BOH Opening, Changeover, Closing, `SIGN_OFF_LISTS`,
+  converted once on deploy, side "both"; when every active list is a
+  single daily item (`shift_db.sign_off_mode`) Checklists shows the day as
+  one list with tick/undo right there; a fresh install still seeds the
+  detailed lists below.
+  Huddle-style: daily/weekly/monthly checklists with who-did-what stamps,
   Owner + Manager check, lock-at-period-end, and a consistency scorecard
   at `/shift/checklists/scorecard` — station cleaning sheets pinned in
   `shift_cleaning.py`; shift notes, announcements with read receipts

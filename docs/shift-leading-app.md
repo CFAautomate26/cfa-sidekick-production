@@ -14,7 +14,23 @@ deployment. Team Hub's look, navigation and sign-in are described in
   notes and announcements are in the ☰ menu (guests and repairs with a red
   count while one needs attention). Opening the app still starts the
   day's checklists, so the scorecard counts the day.
-- **Shift checklists** — FOH/BOH opening, breakfast→lunch transition,
+- **Six one-tap checklists (since October 30, 2026)** — FOH Opening, BOH
+  Opening, FOH Changeover, BOH Changeover, FOH Closing and BOH Closing. The
+  full checklists stay on paper in the restaurant; in the app each is one
+  check-off once the paper list is done, stamped *who* and *when*, so the
+  scorecard measures it. Every leader sees all six (side "both"). When
+  every active list is a single daily item, Checklists shows the day as one
+  list, opening to closing, with a circle to tick each one off right there
+  (and Undo); one not ticked once its daypart is over reads "Not checked
+  off" in red, and past days are read-only except for the Operator. The
+  live lists were converted once on deploy (`SIGN_OFF_LISTS` in
+  `shift_db.py`): the four existing Opening/Closing lists were kept (same
+  history and scorecard), the two Changeovers added (scored from the next
+  day), and every other list retired — still in History, and restorable
+  from Admin › Checklist templates, which brings the detailed page back. A
+  fresh install still seeds the detailed lists described below.
+- **Shift checklists** (the detailed lists, retired from the live store in
+  October 2026) — FOH/BOH opening, breakfast→lunch transition,
   afternoon reset, and closing lists generated fresh every day. Tapping an
   item stamps *who* checked it and *when*. Items marked **critical**
   (food-safety / cash) are flagged red until done. Both closing lists carry
