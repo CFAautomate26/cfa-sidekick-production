@@ -264,7 +264,7 @@ def test_no_leaders_yet(client):
 def test_each_list_has_a_side_in_the_template_editor(client, team):
     login(client)
     new = page(client, "/shift/admin/templates/new")
-    assert '<option value="" selected>Work it out from the area</option>' in new
+    assert '<option value="" selected>Work it out from the name or area</option>' in new
     client.post("/shift/admin/templates/new", data={
         "name": "Patio sweep", "daypart": "allday", "area": "Dining Room", "items": "Sweep"})
     patio = next(t for t in shift_db.all_templates() if t["name"] == "Patio sweep")
@@ -276,7 +276,7 @@ def test_each_list_has_a_side_in_the_template_editor(client, team):
     edit = page(client, f"/shift/admin/templates/{patio['id']}")
     assert 'set on <a href="/shift/admin/checklist-views">Who sees which checklists</a>' in edit
     assert '<option value="both" selected>Front and back leaders</option>' in edit
-    assert "Work it out from the area" not in edit
+    assert "Work it out from the name or area" not in edit
     listing = " ".join(page(client, "/shift/admin/templates").split())
     assert "Dining Room · Front and back · 1 items" in listing
     assert "Kitchen · Back of house · 10 items" in listing

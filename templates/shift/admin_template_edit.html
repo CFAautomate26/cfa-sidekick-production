@@ -68,7 +68,7 @@ month; each locks when its period ends.</span></p>
   </div>
   <label class="field" for="t-side">Who sees it</label>
   <select id="t-side" name="side">
-    {% if not template %}<option value="" selected>Work it out from the area</option>{% endif %}
+    {% if not template %}<option value="" selected>Work it out from the name or area</option>{% endif %}
     {% for sd in CHECKLIST_SIDES %}
     <option value="{{ sd }}" {{ 'selected' if template and template.side == sd }}>{{ CHECKLIST_SIDE_LABELS[sd] }} leaders</option>
     {% endfor %}
