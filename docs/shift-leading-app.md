@@ -51,7 +51,11 @@ deployment. Team Hub's look, navigation and sign-in are described in
   out from its area unless one is picked. Stored as `leaders.checklist_side`
   (`all`/`foh`/`boh`) and `checklist_templates.side` (`foh`/`boh`/`both`);
   both ride in backups, and a restored list missing its side gets it from
-  its area.
+  its area. The Operator's first picks (October 30, 2026) were applied once
+  on deploy from `CHECKLIST_VIEW_PICKS` in `shift_db.py` — by Slack id on the
+  pinned roster, matched to logins the way the roster pull matches, with
+  each login set (or anyone not found) in the deploy log; changes made on
+  the page afterwards stand.
   Each list carries the paper sheet's **Owner** (roster name) and
   **Manager check** (a leader taps "I checked this station" — stamped).
   A list **locks when its day/week/month ends** so the numbers reflect
