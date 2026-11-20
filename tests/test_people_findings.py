@@ -1155,3 +1155,36 @@ def test_f8_the_leaders_page_says_when_a_name_is_too_short_to_spot_without_its_c
     rk.add_subject(world, "ada", None)
     html = page(kit.open_as(world, "operator"), "/shift/reviews/leaders")
     assert html.count("A short name:") == 1 and "“Jo” is taken out only where it is written with its capital" in html
+
+
+# --- the routes these fixes added open only for the people they are meant for ------------------
+
+def test_the_new_actions_are_closed_to_everyone_else(world, monkeypatch):
+    made = rk.shared_review(world)
+    posting_id = live()
+    app_id = applied(posting_id)
+    operator_only = [("/shift/people/settings/confirm", {"key": "min_wage_general"}),
+                     (f"/shift/reviews/review/{made['review']}/concern-followed", {"confirm": "1"})]
+    hiring_only = [(f"/shift/hiring/candidates/{app_id}/more-time", {}),
+                   (f"/shift/hiring/candidates/{app_id}/answers", {"q_1": "Typed by someone with no access."})]
+    for who in ("lena", "ada", "rae", "hari"):
+        client = kit.open_as(world, who)
+        for path, form in operator_only + ([] if who == "hari" else hiring_only):
+            resp = client.post(path, data=form)
+            assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people", (who, path)
+            assert "That page isn't available on your sign-in." in flashed(client), (who, path)
+    member = cfa_app.app.test_client()
+    kit.sign_in(member, "member")
+    stranger = cfa_app.app.test_client()
+    for path, form in operator_only + hiring_only:
+        assert member.post(path, data=form).headers["Location"].endswith("/hub/"), path
+        assert "/login" in stranger.post(path, data=form).headers["Location"], path
+        assert member.get(path).status_code in (302, 405) and stranger.get(path).status_code in (302, 405)
+    assert table("hr_answers") == [] and people_db.settings_all()["min_wage_general"]["updated_at"] is None
+    assert rdb.get_review(made["review"])["concern_followed_at"] is None
+    # and a locked session cannot use them either
+    operator = cfa_app.app.test_client()
+    kit.sign_in(operator, "operator")
+    resp = operator.post("/shift/people/settings/confirm", data={"key": "min_wage_general"})
+    assert "/shift/people/unlock" in resp.headers["Location"]
+    assert people_db.settings_all()["min_wage_general"]["updated_at"] is None
