@@ -54,7 +54,11 @@ CREATE TABLE IF NOT EXISTS hr_criteria (
   id INTEGER PRIMARY KEY, posting_id INTEGER NOT NULL REFERENCES hr_postings(id) ON DELETE CASCADE,
   sort INTEGER NOT NULL, name TEXT NOT NULL, dimension_key TEXT, definition TEXT NOT NULL DEFAULT '',
   anchors_json TEXT NOT NULL DEFAULT '[]', question TEXT NOT NULL DEFAULT '',
-  interview_question TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1);
+  interview_question TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1,
+  -- The exact wording of a question the Operator confirmed is about a guest
+  -- or the work, not about the applicant (see question_hits). A question
+  -- that is changed afterwards no longer matches and is checked again.
+  question_ok TEXT NOT NULL DEFAULT '', interview_ok TEXT NOT NULL DEFAULT '');
 
 -- Exact copies kept for the three-year record: the posting as shown, plus
 -- the blank application form. Personal content: only the hiring contact's
@@ -144,7 +148,9 @@ CREATE INDEX IF NOT EXISTS idx_hr_notes_application ON hr_notes (application_id,
 
 
 # Columns added after a store may already have been created.
-_ADDED_COLUMNS = (("hr_applications", "duplicate_of", "INTEGER"),)
+_ADDED_COLUMNS = (("hr_applications", "duplicate_of", "INTEGER"),
+                  ("hr_criteria", "question_ok", "TEXT NOT NULL DEFAULT ''"),
+                  ("hr_criteria", "interview_ok", "TEXT NOT NULL DEFAULT ''"))
 
 
 def init_schema(conn) -> None:
@@ -553,6 +559,23 @@ def _free_slug(conn, title: str) -> str:
     return slug
 
 
+def _slug_follows_title(conn, posting_id: int) -> None:
+    """A posting's public address is made from its title. Until the posting
+    has been public the address follows the title, so a title that was
+    corrected before publishing ("Young energetic counter girl" to "Team
+    member") never goes live under its first wording. Call it when a draft
+    is saved and again just before it is published. Once a posting has
+    been public its address is frozen: links to it are already out."""
+    row = conn.execute("SELECT slug, title, status FROM hr_postings WHERE id=?", (posting_id,)).fetchone()
+    if not row or row["status"] != "draft" or conn.execute(
+            "SELECT 1 FROM hr_snapshots WHERE posting_id=? LIMIT 1", (posting_id,)).fetchone():
+        return
+    base = _slug_base(row["title"])
+    if row["slug"] == base or re.fullmatch(re.escape(base) + r"-[0-9]+", row["slug"]):
+        return
+    conn.execute("UPDATE hr_postings SET slug=? WHERE id=?", (_free_slug(conn, row["title"]), posting_id))
+
+
 def _read_money(raw, label: str, problems: list[str]) -> float | None:
     text = _line(raw, 20)
     if not text:
@@ -683,18 +706,7 @@ def _problems(posting: dict, criteria: list[dict], conf: dict) -> list[str]:
     if len(questions) > MAX_QUESTIONS:
         problems.append(f"Applicants can be asked {MAX_QUESTIONS} questions at most. "
                         "Take a question off a criterion (it can stay as an interview criterion).")
-    for c in criteria:
-        if not c.get("active", 1):
-            continue
-        for which, text in (("question for applicants", c.get("question")),
-                            ("interview question", c.get("interview_question"))):
-            asked = never_asked(text)
-            if asked:
-                term, about = asked[0]
-                problems.append(
-                    f"The {which} under “{c.get('name') or 'a criterion'}” asks about {about} "
-                    f"(“{term}”). An application or an interview may not ask that. Ask about "
-                    "the work instead.")
+    problems += [block["problem"] for block in question_blocks({"criteria": criteria})]
     return problems
 
 
@@ -705,40 +717,78 @@ def compliance_problems(posting: dict) -> list[str]:
     return _problems(posting, posting.get("criteria", []), settings())
 
 
-# What an application or an interview may not ask (the Human Rights Code
-# makes asking itself the breach). A question for applicants, or an
-# interview question, that uses one of these phrases fails the publish
-# check. Phrases on purpose, so a question about the work ("How would you
-# look after a family with young kids?") passes. A word list cannot read a
-# question for meaning: the Operator still reads every question before
-# publishing.
+# What an application or an interview may not ask (asking can itself
+# breach the Human Rights Code). Two nets, because a word list cannot read
+# a question for meaning:
+#
+# * NEVER_ASK: phrases that ask about a ground. They are looked for
+#   everywhere in a posting (they flag a description, for the "I have read
+#   these" tick).
+# * Inside a question for applicants or an interview question the net is
+#   much wider (question_hits): the same phrases with their plurals, the
+#   words in QUESTION_ONLY, and every word on the ground lists the review
+#   notes are checked with. Any hit holds the posting back. It cannot go
+#   live until the question is reworded, or the Operator confirms that
+#   this exact question is about a guest or the work and not about the
+#   applicant ("Describe a time you helped a guest with a disability").
+#   That confirmation is the Operator's alone, per question, and logged.
+#
+# Even so it catches listed words only: a question that asks about a
+# ground in words that are on no list gets through, so the Operator still
+# reads every question before publishing.
 NEVER_ASK = (
     ("age", ("how old", "your age", "date of birth", "birth date", "birthdate", "birthday",
              "year of birth", "when were you born", "what year did you graduate",
-             "when did you graduate", "year you graduated", "year did you finish")),
+             "when did you graduate", "year you graduated", "year did you finish", "dob",
+             "what grade", "which grade")),
     ("pregnancy or family", ("pregnant", "pregnancy", "marital", "married", "have children",
                              "have kids", "have any children", "have any kids", "your children",
                              "your kids", "your child", "childcare", "child care", "your husband",
                              "your wife", "your spouse", "your boyfriend", "your girlfriend",
-                             "maiden name", "plan to have")),
+                             "maiden name", "plan to have", "are you single", "divorced",
+                             "children do you have", "kids do you have", "start a family",
+                             "family commitments", "live with your parents", "emergency contact",
+                             "next of kin")),
     ("religion", ("religion", "religious", "church", "mosque", "temple", "synagogue", "your faith",
                   "what faith", "do you pray")),
     ("citizenship or where someone is from", (
         "citizen", "citizenship", "nationality", "born", "birthplace", "place of birth",
         "country of origin", "where are you from", "where you are from", "ethnicity", "your race",
-        "mother tongue", "native language", "first language", "immigration status")),
+        "mother tongue", "native language", "first language", "immigration status",
+        "what country", "country are you from", "language at home", "speak at home",
+        "native tongue", "ethnic background")),
     ("health or disability", ("disability", "disabled", "medical", "medication", "diagnosis",
                               "diagnosed", "illness", "health condition", "mental health", "wsib",
-                              "workers comp")),
+                              "workers comp", "workers' compensation", "workers compensation",
+                              "physical limitation", "handicap", "handicapped", "sick leave",
+                              "use drugs")),
     ("a record of offences", ("criminal", "arrested", "convicted", "conviction", "charged with",
                               "record of offences", "police record", "police check",
-                              "background check")),
-    ("gender or orientation", ("gender", "sexual orientation", "your sex")),
+                              "background check", "trouble with the police",
+                              "trouble with the law", "pardon", "record suspension")),
+    ("gender or orientation", ("gender", "sexual orientation", "your sex", "male or female")),
     ("a SIN, a photo or a licence", ("social insurance", "sin number", "your sin", "photo",
                                      "photograph", "driver's licence", "drivers licence",
                                      "driver's license", "drivers license", "your height",
-                                     "your weight")),
+                                     "your weight", "how tall", "how much do you weigh")),
+    ("income or why someone cannot work", ("government assistance", "social assistance",
+                                           "why can't you work", "why can you not work",
+                                           "why cannot you work")),
 )
+# Words that are fine in a description but hold a question back.
+QUESTION_ONLY = (
+    ("age", ("grade", "years old", "student", "students")),
+    ("pregnancy or family", ("single", "parents")),
+    ("religion", ("christmas", "easter")),
+    ("citizenship or where someone is from", ("country", "canadian", "language")),
+    ("health or disability", ("limitation", "physically able", "drugs", "do you drink")),
+    ("a record of offences", ("police", "offence", "offense", "crime")),
+    ("a SIN, a photo or a licence", ("tall", "weigh", "weight", "height", "postal code")),
+)
+_AGE_NUMBER = re.compile(r"\b(?:over|under|at\s+least|older\s+than|younger\s+than)\s+\d{1,2}\b", re.I)
+QUESTION_OK_LABEL = "This question is about a guest or the work, not about the applicant."
+QUESTION_WHICH = {"question": ("question for applicants", "question_ok"),
+                  "interview": ("interview question", "interview_ok")}
 NEVER_ASK_ADVICE = ("An application may not ask about this, and a posting may not screen on it. "
                     "Take it out, or say what the work needs instead.")
 GROUND_ADVICE = ("This can point at a protected ground ({category}). A posting may not screen on "
@@ -748,25 +798,111 @@ GROUND_ADVICE = ("This can point at a protected ground ({category}). A posting m
 _GROUNDS = ("health", "family", "religion", "age", "origin", "gender", "leave")
 
 
-def _phrase(term: str):
+def _phrase(term: str, loose: bool = False):
+    """Whole words, any case, spaces or hyphens between them. loose=True
+    also takes a plain plural or possessive of the last word ("health
+    conditions", "limitation's")."""
     return re.compile(r"(?<![\w])" + r"[\s-]+".join(
-        re.escape(part) for part in re.split(r"[\s-]+", term)) + r"(?![\w])", re.I)
+        re.escape(part) for part in re.split(r"[\s-]+", term))
+        + (r"(?:s|es|'s)?" if loose else "") + r"(?![\w])", re.I)
 
 
 _NEVER_ASK_PATTERNS = [(about, [(term, _phrase(term)) for term in terms]) for about, terms in NEVER_ASK]
+_QUESTION_PATTERNS = [(about, [(term, _phrase(term, loose=True)) for term in terms])
+                      for about, terms in NEVER_ASK + QUESTION_ONLY]
 
 
-def never_asked(text) -> list[tuple[str, str]]:
-    """[(the phrase found, what it asks about)] for anything in `text` an
-    application or an interview may not ask, in the order found."""
+def _found(text, groups) -> list[tuple[str, str]]:
     text = str(text or "").replace("’", "'")
     found = []
-    for about, patterns in _NEVER_ASK_PATTERNS:
+    for about, patterns in groups:
         for term, pattern in patterns:
             match = pattern.search(text)
             if match:
                 found.append((match.start(), -len(term), term, about))
     return [(term, about) for _, _, term, about in sorted(found)]
+
+
+def never_asked(text) -> list[tuple[str, str]]:
+    """[(the phrase found, what it asks about)] for anything in `text` an
+    application or an interview may not ask, in the order found."""
+    return _found(text, _NEVER_ASK_PATTERNS)
+
+
+def question_hits(text) -> list[tuple[str, str, bool]]:
+    """Everything in a question (for applicants, or for the interview) that
+    may ask about a protected ground: [(the words found, what they can ask
+    about, True when it is one of the NEVER_ASK phrases)]. The phrases
+    first, then the question-only words, a number that reads as an age,
+    and every word on the ground lists review notes are checked with.
+    Listed words only: it cannot read a question for meaning."""
+    text = str(text or "").replace("’", "'")
+    plain = {term for term, _ in never_asked(text)}
+    hits = [(term, about, term in plain) for term, about in _found(text, _QUESTION_PATTERNS)]
+    number = _AGE_NUMBER.search(text)
+    if number:
+        hits.append((" ".join(number.group(0).split()).lower(), "age", False))
+    hits += [(f["term"], f["category"].lower(), False) for f in people_ai.language_check(text)
+             if f["key"] in _GROUNDS]
+    out, seen = [], set()
+    for term, about, phrase in sorted(hits, key=lambda hit: not hit[2]):     # the phrases first
+        if term.casefold() not in seen:
+            seen.add(term.casefold())
+            out.append((term, about, phrase))
+    return out
+
+
+def question_blocks(posting: dict) -> list[dict]:
+    """The questions on this posting that hold it back: each uses words
+    that may ask about a protected ground, and the Operator has not
+    confirmed that exact wording as about a guest or the work. Each is
+    {"criterion_id", "which" ("question" or "interview"), "name", "term",
+    "about", "text", "problem" (the publish-check sentence)}."""
+    blocks = []
+    for c in posting.get("criteria", []):
+        if not c.get("active", 1):
+            continue
+        for which, (label, ok_column) in QUESTION_WHICH.items():
+            text = c.get("question" if which == "question" else "interview_question") or ""
+            hits = question_hits(text)
+            if not hits or (c.get(ok_column) or "") == text:
+                continue
+            term, about, phrase = hits[0]
+            name = c.get("name") or "a criterion"
+            said = (f"asks about {about} (“{term}”)" if phrase
+                    else f"uses “{term}”, which can ask about {about}")
+            blocks.append({
+                "criterion_id": c.get("id"), "which": which, "name": name, "term": term,
+                "about": about, "text": text,
+                "problem": (f"The {label} under “{name}” {said}. An application or an interview "
+                            "may not ask that. Ask about the work instead. If the question is "
+                            "about a guest or the work and not about the applicant, the "
+                            "Operator can confirm that here, under the publish check.")})
+    return blocks
+
+
+def confirm_question(posting_id: int, criterion_id: int, which: str, by: str) -> bool:
+    """The Operator confirms that one flagged question, exactly as it is
+    worded now, is about a guest or the work and not about the applicant.
+    Kept with the question; changing the question afterwards voids it.
+    Logged. True when something was recorded."""
+    if which not in QUESTION_WHICH:
+        return False
+    column = QUESTION_WHICH[which][1]                     # one of our two column names
+    source = "question" if which == "question" else "interview_question"
+    with closing(people_db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            f"SELECT c.{source} AS text, c.{column} AS ok, p.status FROM hr_criteria c "
+            "JOIN hr_postings p ON p.id=c.posting_id WHERE c.id=? AND c.posting_id=? AND c.active=1",
+            (criterion_id, posting_id)).fetchone()
+        if not row or row["status"] == "closed" or not row["text"] or row["ok"] == row["text"] \
+                or not question_hits(row["text"]):
+            return False
+        conn.execute(f"UPDATE hr_criteria SET {column}=? WHERE id=?", (row["text"], criterion_id))
+        people_db._audit(conn, by, "question confirmed as about the work", "posting", posting_id,
+                         f"criterion {criterion_id}, {QUESTION_WHICH[which][0]}")
+    return True
 
 
 # Words that should make a leader stop and read the posting again. They
@@ -786,7 +922,7 @@ WORDING_RULES = (
      "not how someone learned it or how they sound."),
     ("gendered", ("waitress", "hostess", "busboy", "busgirl", "salesman", "saleswoman"),
      "Use a title that fits anyone, such as server, host or team member."),
-    ("physical", ("able-bodied", "strong", "fit"),
+    ("physical", ("able-bodied", "strong", "fit", "be healthy", "good health", "physically fit"),
      "Name the duty instead, such as lifting boxes of up to 20 kg, so it is about the job."),
     ("pay", ("tips", "tip", "bonus", "bonuses"),
      "Posted pay means wages. Tips and bonuses can't be used to state it."),
@@ -802,6 +938,8 @@ def wording_flags(posting: dict) -> list[dict]:
     application may not ask about (the same word lists the review notes
     are checked with, plus NEVER_ASK). Plain word lists, no AI."""
     parts = [posting.get("title") or "", posting.get("description") or ""]
+    if posting.get("status") == "draft":         # the public address is read too, until it is frozen
+        parts.append(str(posting.get("slug") or "").replace("-", " "))
     for c in posting.get("criteria", []):
         if c.get("active", 1):
             parts += [c.get("name") or "", c.get("definition") or "", c.get("question") or "",
@@ -916,6 +1054,7 @@ def save_posting(posting_id: int, raw: dict, by: str, reviewed: bool = False) ->
         if not cur.rowcount:
             raise _Refused(["That posting is closed, so it can't be changed. Copy it to a new "
                             "draft instead."])
+        _slug_follows_title(conn, posting_id)
         _changed_while_open(conn, posting_id, by, reviewed, before)
 
     return _write(work)
@@ -940,13 +1079,27 @@ def _criterion_fields(raw: dict) -> tuple[dict, list[str]]:
     return fields, problems
 
 
-def add_criterion(posting_id: int, raw: dict, by: str, reviewed: bool = False) -> list[str]:
+def _confirmed(fields: dict, questions_ok: bool) -> tuple[str, str]:
+    """(question_ok, interview_ok) for a criterion being saved: the exact
+    wording, for a question that has hits, when the Operator ticked the
+    confirmation on the same form; otherwise empty."""
+    if not questions_ok:
+        return "", ""
+    return tuple(text if question_hits(text) else ""
+                 for text in (fields["question"], fields["interview_question"]))
+
+
+def add_criterion(posting_id: int, raw: dict, by: str, reviewed: bool = False,
+                  questions_ok: bool = False) -> list[str]:
     """Add what applications are scored on. raw: name, definition, anchors
     (four level descriptions, lowest first, or none), question (blank =
-    interview only), interview_question, dimension_key."""
+    interview only), interview_question, dimension_key. questions_ok is the
+    Operator's confirmation, given on the same form, that a flagged
+    question is about a guest or the work (see question_blocks)."""
     fields, problems = _criterion_fields(raw)
     if problems:
         return problems
+    question_ok, interview_ok = _confirmed(fields, questions_ok)
 
     def work(conn):
         before = _flag_terms(conn, posting_id)
@@ -963,31 +1116,38 @@ def add_criterion(posting_id: int, raw: dict, by: str, reviewed: bool = False) -
             raise _Refused(["That standard is already one of this posting's criteria."])
         conn.execute(
             "INSERT INTO hr_criteria (posting_id, sort, name, dimension_key, definition, anchors_json, "
-            "question, interview_question) VALUES (?,?,?,?,?,?,?,?)",
+            "question, interview_question, question_ok, interview_ok) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (posting_id, last + 1, fields["name"], fields["dimension_key"], fields["definition"],
              json.dumps(fields["anchors"], ensure_ascii=False), fields["question"],
-             fields["interview_question"]))
+             fields["interview_question"], question_ok, interview_ok))
         _changed_while_open(conn, posting_id, by, reviewed, before)
 
     return _write(work)
 
 
 def save_criterion(criterion_id: int, posting_id: int, raw: dict, by: str,
-                   reviewed: bool = False) -> list[str]:
+                   reviewed: bool = False, questions_ok: bool = False) -> list[str]:
     fields, problems = _criterion_fields(raw)
     if problems:
         return problems
+    question_ok, interview_ok = _confirmed(fields, questions_ok)
 
     def work(conn):
         before = _flag_terms(conn, posting_id)
         row = conn.execute("SELECT status FROM hr_postings WHERE id=?", (posting_id,)).fetchone()
         if not row or row["status"] == "closed":
             raise _Refused(["That posting is closed, so it can't be changed."])
+        # A confirmation already given stays only while its question is word for word the same.
         cur = conn.execute(
             "UPDATE hr_criteria SET name=?, definition=?, anchors_json=?, question=?, "
-            "interview_question=? WHERE id=? AND posting_id=? AND active=1",
+            "interview_question=?, "
+            "question_ok=CASE WHEN ?!='' THEN ? WHEN question_ok=? THEN question_ok ELSE '' END, "
+            "interview_ok=CASE WHEN ?!='' THEN ? WHEN interview_ok=? THEN interview_ok ELSE '' END "
+            "WHERE id=? AND posting_id=? AND active=1",
             (fields["name"], fields["definition"], json.dumps(fields["anchors"], ensure_ascii=False),
-             fields["question"], fields["interview_question"], criterion_id, posting_id))
+             fields["question"], fields["interview_question"],
+             question_ok, question_ok, fields["question"],
+             interview_ok, interview_ok, fields["interview_question"], criterion_id, posting_id))
         if not cur.rowcount:
             raise _Refused(["That criterion isn't on this posting any more."])
         _changed_while_open(conn, posting_id, by, reviewed, before)
@@ -1025,6 +1185,7 @@ def publish(posting_id: int, by: str, reviewed: bool = False) -> list[str]:
     an exact copy of what went live."""
 
     def work(conn):
+        _slug_follows_title(conn, posting_id)     # the address it goes live at is its title today
         posting = _posting(conn, posting_id)
         if not posting or posting["status"] != "draft":
             raise _Refused(["Only a draft can be published."])

@@ -429,6 +429,7 @@ _BADGES = (                     # first one with a count wins; red = someone is 
     ("attention", "{n} posting{s} to fix", "b-red"),
     ("on_hold", "{n} on hold", "b-red"),
     ("new", "{n} new", "b-red"),
+    ("comments", "{n} comment{s} to read", "b-tan"),
     ("notices_due", "{n} notice{s} due", "b-tan"),
     ("notices_follow_up", "{n} to tell", "b-tan"),
     ("past_due", "{n} past due", "b-tan"),

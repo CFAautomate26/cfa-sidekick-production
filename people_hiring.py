@@ -371,6 +371,24 @@ def _note_nudge(*texts: str) -> None:
               "See “What to write, and what never to write”.")
 
 
+def _questions_ok() -> bool:
+    """The tick on a criterion form that confirms a flagged question is
+    about a guest or the work. It counts only from the Operator."""
+    return _ticked("questions_ok") and people.can("operator")
+
+
+def _questions_ok_logged(posting_id: int, raw: dict, criterion_id: int | None = None) -> None:
+    """The activity-log line for a confirmation given on a criterion form."""
+    if not _questions_ok():
+        return
+    which = [label for label, text in (("question for applicants", raw.get("question")),
+                                       ("interview question", raw.get("interview_question")))
+             if hdb.question_hits(hub_text.clean(text or "").strip())]
+    if which:
+        _log("question confirmed as about the work", "posting", posting_id,
+             (f"criterion {criterion_id}, " if criterion_id else "new criterion, ") + " and ".join(which))
+
+
 def _tabs(current: str) -> list[dict]:
     items = [("pipeline", "Pipeline", "people.hiring_home"), ("postings", "Postings", "people.hiring_postings"),
              ("notices", "Notices", "people.hiring_notices"), ("metrics", "Numbers", "people.hiring_metrics")]
@@ -455,6 +473,8 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             "people/hiring/posting.html", tabs=_tabs("postings"), posting=posting, view=view,
             body=hub_text.render(view["description"]),
             problems=hdb.compliance_problems(posting) if posting["status"] != "closed" else [],
+            question_blocks=hdb.question_blocks(posting) if posting["status"] != "closed" else [],
+            question_ok_label=hdb.QUESTION_OK_LABEL,
             flags=hdb.wording_flags(posting), copies=hdb.snapshots(posting_id),
             standards=[d for d in (model["dimensions"] if model else []) if d["key"] not in used],
             has_model=bool(model), ai_setting=people_db.setting_on("ai_hiring"), limits=hdb,
@@ -499,25 +519,43 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
                    "anchors": dim["hiring"]["anchors"] if dim["hiring"] else []}
         else:
             raw = _criterion_form(request.form)
-        problems = hdb.add_criterion(posting_id, raw, people.actor(), reviewed=_ticked("wording_reviewed"))
+        problems = hdb.add_criterion(posting_id, raw, people.actor(), reviewed=_ticked("wording_reviewed"),
+                                     questions_ok=_questions_ok())
         if problems:
             _say(problems)
         else:
             _log("criterion added", "posting", posting_id)
             flash("Criterion added.")
+            _questions_ok_logged(posting_id, raw)
         return to_posting(posting_id, "#criteria")
 
     @bp.route("/hiring/postings/<int:posting_id>/criteria/<int:criterion_id>", methods=["POST"])
     @hiring
     def hiring_criterion_save(posting_id, criterion_id):
-        problems = hdb.save_criterion(criterion_id, posting_id, _criterion_form(request.form),
-                                      people.actor(), reviewed=_ticked("wording_reviewed"))
+        raw = _criterion_form(request.form)
+        problems = hdb.save_criterion(criterion_id, posting_id, raw, people.actor(),
+                                      reviewed=_ticked("wording_reviewed"), questions_ok=_questions_ok())
         if problems:
             _say(problems)
         else:
             _log("criterion changed", "posting", posting_id)
             flash("Criterion saved.")
+            _questions_ok_logged(posting_id, raw, criterion_id)
         return to_posting(posting_id, f"#c{criterion_id}")
+
+    @bp.route("/hiring/postings/<int:posting_id>/criteria/<int:criterion_id>/question-ok", methods=["POST"])
+    @operator
+    def hiring_question_ok(posting_id, criterion_id):
+        """The Operator's own call, one question at a time, and logged: this
+        flagged question is about a guest or the work, not the applicant."""
+        if not _ticked("confirm"):
+            flash("Tick the box to confirm the question is about a guest or the work, not about "
+                  "the applicant. Or reword the question.")
+        elif hdb.confirm_question(posting_id, criterion_id, request.form.get("which", ""), people.actor()):
+            flash("Confirmed. If the question is changed, it is checked again.")
+        else:
+            flash("There is nothing to confirm on that question any more.")
+        return to_posting(posting_id, "#check")
 
     @bp.route("/hiring/postings/<int:posting_id>/criteria/<int:criterion_id>/remove", methods=["POST"])
     @hiring

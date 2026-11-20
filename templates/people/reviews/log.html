@@ -54,7 +54,8 @@
   <article class="card rv-dim" id="o-{{ o.id }}">
     {% if o.flags %}
     <div class="callout tan" role="note">{{ icon('alert') }}<span><strong>Check the wording of this note.</strong> It is saved, and it is yours to fix: remove it and write it again if it says more than what happened at work.
-      <ul class="rv-flag">{% for f in o.flags %}<li>“{{ f.term }}” ({{ f.category }}): {{ f.advice }}</li>{% endfor %}</ul></span></div>
+      <ul class="rv-flag">{% for f in o.flags %}<li>“{{ f.term }}” ({{ f.category }}): {{ f.advice }}</li>{% endfor %}</ul>
+      {% if o.time_away %}<strong>{{ time_away_prompt }}</strong>{% endif %}</span></div>
     {% endif %}
     <div class="rv-tags"{% if not o.flags %} style="margin-top:0;"{% endif %}>
       <span class="badge {{ 'b-green' if o.kind == 'strength' else ('b-tan' if o.kind == 'growth' else '') }}">{{ kinds.get(o.kind, 'Note') }}</span>

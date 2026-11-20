@@ -312,8 +312,9 @@ _EVERYDAY = {"will", "may", "mark", "grace", "joy", "hope", "faith", "rose", "ap
 def _name_forms(names: list[str]) -> tuple[list[str], list[str], list[str]]:
     """(whole names, single parts of three letters or more, two-letter
     parts), each longest first. A two-letter part ("Jo", "Bo", "Li") is
-    only ever matched where it is written with a capital, so "jo" inside
-    ordinary words and "so", "do" and "my" in a sentence are left alone."""
+    only ever matched where it is written with a capital (or, lower-case,
+    where it carries 's), so "jo" inside ordinary words and "so", "do" and
+    "my" in a sentence are left alone."""
     whole, parts, short = set(), set(), set()
     for raw in names or []:
         name = " ".join(str(raw or "").split())
@@ -343,47 +344,92 @@ def _pattern(forms: list[str], flags: int = 0):
     return re.compile(rf"(?<![\w])(?:{body})(?![\w])", flags)
 
 
+def _starts_sentence(match) -> bool:
+    before = match.string[:match.start()].rstrip()
+    return not before or before[-1] in ".!?:\n"
+
+
 def _swap(text: str, pattern, label: str) -> str:
     if pattern is None:
         return text
 
     def put(match):
-        before = match.string[:match.start()].rstrip()
-        starts_sentence = not before or before[-1] in ".!?:\n"
-        return label[:1].upper() + label[1:] if starts_sentence else label
+        return label[:1].upper() + label[1:] if _starts_sentence(match) else label
 
     return pattern.sub(put, text)
+
+
+# Two-letter name parts that are also everyday words. "My" and "An" open
+# ordinary sentences, so as a name they are replaced only where they cannot
+# be the everyday word: inside a sentence, beside another part of the same
+# name, or carrying 's.
+_EVERYDAY_SHORT = frozenset((
+    "an", "my", "so", "do", "no", "on", "in", "is", "it", "to", "we", "he", "me", "up", "or", "of",
+    "if", "as", "at", "by", "go", "am", "be", "us", "oh", "ok", "hi", "ha"))
+
+
+def _swap_short(text: str, short: list[str], near: list[str], label: str) -> str:
+    """Two-letter name parts ("Jo", "Li", "My"), where written with a
+    capital. One that is also an everyday word is left alone when it opens
+    a sentence (unless it carries 's or sits beside another part of the
+    name in `near`), so "My goal this period" is never rewritten. One that
+    is not an everyday word is also replaced in lower case where it carries
+    's ("jo's till")."""
+    if not short:
+        return text
+    beside = "|".join(re.escape(part) for part in near)
+    after_name = re.compile(rf"\s+(?:{beside})(?![\w])", re.I) if near else None
+    before_name = re.compile(rf"(?<![\w])(?:{beside})\s+$", re.I) if near else None
+
+    def put(match):
+        word, rest = match.group(0), match.string[match.end():]
+        opens = _starts_sentence(match)
+        if (word.casefold() in _EVERYDAY_SHORT and opens and not rest.startswith(("'s", "’s"))
+                and not (after_name and after_name.match(rest))
+                and not (before_name and before_name.search(match.string[:match.start()]))):
+            return word
+        return label[:1].upper() + label[1:] if opens else label
+
+    text = _pattern(_capitalised(short)).sub(put, text)
+    plain = sorted({part.lower() for part in short if part.casefold() not in _EVERYDAY_SHORT})
+    if plain:
+        text = _swap(text, re.compile(r"(?<![\w])(?:" + "|".join(map(re.escape, plain))
+                                      + r")(?=['’]s(?![\w]))"), label)
+    return text
 
 
 def deidentify(text: str, subject_names: list[str], other_names: list[str],
                subject_label: str = "the leader") -> str:
     """The copy of a note or answer that goes to the AI service. The
     person's own name (whole, each part of three letters or more, and a
-    two-letter part where it is written with a capital) becomes the label;
-    other supplied names become "a team member" the same way; email
-    addresses and phone numbers become "[removed]"; he/she/him/his/her
-    become they/them/their. The stored text a person wrote is never
-    changed: only this copy."""
+    two-letter part where it is written with a capital: see _swap_short)
+    becomes the label; other supplied names become "a team member" the
+    same way; email addresses and phone numbers become "[removed]";
+    he/she/him/his/her become they/them/their. The stored text a person
+    wrote is never changed: only this copy."""
     text = str(text or "")
     text = _EMAIL.sub("[removed]", text)
     text = _PHONE.sub("[removed]", text)
     text = _TITLE.sub("", text)
     whole, parts, short = _name_forms(subject_names)
-    text = _swap(text, _pattern(whole + parts, re.I), subject_label)
-    text = _swap(text, _pattern(_capitalised(short)), subject_label)
+    text = _swap(text, _pattern(whole, re.I), subject_label)
+    text = _swap_short(text, short, parts, subject_label)
+    text = _swap(text, _pattern(parts, re.I), subject_label)
     whole, parts, short = _name_forms(other_names)
     text = _swap(text, _pattern(whole, re.I), "a team member")
+    text = _swap_short(text, short, parts, "a team member")
     careful = [p for p in parts if p.casefold() in _EVERYDAY]
     text = _swap(text, _pattern([p for p in parts if p.casefold() not in _EVERYDAY], re.I),
                  "a team member")
-    text = _swap(text, _pattern(sorted(set(_capitalised(careful + short)) | set(careful))),
-                 "a team member")
+    text = _swap(text, _pattern(sorted(set(_capitalised(careful)) | set(careful))), "a team member")
 
     def neutral(match):
         word = match.group(1)
         swap = _PRONOUNS[word.lower().replace("’", "'")]
         return swap.capitalize() if word[:1].isupper() else swap
 
+    for label in (subject_label, "a team member"):   # "Yeon So" became the label twice over
+        text = re.sub(rf"({re.escape(label)})(?:\s+{re.escape(label)})+(?![\w])", r"\1", text, flags=re.I)
     return _PRONOUN.sub(neutral, text)
 
 
@@ -414,16 +460,32 @@ LANGUAGE_CATEGORIES = {
                     "or dismissal."),
 }
 LANGUAGE_TERMS = {
-    "health": ("sick", "sickness", "ill", "illness", "injury", "injured", "medication", "meds",
-               "medical", "doctor", "hospital", "surgery", "anxiety", "anxious", "depressed",
+    "health": ("sick", "sickness", "ill", "illness", "injury", "injuries", "injured", "medication",
+               "meds", "medical", "doctor", "hospital", "surgery", "anxiety", "anxious", "depressed",
                "depression", "mental health", "burnt out", "burned out", "burnout", "disability",
                "disabled", "diagnosis", "diagnosed", "therapy", "adhd", "autism", "autistic",
-               "concussion", "migraine", "migraines", "health"),
+               "concussion", "migraine", "migraines", "health",
+               # everyday words for the same things
+               "wheelchair", "crutch", "crutches", "walking cane", "cancer", "chemo", "chemotherapy",
+               "radiation", "tumour", "tumor", "diabetes", "diabetic", "insulin", "seizure",
+               "seizures", "epilepsy", "epileptic", "asthma", "inhaler", "covid", "flu", "fever",
+               "vomiting", "threw up", "throwing up", "pills", "prescription", "prescriptions",
+               "physio", "physiotherapy", "appointment", "appointments", "emergency room",
+               "hospitalised", "hospitalized", "rehab", "hard of hearing", "hearing aid",
+               "hearing aids", "hearing loss", "deaf", "unwell", "nauseous", "stitches", "sprain",
+               "sprained", "infection", "contagious", "medical condition", "health condition",
+               "health conditions", "light duties", "modified duties", "modified work",
+               "handicap", "handicapped", "sik",
+               "malade", "maladie", "médecin", "medecin", "hôpital", "hopital"),
     "family": ("pregnant", "pregnancy", "maternity", "paternity", "parental", "baby", "newborn",
                "childcare", "daycare", "babysitter", "kids", "children", "husband", "wife",
                "spouse", "boyfriend", "girlfriend", "married", "divorce", "divorced",
                "single mom", "single mother", "single dad", "single parent", "family",
-               "eldercare", "home life"),
+               "eldercare", "home life",
+               "kid", "child", "son", "sons", "daughter", "daughters", "mom", "moms", "mum", "dad", "dads",
+               "grandmother", "grandfather", "grandma", "grandpa", "parent", "parents", "funeral",
+               "passed away", "grieving", "grief", "miscarriage", "nursing", "breastfeeding",
+               "pregnent", "preggo", "preggers", "enceinte"),
     "religion": ("church", "mosque", "temple", "synagogue", "prayer", "prayers", "pray",
                  "praying", "religious", "religion", "faith", "bible", "devotional",
                  "devotionals", "sabbath", "ramadan", "hijab", "christian", "muslim", "jewish",
@@ -445,7 +507,12 @@ LANGUAGE_TERMS = {
               "accommodation", "accommodations", "accommodate", "complaint", "complaints",
               "complained", "complain", "harassment", "harassed", "discrimination",
               "discriminated", "grievance", "unsafe", "safety concern", "human rights",
-              "ministry of labour", "union"),
+              "ministry of labour", "union",
+              # everyday words for time away
+              "called off", "called out", "off work", "off sick", "booked off", "went home",
+              "sent home", "return to work", "returned to work", "coming back from",
+              "came back from", "since coming back", "workers' compensation",
+              "workers compensation"),
     "labels": ("lazy", "attitude", "bad attitude", "culture fit", "not committed", "uncommitted",
                "emotional", "aggressive", "bossy", "dramatic", "drama", "moody", "sensitive",
                "difficult", "entitled", "immature", "unmotivated", "careless", "negative",
@@ -456,13 +523,69 @@ LANGUAGE_TERMS = {
                     "written warning", "written up", "discipline", "disciplined", "disciplinary",
                     "probation"),
 }
+# Everyday words that mean health, family or time away only in some
+# company ("away for three weeks", not "put away the stock"), so they are
+# matched as short patterns. What is reported is the words that matched.
+_DAY_OR_SPAN = r"(?:day|days|week|weeks|shift|shifts|month|months)"
+LANGUAGE_PATTERNS = {
+    "health": (
+        r"(?-i:(?<![\w])ER(?![\w]))",                                          # the emergency room
+        r"\b(?:a|her|his|their|my|with)\s+cane\b",
+        r"\b(?:an|her|his|their|my)\s+operation\b|\boperation\s+on\s+(?:her|his|their|my)\b",
+        r"\b(?:is|was|legally|partly|partially|going|went|colou?r)[\s-]+blind\b|\bblind\s+in\b",
+        r"\b(?:got|was|is|been|were|getting)\s+hurt\b|\bhurt\s+(?:her|his|their|my)\s+\w+"
+        r"|\bhurt\s+(?:herself|himself|themself|themselves|myself)\b|\bhurt\s+at\s+work\b",
+        r"\bcan(?:'t|not|\s+no\s+longer)\s+(?:lift|stand|walk|bend|carry|reach)\b"
+        r"|\b(?:unable|not\s+able)\s+to\s+(?:lift|stand|walk|bend|carry|reach)\b",
+    ),
+    "family": (
+        r"(?<![\w])(?:mother|father)(?![\w])(?!'s\s+day)",                      # not Mother's Day
+        r"\bexpecting\s+(?:a\s+(?:baby|child)|(?:her|their)\s+(?:first|second|third|baby|child)|twins"
+        r"|in\s+(?:january|february|march|april|may|june|july|august|september|october|november"
+        r"|december|the\s+(?:spring|summer|fall|winter|new\s+year)))\b"
+        r"|\b(?:is|are|was|were|they're|she's)\s+expecting(?=\s*(?:[.,;!?]|$)|\s+(?:again|soon)\b)",
+    ),
+    "leave": (
+        r"\b(?:was|is|were|are|been|being|be)\s+away\b"
+        r"|\baway\s+(?:for|from\s+work|sick|on\s+(?:leave|vacation|holiday|holidays)|since|until|again"
+        rf"|(?:\w+\s+){{1,2}}{_DAY_OR_SPAN})\b",
+        r"\b(?:miss(?:ed|es|ing)\s+(?:\w+\s+){0,3}"
+        r"|miss\s+(?:(?:a|an|her|his|their|my|another|one|two|three|some|any|more|\d+)\s+)?(?:\w+\s+)?)"
+        r"(?:shift|shifts|close|closes|closing|closings|open|opens|opening|openings|day|days|week|weeks"
+        r"|work)\b(?!\s+(?:checklist|checklists|check|list|task|tasks|duties|sign-?off|huddle|meeting))",
+        r"\b(?:sundays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|weekends?"
+        r"|days?|shifts?|weeks?)\s+off\b",
+        r"\b(?:been|is|was)\s+off\b(?!\s+(?:the|task|track|pace|by|on|target|to))",
+        r"\basked\s+about\s+(?:(?:her|his|their|the|my)\s+)?(?:pay|wages?|overtime|hours|vacation\s+pay"
+        r"|breaks?)\b|\b(?:pay|wage|overtime)\s+(?:complaint|concern|dispute)s?\b",
+    ),
+}
+# A wider net, for one purpose only: a note that uses one of these is
+# still sent to the AI (they are ordinary work words far more often than
+# not), but no level is suggested for a standard whose draft relied on it.
+WIDER_TERMS = (
+    "allergy", "allergies", "allergic", "hearing", "cane", "operation", "blind", "tired",
+    "exhausted", "worn down", "worn out", "run down", "stressed", "stress", "overwhelmed",
+    "crying", "cried", "in tears", "pain", "sore", "dizzy", "headache", "headaches", "hurt",
+    "accident", "emergency", "personal reasons", "personal issue", "personal issues",
+    "personal matter", "at home", "home early", "left early", "leaving early", "leaves early",
+    "walked out", "not herself", "not himself", "not themselves", "away", "missed", "sister",
+    "brother", "wages", "overtime")
 # Words in a leader's or applicant's own comments that may mean they are
 # raising a concern that needs follow-up outside the tool.
-CONCERN_TERMS = ("harassment", "harassed", "harassing", "harass", "bullied", "bullying", "bully",
-                 "discrimination", "discriminated", "unsafe", "safety", "threatened", "threat",
-                 "retaliation", "retaliated", "reprisal", "complaint", "complained", "assault",
-                 "assaulted", "touched", "hostile", "racist", "sexist", "abuse", "abused",
-                 "abusive", "intimidated", "intimidation", "violence", "violent")
+CONCERN_TERMS = ("harassment", "harassed", "harassing", "harass", "harasses", "bullied", "bullying",
+                 "bully", "bullies", "discrimination", "discriminated", "discriminating", "unsafe",
+                 "safety", "feel safe", "felt safe", "not safe", "threatened", "threatens",
+                 "threatening", "threat", "threats", "retaliation", "retaliated", "retaliating",
+                 "reprisal", "complaint", "complaints", "complained", "complain", "assault",
+                 "assaulted", "touched", "touches", "touching", "grabbed", "hostile", "racist",
+                 "racism", "sexist", "sexism", "sexual", "sexually", "abuse", "abused", "abusive",
+                 "intimidated", "intimidation", "intimidate", "intimidates", "intimidating",
+                 "violence", "violent", "scared", "afraid", "frightened", "yell", "yells", "yelled",
+                 "yelling", "scream", "screams", "screamed", "screaming", "swore at", "swears at",
+                 "humiliated", "humiliating", "belittled", "singled out", "picked on", "targeted",
+                 "uncomfortable", "inappropriate", "unfair", "unfairly", "lawyer", "labour board",
+                 "ministry", "human rights", "tribunal", "my body")
 
 
 def _term_pattern(term: str):
@@ -472,14 +595,19 @@ def _term_pattern(term: str):
 
 _TERM_PATTERNS = {key: [(term, _term_pattern(term)) for term in terms]
                   for key, terms in LANGUAGE_TERMS.items()}
+_CONTEXT_PATTERNS = {key: [re.compile(pattern, re.I) for pattern in patterns]
+                     for key, patterns in LANGUAGE_PATTERNS.items()}
+_WIDER_PATTERNS = [(term, _term_pattern(term)) for term in WIDER_TERMS]
 _CONCERN_PATTERNS = [(term, _term_pattern(term)) for term in CONCERN_TERMS]
 
 
 def language_check(text: str) -> list[dict]:
     """Words that should not be in a review or a hiring note, found by
-    plain whole-word lists (no AI, same answer every time). Each finding is
-    {"term", "category", "advice", "key"}, in the order the words appear.
-    It never blocks anything by itself: callers decide what to do."""
+    plain word lists and a few short patterns (no AI, same answer every
+    time). Each finding is {"term", "category", "advice", "key"}, in the
+    order the words appear. It never blocks anything by itself: callers
+    decide what to do. It is a word list, not a reader: it misses
+    misspellings, other languages and anything said in a roundabout way."""
     text = str(text or "").replace("’", "'")
     found = []
     for key, patterns in _TERM_PATTERNS.items():
@@ -488,14 +616,40 @@ def language_check(text: str) -> list[dict]:
             match = pattern.search(text)
             if match:
                 found.append((match.start(), -len(term), term, key, label, advice))
+    for key, patterns in _CONTEXT_PATTERNS.items():
+        label, advice = LANGUAGE_CATEGORIES[key]
+        for pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                term = " ".join(match.group(0).split())
+                term = term if term.isupper() else term.lower()
+                found.append((match.start(), -len(term), term, key, label, advice))
     found.sort()
-    return [{"term": term, "category": label, "advice": advice, "key": key}
-            for _, _, term, key, label, advice in found]
+    out, seen = [], set()
+    for _, _, term, key, label, advice in found:
+        if (term, key) not in seen:
+            seen.add((term, key))
+            out.append({"term": term, "category": label, "advice": advice, "key": key})
+    return out
+
+
+def wider_terms(text: str) -> list[str]:
+    """Everyday words in `text` that may be about health, family, time
+    away or a concern, but usually are not (WIDER_TERMS), plus anything
+    language_check finds under those headings. For a note that was sent to
+    the AI: a standard whose draft relied on it gets no suggested level."""
+    text = str(text or "").replace("’", "'")
+    found = [f["term"] for f in language_check(text)
+             if f["key"] in ("health", "family", "religion", "age", "origin", "gender", "leave")]
+    found += [term for term, pattern in _WIDER_PATTERNS if pattern.search(text)]
+    return list(dict.fromkeys(found))
 
 
 def concern_terms(text: str) -> list[str]:
     """Harassment, safety and complaint words found in someone's own
     comments (whole words, any case), in list order. Used to raise a quiet
-    flag for the Operator; it never blocks the person writing."""
-    text = str(text or "")
+    flag for the Operator; it never blocks the person writing. A word list
+    cannot tell whether a comment raises a concern: callers that must not
+    miss one show the Operator every comment, flagged or not."""
+    text = str(text or "").replace("’", "'")
     return [term for term, pattern in _CONCERN_PATTERNS if pattern.search(text)]

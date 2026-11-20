@@ -91,7 +91,8 @@ Canada.
   `FLASK_SECRET_KEY` (falls back to a key derived from the
   `SCHEDULE_SECRET`/`SHIFT_ADMIN_PIN` env vars, or a random per-boot key if
   neither is set; **People does not load on the live server without it**,
-  and the session cookie is HTTPS-only unless `ENV` is test/dev/local),
+  and the session cookie is HTTPS-only unless `ENV` is
+  test/testing/dev/development/local),
   `SHIFT_TZ` (default America/Toronto),
   `SHIFT_NOTIFY_SLACK_CHANNEL` + `SHIFT_NOTIFY_SLACK_MENTION` (to-do
   completion pings to a private Slack channel via `SLACK_BOT_TOKEN`;
@@ -170,10 +171,16 @@ Canada.
   per standard → six "before you finish" questions (any yes = on hold, the
   Operator releases) → finalise → Operator calibration and process health →
   share → the leader confirms receipt (never agreement) → print view; no
-  overall score, ranking or comparison. **Hiring**: postings with a publish
+  overall score, ranking or comparison; every comment a leader adds on
+  confirming, and a sent reflection the concern word list flags, waits in
+  front of the Operator until ticked as followed up outside the tool. **Hiring**: postings with a publish
   check (pay range, vacancy statement, accommodation notice with a named
-  contact, dated minimum-wage settings, no question that asks about a
-  prohibited ground) that only the Operator publishes, an
+  contact, dated minimum-wage settings, and no question that uses a listed
+  word about a prohibited ground unless the Operator has confirmed that
+  exact question as about a guest or the work, logged: `question_blocks`;
+  listed words only, so the Operator still reads every question) that only
+  the Operator publishes (a draft's `/careers/<slug>` follows its title
+  until then), an
   exact kept copy of each posting and blank form, a two-step application on
   a private link (HMAC hash kept, never the token; a repeat of the same
   email or phone is kept and flagged for a leader, never refused, so the
@@ -189,9 +196,11 @@ Canada.
   only while the posting is a draft so it prints the AI statement from the
   day it goes live; a posting that has been public without the statement
   never uses AI; and only for applicants who applied while it showed);
-  input is de-identified, leaves out any note or answer worded about
-  health, leave or another protected ground, and is stored exactly as
-  sent; output is a labelled draft or suggested level shown only after the
+  input is de-identified, leaves out any review note or reflection box
+  in which the word list (`people_ai.language_check`: listed words only,
+  everyday ones included) finds wording about a protected ground, and any
+  applicant answer that may mention health or an accommodation, and is
+  stored exactly as sent; output is a labelled draft or suggested level shown only after the
   person saved their own, validated by code (of the AI's own "human check"
   lines only fixed sentences are ever shown; a review draft is not shown
   once its notes have changed), never copied into a record, never a

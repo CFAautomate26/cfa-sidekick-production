@@ -23,6 +23,7 @@ A person is tied to a row by leader id AND sign-in name together
 (people_db.same_person), so a renumbered or renamed sign-in fails closed.
 """
 
+import hashlib
 import json
 import re
 from contextlib import closing
@@ -114,7 +115,9 @@ CREATE TABLE IF NOT EXISTS rv_reviews (
   gate_json TEXT, gate_at TEXT, gate_by TEXT, hold_note TEXT NOT NULL DEFAULT '', released_at TEXT, released_by TEXT,
   reflection_at TEXT, finalised_at TEXT, finalised_by TEXT, shared_at TEXT, shared_by TEXT,
   discussed_on TEXT, ack_at TEXT, ack_comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
-  concern_followed_at TEXT, concern_followed_by TEXT,   -- the Operator followed up the leader's comments outside this tool
+  concern_followed_at TEXT, concern_followed_by TEXT,   -- the Operator read the leader's comments, and followed up outside this tool
+  reflection_followed_at TEXT, reflection_followed_by TEXT,   -- the same for a reflection that may raise a concern
+  reflection_followed_sig TEXT,                               -- a hash of the reflection as it was then (a later change is read again)
   UNIQUE (cycle_id, subject_id));
 
 -- The level a person gave for one standard, with their comment. ai_level is
@@ -147,7 +150,10 @@ CREATE INDEX IF NOT EXISTS idx_rv_actions_review ON rv_actions (review_id);
 
 # Columns added after a store may already have been created.
 _ADDED_COLUMNS = (("rv_reviews", "concern_followed_at", "TEXT"),
-                  ("rv_reviews", "concern_followed_by", "TEXT"))
+                  ("rv_reviews", "concern_followed_by", "TEXT"),
+                  ("rv_reviews", "reflection_followed_at", "TEXT"),
+                  ("rv_reviews", "reflection_followed_by", "TEXT"),
+                  ("rv_reviews", "reflection_followed_sig", "TEXT"))
 
 
 def init_schema(conn) -> None:
@@ -956,18 +962,68 @@ def acknowledge(review_id: int, discussed_on: str, comment: str, by: str) -> str
 
 def commented_reviews() -> list[dict]:
     """Every acknowledged review whose leader added comments that the
-    Operator has not yet marked as followed up, in any cycle, open or
-    closed, oldest first. (Which of them may raise a concern is decided by
-    the caller's word list.)"""
+    Operator has not yet marked as read and followed up, in any cycle,
+    open or closed, oldest first. All of them are put in front of the
+    Operator: a word list (the caller's) only decides which are marked as
+    possibly raising a concern, never which are shown."""
     with closing(people_db.connect()) as conn:
         return [_shape(r) for r in conn.execute(
             _REVIEW + "WHERE r.status='acknowledged' AND r.ack_comment != '' "
             "AND r.concern_followed_at IS NULL ORDER BY r.ack_at, r.id")]
 
 
+def _reflection_sig(bodies: dict) -> str:
+    """A fingerprint of a reflection as written, so a follow-up is tied to
+    the words that were read and not to whatever is written later."""
+    joined = "\n\x1f".join(f"{key}\x1e{bodies[key]}" for key in sorted(bodies) if bodies[key])
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def sent_reflections() -> list[dict]:
+    """Every review, in any cycle, whose leader has sent a reflection that
+    the Operator has not marked as followed up in the words it has now.
+    Each is the review plus "reflection" ({standard key: text}). A
+    reflection the leader has saved but not sent is theirs alone and is
+    never returned. The caller's word list decides which may raise a
+    concern."""
+    out = []
+    with closing(people_db.connect()) as conn:
+        for row in conn.execute(_REVIEW + "WHERE r.reflection_at IS NOT NULL ORDER BY r.reflection_at, r.id"):
+            bodies = {r["dimension_key"]: r["body"] for r in conn.execute(
+                "SELECT dimension_key, body FROM rv_reflections WHERE review_id=? AND body != ''",
+                (row["id"],))}
+            if bodies and row["reflection_followed_sig"] != _reflection_sig(bodies):
+                out.append({**_shape(row), "reflection": bodies})
+    return out
+
+
+def mark_reflection_followed(review_id: int, by: str) -> bool:
+    """The Operator records that a reflection was read and followed up
+    outside this tool. Only that, when, and a fingerprint of the words as
+    they were: never what was found. If the leader changes the reflection
+    afterwards it is put in front of the Operator again."""
+    with closing(people_db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT reflection_at, reflection_followed_sig FROM rv_reviews WHERE id=?",
+                           (review_id,)).fetchone()
+        bodies = {r["dimension_key"]: r["body"] for r in conn.execute(
+            "SELECT dimension_key, body FROM rv_reflections WHERE review_id=? AND body != ''", (review_id,))}
+        if not row or not row["reflection_at"] or not bodies:
+            return False
+        sig = _reflection_sig(bodies)
+        if row["reflection_followed_sig"] == sig:
+            return False
+        conn.execute("UPDATE rv_reviews SET reflection_followed_at=?, reflection_followed_by=?, "
+                     "reflection_followed_sig=? WHERE id=?",
+                     (shift_db.now_stamp(), _line(by, CAPS["name"]), sig, review_id))
+        _log(conn, by, "reflection followed up outside this tool", "review", review_id)
+    return True
+
+
 def mark_concern_followed(review_id: int, by: str) -> bool:
-    """The Operator records that the leader's comments were followed up
-    outside this tool. Only that, and when: never what was found."""
+    """The Operator records that the leader's comments were read, and
+    followed up outside this tool where they needed it. Only that, and
+    when: never what was found."""
     with closing(people_db.connect()) as conn, conn:
         done = conn.execute(
             "UPDATE rv_reviews SET concern_followed_at=?, concern_followed_by=? "

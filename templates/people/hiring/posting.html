@@ -33,6 +33,25 @@
   {% else %}
   <p class="callout">{{ icon('checkcircle') }}<span><strong>The publish check passes.</strong> Pay, a vacancy statement, the accommodation notice and a named contact are all here.</span></p>
   {% endif %}
+  {% if question_blocks %}
+  <div class="card" id="questions-check">
+    <span class="card-title">Questions held back</span>
+    <p class="card-meta">An application or an interview may not ask an applicant about age, family, religion, where they are from, health or a disability, a record of offences, gender or orientation. The check looks for listed words, so it also stops a fair question that happens to use one, such as a question about helping a guest. Reword the question, or the Operator confirms it below. The list cannot read meaning: a question can still ask about one of these in words that are on no list, so read every question before publishing.</p>
+    {% for b in question_blocks %}
+    <div class="hr-qblock">
+      <p class="card-meta"><strong>{{ b.name }}</strong>, {{ 'question for applicants' if b.which == 'question' else 'interview question' }}: “{{ b.text }}”<br>Found: “{{ b.term }}” ({{ b.about }}).</p>
+      {% if viewer.is_operator %}
+      <form method="post" action="{{ url_for('people.hiring_question_ok', posting_id=posting.id, criterion_id=b.criterion_id) }}">
+        <input type="hidden" name="which" value="{{ b.which }}">
+        <label class="checkline"><input type="checkbox" name="confirm" value="1" required><span>{{ question_ok_label }}</span></label>
+        <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Confirm this question</button></div>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% if not viewer.is_operator %}<p class="fine-line">Only the Operator can confirm a question. Each confirmation is written in the activity log.</p>{% else %}<p class="fine-line">Each confirmation is written in the activity log, and it lasts only while the question stays word for word the same.</p>{% endif %}
+  </div>
+  {% endif %}
   {% if wages_to_check %}
   <p class="callout tan">{{ icon('clock') }}<span><strong>The minimum wage figures this check uses were last confirmed before the most recent October 1</strong>, the day Ontario's rates usually change. {% if viewer.is_operator %}<a class="textlink" href="{{ url_for('people.settings') }}#wages">Check and confirm them in People settings</a> before you rely on this check.{% else %}Ask the Operator to check them in People settings.{% endif %}</span></p>
   {% endif %}
@@ -45,6 +64,7 @@
     <form method="post" action="{{ url_for('people.hiring_publish', posting_id=posting.id) }}" class="card">
       <span class="card-title">Publish</span>
       <p class="card-meta">Puts the posting on the public careers page and keeps an exact copy of it with the blank application form.</p>
+      {% if public_url %}<p class="card-meta">Its public address will be <span class="hr-def">{{ public_url }}</span>. The address is made from the title: to change it, change the title before you publish. After that it stays as it is.</p>{% endif %}
       {% if flags %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read these and the wording is about the job.</span></label>{% endif %}
       <div class="btnrow"><button class="btn btn-primary" type="submit"{{ ' disabled' if problems }}>Publish this posting</button></div>
     </form>
@@ -117,6 +137,7 @@
         <textarea id="c{{ c.id }}-a{{ n }}" name="anchor{{ n }}" rows="2" maxlength="{{ limits.ANCHOR_MAX }}">{{ c.anchors[n - 1] if c.anchors|length >= n else '' }}</textarea>
         {% endfor %}
         {% if posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read the advice on flagged words, and the wording is about the job.</span></label>{% endif %}
+        {% if viewer.is_operator and posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="questions_ok" value="1"><span>If a question here uses a word the publish check holds back: {{ question_ok_label }}</span></label>{% endif %}
         <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save criterion</button></div>
       </form>
       <form method="post" action="{{ url_for('people.hiring_criterion_remove', posting_id=posting.id, criterion_id=c.id) }}" class="btnrow"><button class="btn btn-secondary sm" type="submit">Remove this criterion</button></form>
@@ -158,6 +179,7 @@
         <textarea id="n-a{{ n }}" name="anchor{{ n }}" rows="2" maxlength="{{ limits.ANCHOR_MAX }}"></textarea>
         {% endfor %}
         {% if posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read the advice on flagged words, and the wording is about the job.</span></label>{% endif %}
+        {% if viewer.is_operator and posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="questions_ok" value="1"><span>If a question here uses a word the publish check holds back: {{ question_ok_label }}</span></label>{% endif %}
         <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add criterion</button></div>
       </form>
     </div>

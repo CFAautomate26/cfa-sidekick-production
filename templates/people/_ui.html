@@ -34,7 +34,9 @@
   font-variant-numeric: tabular-nums; }
 .pp-stamp { font-size: 0.8125rem; color: var(--text-muted); }
 .pp-text { white-space: pre-line; }
-.pp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* position: relative keeps the screen-reader-only spans (.sr, position: absolute) of a wide
+   table inside the scroller; without it they stretch the whole page sideways on a phone. */
+.pp-scroll { position: relative; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .pp-anchors { list-style: none; margin: 8px 0 0; padding: 0; }
 .pp-anchors li { padding: 9px 0; border-top: 1px solid var(--rule); font-size: 0.9375rem; line-height: 1.45; white-space: pre-line; }
 .pp-anchors li b { display: block; font-size: 0.8125rem; color: var(--text-strong); white-space: normal; }

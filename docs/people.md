@@ -165,7 +165,15 @@ keyboard to talk instead of type.
   Work conduct only: never health, family, leave, religion, age, or that
   someone raised a concern.
 - A plain word-list check runs on every note and shows a flag above it if
-  it finds a word to read again. It never blocks; it is yours to fix.
+  it finds a word to read again. It never blocks; it is yours to fix. It
+  knows everyday words for health, family and time away ("chemo",
+  "appointment", "her mom", "was away for three weeks", "missed two
+  shifts"), not only the formal ones. Under a **To work on** note that
+  reads like time away it adds: *if this was time away, do not write it as
+  a note; mark the dates as time away on the review instead.*
+- It is a word list, not a reader. It misses a misspelling, another
+  language and anything said in a roundabout way, so the rule in the box
+  is still yours to keep.
 - **Leave out of the review** keeps a note on the log without counting it.
   **Remove** takes it off the log (who removed it, and when, is kept).
 - Notes that count toward a review are **shown to the leader with that
@@ -202,10 +210,14 @@ Then:
 ### The AI draft (only if you have switched it on)
 
 **Ask the AI for a draft** sends the notes for the period to the AI service
-with names taken out (see *AI* below). **A note whose wording touches on
-health, family, age, religion, origin, gender, time away or a complaint is
-not sent at all**, and neither is a box of the leader's reflection worded
-that way: the page says how many were held back, and they are yours to read.
+with names taken out (see *AI* below). **Before anything is sent, a plain
+word list looks for wording about health, family, age, religion, origin,
+gender, time away or a complaint, and a note it catches is not sent**;
+neither is a box of the leader's reflection it catches. The page says how
+many were held back, and they are yours to read. **A word list cannot
+catch every way of saying these things** (a misspelling, another language,
+a roundabout phrase), so a note like that is still yours to leave out:
+tap *Leave out of the review* on it, or mark the dates as time away.
 What comes back is a second read of the notes that were sent:
 
 - The draft for a standard appears **only after you have saved your own
@@ -216,7 +228,11 @@ What comes back is a second read of the notes that were sent:
   note behind it is dropped; a note the AI cites that was never sent is
   dropped; a sentence that uses a word about health, family, age or the
   like is taken out of the draft and shown as a line for you to check, and
-  the suggested level for that standard is withheld.
+  the suggested level for that standard is withheld. So is the suggested
+  level for any standard whose draft relied on a note that got through but
+  uses an everyday word that *may* be about health, family or time away
+  ("away", "exhausted", "left early", "hurt"): the note was sent, because
+  such words are usually about work, but it never grounds a level.
 - The "Human check needed" lines at the top of the draft are **fixed
   sentences written by our own code**. The AI can ask for one of four of
   them; anything else it writes there in its own words is never shown,
@@ -288,15 +304,29 @@ sign-in: the date it was discussed, optional comments, and this wording:
 > agree with the review. I can add comments below, and they will be kept
 > with this review.
 
-If their comments use words about harassment or safety, you (only you) see
-a note on the review that it may need follow-up. It is also listed on the
-Leader reviews page, on the People home page and in the menu count, **and
-it stays there, even after the cycle is closed, until you tick "Followed up
-outside this tool"** on the review. Only the tick and the date are kept,
-never what you found. The leader is never stopped or questioned by the
-tool. Their reviewer can read the comments too (the leader's page says so),
-which is why a comment about the reviewer or another senior leader is a
-call to a lawyer first: the note on the review says so.
+**Every comment a leader adds waits for you to read it.** No word list can
+tell whether someone is raising a concern, so each one is listed on the
+Leader reviews page (*Comments to follow up*), on the People home page and
+in the menu count, **and it stays there, even after the cycle is closed,
+until you tick on the review that you have read it and that anything it
+raises was followed up outside this tool**. Where the comments use words
+about harassment, safety or how someone was treated, the entry is marked in
+red as one that may raise a concern, with the escalation note beside it.
+Only the tick and the date are kept, never what you found. The leader is
+never stopped or questioned by the tool. Their reviewer can read the
+comments too (the leader's page says so), which is why a comment about the
+reviewer or another senior leader is a call to a lawyer first: the note on
+the review says so.
+
+**A reflection is read by the reviewer**, who may be the person a leader
+wants to raise something about. The reflection page tells the leader so,
+and that a concern about how they are treated, or about their reviewer,
+goes to you directly. If a reflection a leader has sent uses words about
+harassment, safety or how they were treated, it is listed for you in the
+same places, marked in red, until you tick *Followed up outside this tool*
+on the review; if the leader changes the reflection afterwards it comes
+back. (A reflection is checked by the word list only. Read reflections
+yourself when you can: the list does not catch everything.)
 
 **Print view** (finalised reviews onward) carries the same content with
 signature lines and "Leader declined to sign; copy provided on ____". Use
@@ -326,20 +356,38 @@ change to a live posting is refused if it would make it fail:
 - existing vacancy or not;
 - a hiring contact in Settings;
 - at least two criteria with questions;
-- no question, for applicants or for the interview, that asks what an
-  application may not ask: age or date of birth, pregnancy, marriage or
-  children, religion, citizenship or where someone was born, health or
-  disability, a criminal record, gender, a SIN, a photo or a licence. The
-  check works from a list of phrases, so it catches the plain cases and
-  nothing subtler: **read every question yourself before you publish**;
+- no question, for applicants or for the interview, that uses a listed
+  word about what an application may not ask: age or date of birth,
+  pregnancy, marriage or children, religion, citizenship or where someone
+  is from, health or disability, a record of offences, gender or
+  orientation, a SIN, a photo or a licence. Inside a question the net is
+  wide on purpose: the listed phrases ("how old", "are you single", "what
+  country"), their plurals, and every word the note check knows about
+  health, family, religion, age, origin, gender and leave. It also stops a
+  fair question that happens to use one ("Describe a time you helped a
+  guest with a disability"). Such a question is listed under **Questions
+  held back**: reword it, or **the Operator confirms, one question at a
+  time, that it is about a guest or the work and not about the
+  applicant**. Only the Operator can; each confirmation is written in the
+  Activity log; and it lasts only while the question stays word for word
+  the same. The check catches listed words only. It cannot read a question
+  for meaning, so one that asks about a ground in words on no list still
+  gets through: **read every question yourself before you publish**;
 - if AI assist is ticked for the posting, AI that can really run (see *AI*
   below), so the posting goes live with its AI statement.
 
 It also flags words to read again ("young", "recent grad", "strong",
 "Canadian experience", gendered job titles, tips or bonuses as pay, and any
-word about health, family, religion, age, origin, gender or leave). They
-do not block, but you tick that you have read them and the wording is
-about the job.
+word about health, family, religion, age, origin, gender or leave). In the
+title, the description and a criterion's name and meaning they do not
+block, but you tick that you have read them and the wording is about the
+job.
+
+**The public address** of a posting is made from its title
+(`/careers/team-member`). While a posting is a draft the address follows
+the title, so correcting a title also corrects the address; the publish
+card shows the address it will go live at. Once a posting has been
+published its address never changes, because links to it are already out.
 
 **A setting can leave a live posting failing** without anyone touching the
 posting: the minimum wage goes up on 1 October, or the hiring contact
@@ -549,7 +597,7 @@ under People → Settings, with a short go-live checklist above it.
 |---|---|---|
 | **Sent** | The wording of our standards; the observations that count toward the review; the leader's reflection if they sent one. | The posting's criteria and the applicant's written answers to the quick questions. |
 | **Taken out first** | The leader's name (a two-letter name such as Jo only where it is written with a capital); the names of everyone on the Team Hub roster, the leader list and the review list; email addresses and phone numbers; he/she words. | The applicant's name; the names of everyone on the roster and the leader list; email addresses and phone numbers; he/she words. |
-| **Never sent** | The leader's name, title or area; the reviewer's own ratings and comments; time-away dates; the "before you finish" answers; any note, or box of the reflection, whose wording touches on health, family, age, religion, origin, gender, time away or a complaint; anything from Team Hub activity (checklists, to-dos, training, read receipts, 1:1s). | Name and contact details; availability; how they heard about us; experience; the 18-or-over and work-entitlement answers; interview notes and scores; any answer that may mention health or an accommodation. |
+| **Never sent** | The leader's name, title or area; the reviewer's own ratings and comments; time-away dates; the "before you finish" answers; any note, or box of the reflection, in which the word list finds wording about health, family, age, religion, origin, gender, time away or a complaint (listed words only: what the list misses is sent, which is why reviewers are told to leave such notes out); anything from Team Hub activity (checklists, to-dos, training, read receipts, 1:1s). | Name and contact details; availability; how they heard about us; experience; the 18-or-over and work-entitlement answers; interview notes and scores; any answer that may mention health or an accommodation. |
 
 Taking names out is done by matching the names Team Hub knows. A name it
 does not know (a guest, a nickname) can slip through, and so can a

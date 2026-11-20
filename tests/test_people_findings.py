@@ -225,7 +225,7 @@ def stale_world(world, monkeypatch):
     reviews_ai_on()
     kit.fake_ai(monkeypatch, draft_reply)
     made = rk.one_review(world)
-    made["note"] = rk.observe(made["subject"], "Missed three opens in a row.", -10, "reliable", "growth")
+    made["note"] = rk.observe(made["subject"], "Left the till uncounted on three opens in a row.", -10, "reliable", "growth")
     rk.observe(made["subject"], "Showed a new starter the register.", -3, "teamwork")
     rae = kit.open_as(world, "rae")
     post(rae, review_url(made, "/ai"))
@@ -242,7 +242,7 @@ def test_f3_c3_a_draft_is_not_shown_once_the_notes_it_read_have_changed(world, m
     made, rae = stale_world(world, monkeypatch)
     if change == "time away":
         html = post(rae, review_url(made, "/time-away"), {"start": rk.day(-11), "end": rk.day(-9)})
-        assert "Missed three opens in a row." not in html              # the note no longer counts
+        assert "Left the till uncounted on three opens in a row." not in html              # the note no longer counts
     elif change == "left out":
         post(rae, f"/shift/reviews/observations/{made['note']}/toggle")
     elif change == "removed":
@@ -538,28 +538,39 @@ def test_c6_a_concern_is_listed_until_the_operator_follows_it_up_even_after_the_
     post(lena, f"/shift/reviews/mine/{made['review']}/acknowledge",
          {"confirm": "1", "discussed_on": rk.day(0), "comment": CONCERN})
     assert rdb.acknowledge(plain["review"], rk.day(0), "Thanks, this was fair.", "Ada") is None
-    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 1}
+    # (rewritten after the compliance check, finding C-V2: every comment waits for the Operator,
+    # because no word list can tell whether one raises a concern; the list only marks the likely ones)
+    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 1, "comments": 1}
     assert people_reviews.extra_counts("leader", world["ids"]["rae"], "Rae") == {}
     for cycle in (made["cycle"], plain["cycle"]):
         assert rdb.close_cycle(cycle, "Operator")
     home = page(operator, "/shift/reviews")
     listed = home[home.index('id="follow-up"'):home.index('id="cycles"')]
     assert f'href="/shift/reviews/review/{made["review"]}#leader-comments"' in listed
-    assert f'/review/{plain["review"]}#' not in listed                  # ordinary comments are not flagged
-    assert "1 leader&#39;s comments may raise a concern" in page(operator, "/shift/people")
+    assert listed.count("may raise a concern that needs follow-up. It stays here") == 1
+    assert f'href="/shift/reviews/review/{plain["review"]}#leader-comments"' in listed   # the ordinary one, to read
+    assert "The leader added comments when they confirmed the review. Read them." in listed
+    assert "1 leader&#39;s comments or reflection may raise a concern" in page(operator, "/shift/people")
+    assert "1 leader added comments to a review for you to read" in page(operator, "/shift/people")
     assert "1 to follow up" in page(operator, "/shift/more")            # the badge on the People menu row
     # only the Operator records the follow-up, with a tick, and nothing about what was found is kept
     rae = kit.open_as(world, "rae")
     assert rk.NOT_YOURS in post(rae, f"/shift/reviews/review/{made['review']}/concern-followed", {"confirm": "1"})
     assert "Tick the box" in post(operator, f"/shift/reviews/review/{made['review']}/concern-followed")
-    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 1}
+    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 1, "comments": 1}
     html = post(operator, f"/shift/reviews/review/{made['review']}/concern-followed", {"confirm": "1"})
     assert "Recorded as followed up outside this tool by" in html and CONCERN in html
-    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 0}
-    assert 'id="follow-up"' not in page(operator, "/shift/reviews")
+    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 0, "comments": 1}
     assert "to follow up" not in page(operator, "/shift/more")
-    row = next(r for r in people_db.audit_feed() if r["action"] == "comments followed up outside this tool")
-    assert (row["who"], row["object_id"], row["detail"]) == ("Operator", made["review"], "")
+    assert "1 comment to read" in page(operator, "/shift/more")
+    html = post(operator, f"/shift/reviews/review/{plain['review']}/concern-followed", {"confirm": "1"})
+    assert "Recorded as read, and followed up outside this tool if it needed it, by" in html
+    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 0, "comments": 0}
+    assert 'id="follow-up"' not in page(operator, "/shift/reviews")
+    assert "to read" not in page(operator, "/shift/more")
+    rows = [r for r in people_db.audit_feed() if r["action"] == "comments followed up outside this tool"]
+    assert [(r["who"], r["object_id"], r["detail"]) for r in rows] == [
+        ("Operator", plain["review"], ""), ("Operator", made["review"], "")]
     # a store made before this column existed gains it at the next start
     with people_db.connect() as conn:
         conn.execute("ALTER TABLE rv_reviews DROP COLUMN concern_followed_at")

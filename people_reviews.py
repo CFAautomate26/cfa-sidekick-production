@@ -53,6 +53,9 @@ ACK_TEXT = ("I confirm that I received this review and that it was discussed wit
 SUPPORT_TEXT = ("If anything here is affecting your work that you would like support or an "
                 "accommodation for, please tell the Operator at any time.")
 CONCERN_FLAG = "The leader's comments may raise a concern that needs follow-up"
+REFLECTION_FLAG = "The leader's reflection may raise a concern that needs follow-up"
+COMMENTS_TO_READ = ("The leader added comments. Read them: a word list cannot tell whether "
+                    "comments need follow-up, so every comment waits here for you")
 
 
 # ---------------------------------------------------------------------------
@@ -114,10 +117,27 @@ def _today() -> str:
 
 
 def _concerns() -> list[dict]:
-    """Acknowledged reviews, in any cycle, whose leader's comments may
-    raise harassment, safety or how they were treated, until the Operator
-    marks them followed up. A closed cycle never hides one."""
-    return [r for r in rdb.commented_reviews() if people_ai.concern_terms(r["ack_comment"])]
+    """What a leader wrote that the Operator has to read, in any cycle,
+    until the Operator records that they did (a closed cycle never hides
+    one). Each is the review plus "what" and "flagged":
+
+    - every acknowledged review whose leader added comments ("comments").
+      Not only the ones a word list picks out: a complaint can be worded
+      any way at all, so all of them wait for the Operator, and "flagged"
+      only says the word list found harassment, safety or complaint words;
+    - a reflection the leader has sent in which the word list finds such
+      words ("reflection", always flagged). The reviewer reads a
+      reflection, and the reviewer may be who it is about."""
+    out = [{**r, "what": "comments", "flagged": bool(people_ai.concern_terms(r["ack_comment"]))}
+           for r in rdb.commented_reviews()]
+    out += [{**r, "what": "reflection", "flagged": True} for r in rdb.sent_reflections()
+            if people_ai.concern_terms(" \n".join(r["reflection"].values()))]
+    return out
+
+
+def _reflection_concern(found: dict) -> bool:
+    """Is this review's sent reflection waiting for the Operator's follow-up?"""
+    return any(r["id"] == found["id"] for r in _concerns() if r["what"] == "reflection")
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +266,15 @@ def _month(day: str) -> str:
         return day[:7]
 
 
+TIME_AWAY_PROMPT = ("If this was time away, do not write it as a note: remove the note, and mark the "
+                    "dates as time away on the review instead. Time away never counts against anyone.")
+
+
+def _may_be_time_away(flags: list[dict]) -> bool:
+    """Did the word list find health or time-away wording?"""
+    return any(f["key"] in ("leave", "health") for f in flags)
+
+
 def _log_page(subject: dict, draft: dict | None = None, status: int = 200):
     who = people.viewer()
     model = people_db.active_model()
@@ -253,6 +282,7 @@ def _log_page(subject: dict, draft: dict | None = None, status: int = 200):
     months: list[dict] = []
     for note in rdb.observations(subject["id"]):
         note["flags"] = people_ai.language_check(note["body"])
+        note["time_away"] = note["kind"] == "growth" and _may_be_time_away(note["flags"])
         note["standard"] = names.get(note["dimension_key"] or "")
         label = _month(note["obs_date"])
         if not months or months[-1]["label"] != label:
@@ -263,7 +293,7 @@ def _log_page(subject: dict, draft: dict | None = None, status: int = 200):
         "people/reviews/log.html", subject=subject, model=model, months=months,
         removed=rdb.observations(subject["id"], removed=True) if who.is_operator else [],
         reviews=reviews, kinds=rdb.OBS_KIND_LABELS, draft=draft or {}, today=shift_db.today_local(),
-        caps=rdb.CAPS, reviewer=_reviewer_label(subject)), status
+        caps=rdb.CAPS, reviewer=_reviewer_label(subject), time_away_prompt=TIME_AWAY_PROMPT), status
 
 
 def leader_log(subject_id: int):
@@ -291,6 +321,8 @@ def observe(subject_id: int):
         return _log_page(subject, draft=entered, status=400)      # what was typed is kept
     flagged = people_ai.language_check(hub_text.clean(entered["body"]))
     flash("Note saved. Have a look at the wording check shown above it." if flagged else "Note saved.")
+    if entered["kind"] == "growth" and _may_be_time_away(flagged):
+        flash(TIME_AWAY_PROMPT)
     return redirect(url_for("people.reviews_leader", subject_id=subject_id) + f"#o-{obs_id}")
 
 
@@ -460,6 +492,8 @@ def review(review_id: int):
         ai=_ai_state(found, model, rated), unrated=rdb.unrated(found, model, rated),
         hold_text=HOLD_TEXT, gate=gate, gate_questions=rdb.GATE, release_notes=rdb.RELEASE_NOTES,
         concern=(CONCERN_FLAG if who.is_operator and people_ai.concern_terms(found["ack_comment"]) else ""),
+        comments_to_read=(COMMENTS_TO_READ if who.is_operator and found["ack_comment"] else ""),
+        reflection_concern=(REFLECTION_FLAG if who.is_operator and _reflection_concern(found) else ""),
         kinds=rdb.OBS_KIND_LABELS, caps=rdb.CAPS, reviewer=_reviewer_label(found), today=_today(),
         action_rule=rdb.ACTION_RULE, linked=bool(found["leader_id"]))
 
@@ -644,13 +678,14 @@ def concern_followed(review_id: int):
     found = rdb.get_review(review_id)
     if not found:
         return people.deny()
+    reflection = request.form.get("what") == "reflection"
     if request.form.get("confirm") != "1":
         flash("Tick the box to say it was followed up outside this tool.")
-    elif rdb.mark_concern_followed(review_id, people.actor()):
+    elif (rdb.mark_reflection_followed if reflection else rdb.mark_concern_followed)(review_id, people.actor()):
         flash("Recorded as followed up. Nothing about what was found is kept here.")
     else:
         flash("That was already recorded, or there is nothing to follow up on this review.")
-    return _back(review_id, "leader-comments")
+    return _back(review_id, "reflection" if reflection else "leader-comments")
 
 
 def share(review_id: int):
@@ -939,9 +974,11 @@ def ai_payload(found: dict, model: dict) -> dict:
     details and he/she words already taken out. Never in it: the leader's
     name, title or area, the reviewer's own ratings and comments, time-away
     dates, or anything from Team Hub activity. A note, or a part of the
-    leader's reflection, whose wording touches on health, family, religion,
-    age, origin, gender, or leave and complaints is not sent at all:
-    "withheld" counts them, so the page can say so."""
+    leader's reflection, in which the word list (people_ai.language_check)
+    finds wording about health, family, religion, age, origin, gender, or
+    leave and complaints is not sent at all: "withheld" counts them, so the
+    page can say so. A word list is not a reader: what it misses is sent,
+    which is why the pages tell the reviewer to leave such notes out."""
     own, others = _names_to_remove(found)
 
     def scrub(text: str) -> str:
@@ -1041,6 +1078,7 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
     the AI's own "human checks" only the fixed lines (people_ai.fixed_checks),
     never its own words."""
     supplied = {e["id"] for e in payload["evidence"]}
+    sent_text = {e["id"]: e["text"] for e in payload["evidence"]}
     given = raw.get("dimensions")
     if isinstance(given, list):
         given = {d.get("key"): d for d in given if isinstance(d, dict)}
@@ -1066,6 +1104,17 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
             level = None
             own_checks.append("No level is suggested here: the draft touched on something that must "
                               "never count for or against a person. Rate this from the evidence.")
+        # A second line behind the word list that decides what is sent: a
+        # note that got through but uses an everyday word that may be about
+        # health, family or time away never grounds a suggested level.
+        maybe = list(dict.fromkeys(term for item in cited
+                                   for term in people_ai.wider_terms(sent_text.get(item, ""))))
+        if maybe:
+            level, withheld = None, True
+            own_checks.append(
+                "No level is suggested here: a note this draft relied on uses wording that may be "
+                f"about health, family or time away (“{'”, “'.join(maybe[:4])}”). If it is, leave "
+                "that note out of the review. " + NEVER_COUNTS)
         if len(cited) == 1:
             own_checks.append(SINGLE_OBSERVATION)
         dimensions[dim["key"]] = {
@@ -1138,12 +1187,16 @@ def nav_counts(kind, leader_id, name) -> dict:
 
 def extra_counts(kind, leader_id, name) -> dict:
     """More for the Operator's badge and People home page: concerns (a
-    leader's comments on a review, in any cycle, that may need follow-up
-    and have not been marked as followed up)."""
+    leader's comments or sent reflection, in any cycle, in which the word
+    list finds harassment, safety or complaint words) and comments (every
+    other comment a leader added when confirming a review). Both stay
+    until the Operator records that they were read and followed up."""
     if kind != "operator":
         return {}
     people_db.ensure()
-    return {"concerns": len(_concerns())}
+    waiting = _concerns()
+    flagged = sum(1 for r in waiting if r["flagged"])
+    return {"concerns": flagged, "comments": len(waiting) - flagged}
 
 
 def own_count(kind, leader_id, name) -> int:

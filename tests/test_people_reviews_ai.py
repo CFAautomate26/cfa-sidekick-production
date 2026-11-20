@@ -346,7 +346,8 @@ def test_a_running_draft_refreshes_the_page_and_pauses_saving(world, monkeypatch
     rae = kit.open_as(world, "rae")
     html = page(rae, url(made))
     assert "Drafting…" in html
-    assert f'<meta http-equiv="refresh" content="5; url={url(made)}#ai">' in html
+    # no "#ai" on the refresh address: with one, a real browser never reloads (see test_people_verify.py)
+    assert f'<meta http-equiv="refresh" content="5; url={url(made)}">' in html
     assert html.count('<fieldset class="rv-set" disabled>') == 6     # three standards, summary, action, dates
     assert "Ask the AI for a draft" not in html and "Try again" not in html
     # asking again while one is running starts nothing new

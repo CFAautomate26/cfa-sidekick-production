@@ -6,7 +6,10 @@
 {% from "people/hiring/_bits.html" import hiring_styles, level_picker, stage_badge %}
 {% block title %}Candidate{% endblock %}
 {% block head %}{{ hiring_styles() }}
-{% if ai.status in ('queued', 'working') %}<meta http-equiv="refresh" content="6">{% endif %}
+{# An explicit address with no "#...": this page is reached with #answers
+   after the ask, and a browser does not reload for a refresh to the
+   address it is on plus a fragment. #}
+{% if ai.status in ('queued', 'working') %}<meta http-equiv="refresh" content="6; url={{ url_for('people.hiring_candidate', application_id=c.id) }}">{% endif %}
 {% endblock %}
 {% block content %}
 {{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), (c.name, none)]) }}
@@ -118,7 +121,7 @@
     {% else %}
     <p class="card-meta">A second read of the written answers against the criteria. It sees no name, contact details, availability or experience, and it never moves anyone. Save your own level first: a suggestion shows only beside an answer you have already scored.</p>
     {% if ai.status in ('queued', 'working') %}
-    <p class="callout tan">{{ icon('clock') }}<span>The AI is reading the answers. This page refreshes by itself.</span></p>
+    <p class="callout tan">{{ icon('clock') }}<span>The AI is reading the answers. This page refreshes by itself. If it does not, <a href="{{ url_for('people.hiring_candidate', application_id=c.id) }}">check now</a>.</span></p>
     {% elif ai.status == 'failed' %}
     <p class="callout warm">{{ icon('alert') }}<span>The last request did not finish{% if ai.error %}: {{ ai.error }}{% endif %}</span></p>
     {% elif ai.status == 'done' %}
