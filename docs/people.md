@@ -446,8 +446,10 @@ reason notes describe what happened and not who.
 
 Every request is kept on record exactly as it was sent, with the reply,
 the model and the date: it is in the People backup. A request that has not
-come back after three minutes shows as failed, and you can ask again. The
-model is `gpt-4o-mini` unless `PEOPLE_AI_MODEL` names another.
+come back after three minutes shows as failed, and you can ask again. Which
+of the provider's models is used is set in `people_ai.py`, unless
+`PEOPLE_AI_MODEL` names another; each request's record shows the one it
+used.
 
 ## Backups
 
@@ -473,7 +475,7 @@ the disk. Download it after each review cycle and after each hiring round.
 |---|---|
 | `PEOPLE_DB_PATH` | Where the People database lives. Leave it unset and it is `people.db` beside the Team Hub database (`SHIFT_DB_PATH`), on the persistent disk. |
 | `OPENAI_API_KEY` | The AI service key. Already set for the GroupMe bot. People uses it only while an AI switch is on. |
-| `PEOPLE_AI_MODEL` | Optional. The AI model to use; `gpt-4o-mini` if unset. |
+| `PEOPLE_AI_MODEL` | Optional. Which of the AI provider's models to use; the default in `people_ai.py` if unset. |
 
 ## Left out of version 1, on purpose
 

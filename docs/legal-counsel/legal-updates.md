@@ -31,8 +31,9 @@ that day: run a full briefing before relying on them for a decision.
 
 - **Every Oct 1**: Ontario minimum wage indexation (general + student rates).
   Update [ontario-employment-standards.md](./ontario-employment-standards.md)
-  and check anyone within $0.50 of the new floor, including wage compression
-  above it.
+  and the two minimum-wage figures in Team Hub's People settings (a job
+  posting is checked against them), and check anyone within $0.50 of the
+  new floor, including wage compression above it.
 - ***Working for Workers* act series**: Ontario has amended the ESA nearly
   annually since 2021. Watch for the next act each session of the
   Legislature.

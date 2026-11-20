@@ -38,7 +38,7 @@
       {%- if counts.notices_due %}<span class="badge b-tan">{{ counts.notices_due }} notice{{ '' if counts.notices_due == 1 else 's' }} due</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
   {% endif %}
   {% if mine_url %}
-  <a class="row" href="{{ mine_url }}"><span class="lead-ico{{ ' red' if counts.mine else ' navy' }}">{{ icon('file') }}</span><span class="row-main"><span class="row-title">My review</span><span class="row-meta">{% if counts.mine %}Something is waiting for you.{% else %}Your own reviews, once they are shared with you.{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+  <a class="row" href="{{ mine_url }}"><span class="lead-ico{{ ' red' if counts.mine else ' navy' }}">{{ icon('file') }}</span><span class="row-main"><span class="row-title">My review</span><span class="row-meta">{% if counts.mine %}Something is waiting for you.{% else %}Your reflections, and the reviews that have been shared with you.{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
   {% endif %}
 </div>
 {% elif not viewer.caps %}
