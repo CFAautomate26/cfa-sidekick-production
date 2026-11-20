@@ -99,6 +99,16 @@ CREATE INDEX IF NOT EXISTS idx_people_ai_jobs_target ON ai_jobs (kind, target_id
 CREATE TABLE IF NOT EXISTS unlocks (
   id_hash TEXT PRIMARY KEY, identity TEXT NOT NULL, created_at INTEGER NOT NULL,
   last_seen INTEGER NOT NULL);
+
+-- Local housekeeping for the PIN lock: one row per PIN recently tried at
+-- the lock, written BEFORE that PIN is checked, so the limit holds however
+-- many are sent at the same moment, across restarts and across server
+-- processes. `key` is "op" or "l:<leader id>"; `at` is a clock stamp.
+-- Never the PIN. Never exported. No personal content.
+CREATE TABLE IF NOT EXISTS pin_tries (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL, at INTEGER NOT NULL);
+
+CREATE INDEX IF NOT EXISTS idx_people_pin_tries_key ON pin_tries (key, at);
 """
 
 
@@ -223,6 +233,42 @@ def unlock_close(unlock_id) -> None:
     if unlock_id and isinstance(unlock_id, str):
         with closing(connect()) as conn, conn:
             conn.execute("DELETE FROM unlocks WHERE id_hash=?", (_unlock_hash(unlock_id),))
+
+
+def pin_try(key: str, now: int, limit: int, window: int) -> int:
+    """Count one PIN about to be checked at the lock, and return which try
+    in the last `window` seconds it is (1, 2, ...), or 0 when `limit` tries
+    are already counted and this one must not be checked at all.
+
+    The count and the new row are one write transaction, so two requests
+    can never both see room for the last try: whatever arrives together,
+    at most `limit` PINs are ever checked in a window. A right PIN clears
+    the count afterwards (pin_clear)."""
+    key, now, window = str(key)[:40], int(now), int(window)
+    with closing(connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM pin_tries WHERE at <= ? OR at > ?", (now - window, now + window))
+        # No upper bound on `at`: a request that read the clock a second
+        # earlier than one already counted must still see that one.
+        recent = conn.execute("SELECT COUNT(*) FROM pin_tries WHERE key=? AND at > ?",
+                              (key, now - window)).fetchone()[0]
+        if recent >= int(limit):
+            return 0
+        conn.execute("INSERT INTO pin_tries (key, at) VALUES (?,?)", (key, now))
+        return recent + 1
+
+
+def pin_tries(key: str, now: int, window: int) -> int:
+    """How many tries are counted for this sign-in right now."""
+    with closing(connect()) as conn:
+        return conn.execute("SELECT COUNT(*) FROM pin_tries WHERE key=? AND at > ? AND at <= ?",
+                            (str(key)[:40], int(now) - int(window), int(now) + int(window))).fetchone()[0]
+
+
+def pin_clear(key: str) -> None:
+    """The right PIN was entered: forget the tries before it."""
+    with closing(connect()) as conn, conn:
+        conn.execute("DELETE FROM pin_tries WHERE key=?", (str(key)[:40],))
 
 
 # ---------------------------------------------------------------------------
@@ -493,17 +539,17 @@ def token_hash(token: str) -> str:
 # ---------------------------------------------------------------------------
 
 def export_json(by: str) -> str:
-    """Every People table except the two that are local housekeeping (meta
-    and unlocks: the link pepper and who has the lock open right now), as
-    one JSON document. It holds private information about people:
-    Operator-only, and logged."""
+    """Every People table except the three that are local housekeeping
+    (meta, unlocks and pin_tries: the link pepper, who has the lock open
+    right now, and the PINs recently tried at it), as one JSON document.
+    It holds private information about people: Operator-only, and logged."""
     with closing(connect()) as conn:
         with conn:
             _audit(conn, by, "backup downloaded")
         conn.execute("BEGIN")                        # one consistent snapshot
         names = [r["name"] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
-            "AND name NOT IN ('meta', 'unlocks') ORDER BY name")]
+            "AND name NOT IN ('meta', 'unlocks', 'pin_tries') ORDER BY name")]
         tables = {name: [dict(r) for r in conn.execute(f'SELECT * FROM "{name}"')]
                   for name in names}
         conn.commit()

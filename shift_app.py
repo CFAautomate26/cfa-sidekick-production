@@ -66,6 +66,7 @@ SHIFT_ROSTER_SLACK_CHANNEL = os.getenv("SHIFT_ROSTER_SLACK_CHANNEL", "").strip()
 _MAX_FAILS = 5
 _LOCK_SECONDS = 600
 _pin_fails: dict[str, list[float]] = {}
+_pin_lock = threading.Lock()
 
 
 def _locked_out(name: str) -> bool:
@@ -88,6 +89,20 @@ def _record_fail(name: str) -> None:
 
 def _clear_fails(name: str) -> None:
     _pin_fails.pop(name.lower(), None)
+
+
+def _count_pin_try(name: str) -> bool:
+    """Count one PIN about to be checked for this name; False when the name
+    is locked out and the PIN must not be checked at all. The check and the
+    count are one step under a lock, and the count comes BEFORE the PIN is
+    verified (a leader's PIN is a slow hash), so guesses that arrive in the
+    same instant cannot all get in ahead of the first recorded miss. A
+    right PIN clears the count (_clear_fails)."""
+    with _pin_lock:
+        if _locked_out(name):
+            return False
+        _record_fail(name)
+        return True
 
 
 def app_configured() -> bool:
@@ -356,7 +371,7 @@ def login():
 
         if not name or not pin:
             error = "Pick your name and enter your PIN."
-        elif _locked_out(name):
+        elif not _count_pin_try(name):          # counted before the PIN is checked
             error = "Too many wrong PINs. Try again in 10 minutes."
         elif name.lower() == OPERATOR_NAME.lower():
             if SHIFT_ADMIN_PIN and hmac.compare_digest(pin, SHIFT_ADMIN_PIN):
@@ -368,7 +383,6 @@ def login():
                 session["shift_pin_tag"] = _operator_pin_tag()
                 return _safe_next()
             error = "Wrong PIN."
-            _record_fail(name)
         else:
             leader = shift_db.verify_leader(name, pin)
             if leader:
@@ -381,7 +395,6 @@ def login():
                 session["shift_epoch"] = shift_db.session_epoch()
                 return _safe_next()
             error = "Wrong name or PIN."
-            _record_fail(name)
 
         return render_front_door("leader", error, name, 401)
 

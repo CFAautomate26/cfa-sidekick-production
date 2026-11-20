@@ -123,8 +123,9 @@ def test_the_raw_shift_database_file_holds_nothing_that_was_typed(walked):
 
 def test_the_people_backup_is_the_only_copy_and_leaves_the_pepper_out(walked):
     backup = json.loads(people_db.export_json("Operator"))
-    # everything but the two tables of local housekeeping (the link pepper, and who has the lock open)
-    assert set(backup["tables"]) == people_tables() - {"meta", "unlocks"}
+    # everything but the tables of local housekeeping (the link pepper, who has the lock open,
+    # and the PINs recently tried at the lock)
+    assert set(backup["tables"]) == people_tables() - {"meta", "unlocks", "pin_tries"}
     assert people_walk.OBSERVATION in json.dumps(backup) and people_walk.ANSWERS[0] in json.dumps(backup)
     token = walked.ids["private"].rsplit("/", 1)[1]
     assert token not in json.dumps(backup) and "token_pepper" not in json.dumps(backup)

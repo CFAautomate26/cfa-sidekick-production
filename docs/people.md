@@ -64,7 +64,13 @@ Things to know:
   the lock and to your own sign-in: wrong PINs typed at the sign-in page,
   by you or by anyone else, never hold your People lock, and wrong PINs
   here do not lock your sign-in. The activity log notes each wrong PIN and
-  each hold.
+  each hold. Every try is counted before its PIN is checked, and the count
+  is kept in the People store, so the limit holds when many guesses are
+  sent in the same instant, after a restart, and across server processes.
+  The sign-in page counts the same way (count first, then check), but in
+  the memory of the running server, as it always has: each server process
+  keeps its own count, so run the app as **one process** (see *For whoever
+  maintains it*).
 - The PIN box is deliberately not a password box, so a browser that saved
   your sign-in PIN does not fill it in for whoever is holding the phone.
   **On a phone or computer other people use, don't let the browser save
@@ -641,4 +647,14 @@ on its own after the Hub, so a fault in it never takes down `/shift`,
 who-may-open-what table; `tests/test_people_privacy.py` walks both flows
 and checks nothing private leaves the People store;
 `tests/test_people_findings.py` has one or more tests for each thing two
-independent reviews of the finished section found, named by finding).
+independent reviews of the finished section found, named by finding, and
+`tests/test_people_verify.py` does the same for the three checks that
+followed: an attack on those fixes, a compliance read, and a run in a real
+browser).
+
+**How the app is served matters to the PIN.** A four-digit PIN is only as
+strong as the limit on guesses. The lock's limit is kept in the People
+store. The sign-in page's limit is kept in the memory of each server
+process, so serve the app as a single process (`python app.py`, or one
+gunicorn worker): with several workers, each one allows its own five
+guesses per ten minutes.

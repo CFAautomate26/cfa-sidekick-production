@@ -45,7 +45,7 @@ def make_world(monkeypatch, tmp_path, bare: bool = False) -> dict:
     people_db.init_db()
     shift_app._pin_fails.clear()
     hub._fails.clear()
-    people._unlock_fails.clear()
+    # (PINs tried at the People lock are counted in the People store, which is new here)
     monkeypatch.setattr(shift_app, "SHIFT_ADMIN_PIN", PINS["operator"])
     cfa_app.app.config["TESTING"] = True
     for who, role in (("lena", "lead"), ("ada", "admin"), ("hari", "lead"), ("rae", "lead")):

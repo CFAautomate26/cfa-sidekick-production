@@ -307,37 +307,16 @@ def _safe_next(raw: str | None) -> str:
     return ""
 
 
-# Wrong PINs at the lock are counted here, apart from wrong PINs at sign-in.
-# Only someone already signed in can add to this count, and it is kept
-# against that sign-in ("op" or "l:<leader id>"), so nobody on the public
-# sign-in page can shut a leader out of People by guessing at their name.
+# PINs tried at the lock are counted in the People store (people_db.pin_try),
+# apart from wrong PINs at sign-in. Only someone already signed in can add
+# to this count, and it is kept against that sign-in ("op" or
+# "l:<leader id>"), so nobody on the public sign-in page can shut a leader
+# out of People by guessing at their name. Each try is counted BEFORE its
+# PIN is checked, in one write transaction, so the limit holds when many
+# guesses arrive at the same moment, after a restart, and across server
+# processes.
 UNLOCK_MAX_MISSES = 5
 UNLOCK_HOLD_SECONDS = 600
-_unlock_fails: dict[str, list[int]] = {}
-
-
-def _recent_misses(identity: str) -> list[int]:
-    now = _now()
-    return [t for t in _unlock_fails.get(identity, []) if 0 <= now - t < UNLOCK_HOLD_SECONDS]
-
-
-def _unlock_held(identity: str) -> bool:
-    misses = _recent_misses(identity)
-    if misses:
-        _unlock_fails[identity] = misses
-    else:
-        _unlock_fails.pop(identity, None)
-    return len(misses) >= UNLOCK_MAX_MISSES
-
-
-def _unlock_miss(identity: str) -> bool:
-    """Count one wrong PIN. True when this one starts a hold."""
-    if len(_unlock_fails) > 500:                 # bounded: forget whoever has nothing recent
-        for key in [k for k in _unlock_fails if not _recent_misses(k)]:
-            _unlock_fails.pop(key, None)
-    misses = _recent_misses(identity) + [_now()]
-    _unlock_fails[identity] = misses
-    return len(misses) == UNLOCK_MAX_MISSES
 
 
 @people_bp.route("/people/unlock", methods=["GET", "POST"])
@@ -355,10 +334,13 @@ def unlock():
     if not pin:
         flash("Enter your PIN.")
         return redirect(again)
-    # Five wrong PINs hold the lock for ten minutes: checked before the
-    # PIN is, a miss is counted, a hit clears it.
+    # Five wrong PINs hold the lock for ten minutes. This try is counted
+    # first and only then is its PIN checked: a sixth is never checked,
+    # even when it arrives in the same instant as the other five. The
+    # right PIN clears the count.
     identity = _identity(who)
-    if _unlock_held(identity):
+    nth = people_db.pin_try(identity, _now(), UNLOCK_MAX_MISSES, UNLOCK_HOLD_SECONDS)
+    if not nth:
         flash("Too many wrong PINs. Try again in 10 minutes.")
         return redirect(again)
     if who.is_operator:
@@ -368,13 +350,12 @@ def unlock():
         leader = shift_db.verify_leader(who.name, pin) if who.leader_id else None
         ok = bool(leader) and leader["id"] == who.leader_id
     if not ok:
-        held = _unlock_miss(identity)
         people_db.audit(who.name, "wrong PIN at the lock")
-        if held:
+        if nth == UNLOCK_MAX_MISSES:
             people_db.audit(who.name, "lock held after wrong PINs")
         flash("Wrong PIN.")
         return redirect(again)
-    _unlock_fails.pop(identity, None)
+    people_db.pin_clear(identity)
     people_db.unlock_close(session.get("people_unlock_id"))
     session["people_unlock_at"] = _now()
     session["people_unlock_for"] = identity

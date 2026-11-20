@@ -388,6 +388,13 @@ def flashed(client):
         return [m for _, m in sess.get("_flashes", [])]
 
 
+def lock_tries(identity: str) -> int:
+    """PINs counted at the lock for this sign-in ("op" or "l:<leader id>"):
+    kept in the People store, so they survive a restart and are shared by
+    every server process."""
+    return people_db.pin_tries(identity, people._now(), people.UNLOCK_HOLD_SECONDS)
+
+
 def test_people_is_registered_on_a_fresh_boot():
     assert "people" in cfa_app.app.blueprints and "careers" in cfa_app.app.blueprints
     assert people.FEATURES == {"reviews", "hiring"}
@@ -519,7 +526,7 @@ def test_a_wrong_pin_stays_locked_and_five_of_them_hold_the_lock(world, capsys):
         assert resp.headers["Location"] == UNLOCK + "?next=/shift/people/standards"
         assert flashed(client)[-1] == "Wrong PIN."
         assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
-    assert len(people._unlock_fails[mine]) == 5
+    assert lock_tries(mine) == 5
     # held now: even the right PIN is refused at the lock, under either field name
     for field in ("unlock_code", "pin"):
         client.post(UNLOCK, data={field: "1111"})
@@ -543,12 +550,12 @@ def test_the_right_pin_clears_earlier_misses_and_an_empty_one_is_not_a_miss(worl
     mine = f"l:{world['ids']['rae']}"
     client.post(UNLOCK, data={"pin": ""})
     assert flashed(client)[-1] == "Enter your PIN."
-    assert mine not in people._unlock_fails
+    assert lock_tries(mine) == 0
     client.post(UNLOCK, data={"pin": "1"})
     client.post(UNLOCK, data={"pin": "22"})
-    assert len(people._unlock_fails[mine]) == 2
+    assert lock_tries(mine) == 2
     kit.unlock(client, "rae")
-    assert mine not in people._unlock_fails and "rae" not in shift_app._pin_fails
+    assert lock_tries(mine) == 0 and "rae" not in shift_app._pin_fails
 
 
 def test_only_your_own_pin_opens_the_lock(world, monkeypatch):
@@ -673,7 +680,7 @@ def test_another_site_cannot_open_the_lock_either(world):
     kit.sign_in(client, "operator")
     client.post(UNLOCK, data={"pin": "9999"}, headers={"Origin": "https://evil.example"})
     assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
-    assert "operator" not in shift_app._pin_fails and "op" not in people._unlock_fails
+    assert "operator" not in shift_app._pin_fails and lock_tries("op") == 0
 
 
 # --- who gets what ------------------------------------------------------------
