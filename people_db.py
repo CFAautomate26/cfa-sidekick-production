@@ -109,14 +109,19 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+_ready: set[str] = set()
+
+
 def init_db() -> None:
     """Create the core tables, then let each feature store add its own. A
     feature whose schema fails is skipped with a warning: it must not take
     the rest of People down with it."""
+    path = db_path()
     with closing(connect()) as conn:
         conn.executescript(SCHEMA)
         with conn:
             _pepper(conn)
+        _ready.add(path)
         for name in FEATURE_STORES:
             try:
                 importlib.import_module(name).init_schema(conn)
@@ -124,6 +129,15 @@ def init_db() -> None:
             except Exception as e:
                 conn.rollback()
                 print(f"WARNING: People store {name} failed to set up its tables: {e!r}")
+
+
+def ensure() -> None:
+    """Make sure the store at the current path has its tables. The app sets
+    it up at boot; this covers a path that changed since (a test's fresh
+    database, a moved disk), so a People page never meets a missing table."""
+    path = db_path()
+    if path not in _ready or not os.path.exists(path):
+        init_db()
 
 
 def _line(value, cap: int) -> str:

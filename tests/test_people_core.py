@@ -78,6 +78,28 @@ def test_set_up_is_repeatable_and_one_broken_feature_store_is_skipped(world, mon
     assert people_db.active_model()["version"] == 1                # nothing was lost
 
 
+def test_a_store_that_was_never_set_up_is_made_on_the_first_people_page(world, tmp_path, monkeypatch):
+    """The app sets the store up at boot. A path that changed afterwards
+    (another test's fresh database) must never be a missing-table error."""
+    fresh = tmp_path / "fresh" / "people.db"
+    fresh.parent.mkdir()
+    monkeypatch.setenv("PEOPLE_DB_PATH", str(fresh))
+    assert not fresh.exists()
+    lena = world["client"]
+    kit.sign_in(lena, "lena")
+    assert lena.get("/shift/").status_code == 200                  # the menu shrugs it off
+    resp = lena.get("/shift/people")
+    assert resp.status_code == 302 and "/shift/people/unlock" in resp.headers["Location"]
+    assert fresh.exists() and people_db.capabilities(world["ids"]["hari"], "Hari") == frozenset()
+    kit.unlock(lena, "lena")
+    assert lena.get("/shift/people").status_code == 200
+    fresh.unlink()                                                 # even a file that vanished
+    for extra in (str(fresh) + "-wal", str(fresh) + "-shm"):
+        if os.path.exists(extra):
+            os.unlink(extra)
+    assert lena.get("/shift/people").status_code == 200
+
+
 # --- settings -----------------------------------------------------------------
 
 def test_settings_have_defaults_and_reject_unknown_keys(world):
@@ -369,6 +391,40 @@ def test_people_is_registered_on_a_fresh_boot():
     assert set(CORE_PAGES) <= rules and UNLOCK in rules and "/shift/people/lock" in rules
 
 
+def test_a_feature_imported_ahead_of_people_is_asked_again_not_written_off(monkeypatch, capsys):
+    """A test (or a script) may import people_reviews before the app; that
+    module then imports people while it is itself only half-built."""
+    import sys
+    import types
+    calls = []
+    half = types.ModuleType("people_probe")
+    half.__spec__ = types.SimpleNamespace(_initializing=True)
+    monkeypatch.setitem(sys.modules, "people_probe", half)
+    monkeypatch.setattr(people, "_FEATURE_NAMES", people._FEATURE_NAMES + (("probe", "people_probe"),))
+    monkeypatch.setattr(people, "FEATURES", set(people.FEATURES))
+    monkeypatch.setattr(people, "_settled", set(people._settled))
+    monkeypatch.setattr(people, "_FEATURE_MODULES", dict(people._FEATURE_MODULES))
+    people.load_features()
+    assert "probe" not in people.FEATURES and capsys.readouterr().out == ""    # waiting, not failed
+    half.register = lambda bp: calls.append(bp)
+    half.__spec__._initializing = False
+    people.load_features()
+    people.load_features()                                   # once only
+    assert "probe" in people.FEATURES and calls == [people.people_bp]
+    # one that really is broken is skipped with a warning, and never retried
+    broken = types.ModuleType("people_broken")
+    broken.register = lambda bp: 1 / 0
+    monkeypatch.setitem(sys.modules, "people_broken", broken)
+    monkeypatch.setattr(people, "_FEATURE_NAMES", people._FEATURE_NAMES + (("broken", "people_broken"),
+                                                                           ("gone", "people_gone")))
+    people.load_features()
+    people.load_features()
+    out = capsys.readouterr().out
+    assert out.count("WARNING: People feature broken failed to load") == 1
+    assert out.count("WARNING: People feature gone failed to load") == 1
+    assert not {"broken", "gone"} & people.FEATURES and {"reviews", "hiring"} <= people.FEATURES
+
+
 # --- the gate, in order ---------------------------------------------------------
 
 def test_signed_out_lands_on_the_front_door(world):
@@ -424,6 +480,13 @@ def test_pages_stay_locked_until_the_pin_is_entered_again(world, who):
     assert resp.status_code == 302 and resp.headers["Location"] == UNLOCK
     assert "People pages locked themselves. Enter your PIN and try again." in flashed(client)
     assert people_db.get_setting("lock_minutes") == "30"
+    # ... and after the PIN they land back on the page the form was on
+    resp = client.post("/shift/people/settings", data={"lock_minutes": "99"},
+                       headers={"Referer": "http://localhost/shift/people/settings"})
+    assert resp.headers["Location"] == UNLOCK + "?next=/shift/people/settings"
+    resp = client.post("/shift/people/settings", data={"lock_minutes": "99"},
+                       headers={"Referer": "https://evil.example/shift/people/settings"})
+    assert resp.headers["Location"] == UNLOCK
     lock_page = page(client, UNLOCK + "?next=/shift/people/standards")
     assert "Enter your PIN to open People pages" in lock_page
     assert "These pages hold private information about people, so they lock after 30 minutes." in lock_page
@@ -432,6 +495,7 @@ def test_pages_stay_locked_until_the_pin_is_entered_again(world, who):
     resp = client.post(UNLOCK, data={"pin": world["pins"][who], "next": "/shift/people/standards"})
     assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people/standards"
     assert client.get("/shift/people").status_code == 200
+    assert client.get("/shift/people/").status_code == 200          # with or without the slash
     # once open, the lock page just sends you on
     assert client.get(UNLOCK).headers["Location"] == "/shift/people"
     assert [r["who"] for r in people_db.audit_feed() if r["action"] == "unlocked"] == [kit.NAMES[who]]

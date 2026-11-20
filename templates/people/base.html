@@ -27,7 +27,7 @@
   {% block content %}{% endblock %}
   {% block lockbar %}{% if people_unlocked %}
   <div class="pp-lockbar no-print">
-    <span>{{ icon('lock', 'xs') }} Private pages. They lock after {{ people_lock_minutes }} minutes without a tap.</span>
+    <span>{{ icon('lock', 'xs') }} Private pages. They lock after {{ people_lock_minutes }} minutes without a tap, so save as you go.</span>
     <form method="post" action="{{ url_for('people.lock') }}"><button class="btn btn-secondary sm" type="submit">Lock now</button></form>
   </div>
   {% endif %}{% endblock %}

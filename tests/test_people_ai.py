@@ -271,15 +271,17 @@ def test_a_second_request_joins_the_job_already_running(world, monkeypatch, thre
 def test_a_job_that_never_finishes_reads_as_failed_after_three_minutes(world, monkeypatch, threads):
     clock = {"now": datetime(2026, 11, 20, 14, 0, tzinfo=shift_db.STORE_TZ)}
     monkeypatch.setattr(shift_db, "now_local", lambda: clock["now"])
-    release = threading.Event()
+    release, reached = threading.Event(), threading.Event()
 
     def stuck_then_fine(system, user):
         if not calls[1:]:                        # only the first call hangs
+            reached.set()
             assert release.wait(10)
         return REPLY
 
     calls = kit.fake_ai(monkeypatch, stuck_then_fine)
     first = people_ai.start_job(KIND, 1, PAYLOAD, "Rae")
+    assert reached.wait(10)                      # the first worker is now inside the AI call
     clock["now"] += timedelta(minutes=3)
     assert people_ai.latest_job(KIND, 1)["status"] in ("queued", "working")   # three minutes is allowed
     clock["now"] += timedelta(minutes=1)

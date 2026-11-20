@@ -82,9 +82,10 @@ if shift_db is not None:
 if shift_db is not None:
     try:
         import people_db
-        from people import people_bp
+        from people import load_features, people_bp
 
         people_db.init_db()
+        load_features()         # no-op unless a feature was imported ahead of people.py
         app.register_blueprint(people_bp)
         try:
             from careers import careers_bp

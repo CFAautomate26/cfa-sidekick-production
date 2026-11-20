@@ -159,6 +159,7 @@ def _gate():
     if not reading and _cross_site():
         flash("That didn't come from Team Hub. Please try again.")
         return redirect(url_for("people.home"))
+    people_db.ensure()
     if shift_app._is_operator():
         who = Viewer("operator", None, shift_app.OPERATOR_NAME, "admin", OPERATOR_CAPS)
     else:
@@ -174,8 +175,12 @@ def _gate():
         return None
     if reading:
         return redirect(url_for("people.unlock", next=request.full_path.rstrip("?")))
+    # A form post is never carried out while locked. After the PIN they
+    # land back on the page the form was on, to try again.
     flash("People pages locked themselves. Enter your PIN and try again.")
-    return redirect(url_for("people.unlock"))
+    came_from = urlparse(request.referrer or "")
+    back = _safe_next(came_from.path) if came_from.netloc == request.host else ""
+    return redirect(url_for("people.unlock", next=back or None))
 
 
 @people_bp.after_request
@@ -403,7 +408,7 @@ def nav_rows(kind: str, leader_id: int | None, name: str) -> list[dict]:
 # Home
 # ---------------------------------------------------------------------------
 
-@people_bp.route("/people")
+@people_bp.route("/people", strict_slashes=False)
 def home():
     who = viewer()
     counts = _feature_counts(who.kind, who.leader_id, who.name, who.caps)
@@ -698,12 +703,32 @@ def backup():
 # blueprint: one that fails is skipped with a warning and People carries on.
 # ---------------------------------------------------------------------------
 
-for _feature, _module_name in (("reviews", "people_reviews"), ("hiring", "people_hiring")):
-    try:
-        _module = importlib.import_module(_module_name)
-        _module.register(people_bp)
-        FEATURES.add(_feature)
-        _FEATURE_MODULES[_feature] = _module
-    except Exception as e:
-        print(f"WARNING: People feature {_feature} failed to load, the rest of People "
-              f"is unaffected: {e!r}")
+_FEATURE_NAMES = (("reviews", "people_reviews"), ("hiring", "people_hiring"))
+_settled: set[str] = set()
+
+
+def load_features() -> None:
+    """Import each feature and let it add its routes, once. Runs when this
+    module is imported; app.py calls it again just before it registers the
+    blueprint, which only matters when a feature module was imported first
+    and imported this one while still half-built: that feature waits for
+    the second call instead of being written off."""
+    for feature, module_name in _FEATURE_NAMES:
+        if feature in _settled:
+            continue
+        try:
+            module = importlib.import_module(module_name)
+            if not hasattr(module, "register") \
+                    and getattr(getattr(module, "__spec__", None), "_initializing", False):
+                continue                        # it is importing us right now: ask again later
+            _settled.add(feature)
+            module.register(people_bp)
+            FEATURES.add(feature)
+            _FEATURE_MODULES[feature] = module
+        except Exception as e:
+            _settled.add(feature)
+            print(f"WARNING: People feature {feature} failed to load, the rest of People "
+                  f"is unaffected: {e!r}")
+
+
+load_features()
