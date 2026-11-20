@@ -64,6 +64,26 @@ def world(tmp_path, monkeypatch):
            "goal": goal_id, "foh": foh}
 
 
+# Every People GET page (leader reviews and hiring). Nobody gets a 200 before
+# entering their PIN again, so every role is turned away here: the full
+# who-may-open-what table for these pages is tests/test_people_roles.py,
+# which also checks that this list has every one of them. The ids need no
+# rows: the lock answers before anything is looked up.
+PEOPLE_LOCK = "/shift/people/unlock"       # the PIN box itself: all a signed-in leader gets
+PEOPLE_PAGES = (
+    "/shift/people", "/shift/people/access", "/shift/people/settings",
+    "/shift/people/standards", "/shift/people/audit", "/shift/people/backup",
+    "/shift/reviews", "/shift/reviews/leaders", "/shift/reviews/leaders/1",
+    "/shift/reviews/cycles/1", "/shift/reviews/review/1", "/shift/reviews/review/1/finalise",
+    "/shift/reviews/review/1/print", "/shift/reviews/calibration/1", "/shift/reviews/health",
+    "/shift/reviews/mine", "/shift/reviews/mine/1",
+    "/shift/hiring", "/shift/hiring/postings", "/shift/hiring/postings/new",
+    "/shift/hiring/postings/1", "/shift/hiring/postings/1/edit", "/shift/hiring/postings/1/copies/1",
+    "/shift/hiring/candidates/1", "/shift/hiring/candidates/1/contact", "/shift/hiring/notices",
+    "/shift/hiring/metrics", "/shift/hiring/retention",
+)
+
+
 def sign_in(client, role):
     if role == "member":
         return client.post("/hub/login", data={"name": "Sam", "code": "1042"})
@@ -111,6 +131,8 @@ def table(w):
         ("/shift/admin/templates/new", EDITORS),
         (f"/shift/admin/templates/{w['template']}", EDITORS),
         ("/shift/admin/export", OPERATOR),
+        # People pages: nobody gets 200 before unlocking (full matrix: test_people_roles.py)
+        *[(path, set()) for path in PEOPLE_PAGES], (PEOPLE_LOCK, LEADERS),
     ]
 
 
