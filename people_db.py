@@ -119,8 +119,11 @@ def db_path() -> str:
             or os.path.join(os.path.dirname(os.path.abspath(shift_db.DB_PATH)), "people.db"))
 
 
-def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path(), timeout=15)
+BUSY_SECONDS = 15                # how long a write waits for another writer to finish
+
+
+def connect(timeout: float | None = None) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path(), timeout=BUSY_SECONDS if timeout is None else timeout)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -228,10 +231,12 @@ def unlock_valid(unlock_id, identity: str, now: int, idle_seconds: int, max_seco
     return good
 
 
-def unlock_close(unlock_id) -> None:
-    """Lock now, or sign out: the unlock is gone for every copy of it."""
+def unlock_close(unlock_id, timeout: float | None = None) -> None:
+    """Lock now, or sign out: the unlock is gone for every copy of it.
+    Raises if the store cannot be written (the caller must not treat the
+    unlock as closed then: see people._close_unlock)."""
     if unlock_id and isinstance(unlock_id, str):
-        with closing(connect()) as conn, conn:
+        with closing(connect(timeout)) as conn, conn:
             conn.execute("DELETE FROM unlocks WHERE id_hash=?", (_unlock_hash(unlock_id),))
 
 

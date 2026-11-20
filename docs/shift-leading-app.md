@@ -372,9 +372,15 @@ scale.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-SHIFT_ADMIN_PIN=1234 python app.py         # http://localhost:5000/shift
-python -m pytest tests/                    # storage + route tests
+ENV=dev SHIFT_ADMIN_PIN=1234 python app.py   # http://localhost:5000/shift
+python -m pytest tests/                      # storage + route tests
 ```
+
+Set `ENV=dev` (or `test`, `local`) to run on a plain `http://` address.
+Without it the app counts as the live server: the sign-in cookie is marked
+HTTPS-only, so sign-in over plain http returns to the sign-in page with no
+message, and People and the careers pages need `FLASK_SECRET_KEY`
+(see [people.md](people.md)).
 
 The store "business day" rolls over at 4 a.m., not midnight, so post-close
 work after 12 a.m. lands on the shift it belongs to.

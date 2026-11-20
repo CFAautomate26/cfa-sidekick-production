@@ -204,7 +204,7 @@ def test_f2_a_stored_reply_from_before_the_fix_shows_none_of_its_own_words(world
     ("e", False), ("the", False), ("stand", False), ("farm stand", False),
     ("opened the farm stand", True), ("I  OPENED the farm", True),
     ("pened the farm stand ever", False),                             # cut through the middle of words
-    ("responsibility", True)])
+    ("responsibility", False)])              # (rewritten, finding A-V5: one word, however long, grounds nothing)
 def test_f10_a_level_needs_a_real_phrase_from_the_answer(quote, kept):
     payload = {"criteria": [{"criterion_id": 1, "name": "Reliable"}],
                "answers": [{"criterion_id": 1,

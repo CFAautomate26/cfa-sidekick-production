@@ -645,7 +645,7 @@ def test_logging_a_notice_and_the_notices_page(world, monkeypatch):
     assert "The date they were told can't be in the future." in flashed(hari)
     post(hari, f"/shift/hiring/candidates/{early}/notice", kind="no-decision-yet", method="phone",
          given_on="2026-10-20", said="Hi Jordan1, no decision has been made yet.")
-    assert "Notice logged. It is kept for three years." in flashed(hari)
+    assert "Notice logged. A notice given after an interview is kept for three years." in flashed(hari)
     html = page(hari, "/shift/hiring/notices")
     assert f'id="o{early}"' not in html and "<b>1</b> owed · <b>0</b> overdue" in html
     log = html[html.index('id="log"'):]

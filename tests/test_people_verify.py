@@ -623,3 +623,458 @@ def test_vb3_an_old_draft_with_a_stale_address_is_put_right_when_it_is_published
     assert hdb.save_posting(second, {"title": "Team member", "employment_type": "part-time", "description": "x",
                                      "pay_min": "", "pay_max": "", "vacancy": ""}, "Hari") == []
     assert hdb.get_posting(second)["slug"] == "team-member-2"       # an unchanged title keeps its address
+
+
+# --- A-V3: an applicant's private link is not in the server's request log -----------------------
+
+def test_va3_the_request_log_never_carries_a_private_link_or_the_scheduled_token():
+    import logging
+
+    assert careers.mask_addresses('"GET /careers/a/0123456789abcdef0123456789abcdef HTTP/1.1" 404 -') == \
+        '"GET /careers/a/[removed] HTTP/1.1" 404 -'
+    assert careers.mask_addresses('"GET /scheduled/shift-backup?token=s3cr3t&x=1 HTTP/1.1" 200 -') == \
+        '"GET /scheduled/shift-backup?token=[removed]&x=1 HTTP/1.1" 200 -'
+    assert careers.mask_addresses('"GET /careers/team-member HTTP/1.1" 200 -') == \
+        '"GET /careers/team-member HTTP/1.1" 200 -'                   # an ordinary address is left alone
+    # the app put the mask on the built-in server's logger when it registered the careers pages
+    logger = logging.getLogger("werkzeug")
+    assert any(isinstance(f, careers.RequestLogMask) for f in logger.filters)
+    written: list[str] = []
+
+    class Keep(logging.Handler):
+        def emit(self, record):
+            written.append(record.getMessage())
+
+    handler, level = Keep(), logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:        # the way werkzeug writes a request line
+        logger.info('%s - - [%s] "%s" %s %s', "203.0.113.9", "20/Nov/2026 10:00:00",
+                    "POST /careers/a/00112233445566778899aabbccddeeff HTTP/1.1", 302, "-")
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+    assert written == ['203.0.113.9 - - [20/Nov/2026 10:00:00] "POST /careers/a/[removed] HTTP/1.1" 302 -']
+
+
+# --- A-V4: an unlock never survives a lock or a sign-out, even when the store is busy -----------
+
+@pytest.fixture()
+def busy_store(monkeypatch):
+    """Call the returned function to make every write to the People store
+    fail until release() is called (another connection holds the write
+    lock, and writers give up at once instead of waiting 15 seconds)."""
+    held = []
+
+    def hold():
+        monkeypatch.setattr(people_db, "BUSY_SECONDS", 0.05)
+        conn = people_db.connect()
+        conn.execute("BEGIN IMMEDIATE")
+        held.append(conn)
+
+        def release():
+            conn.rollback()
+            conn.close()
+            held.clear()
+        return release
+
+    yield hold
+    for conn in held:
+        conn.rollback()
+        conn.close()
+    people._revoked.clear()
+
+
+def copy_of(client):
+    thief = cfa_app.app.test_client()
+    thief.set_cookie("session", client.get_cookie("session").value)
+    return thief
+
+
+@pytest.mark.parametrize("path", ["/shift/logout", "/shift/people/lock"])
+def test_va4_a_copied_cookie_is_refused_even_when_the_lock_could_not_be_written(world, busy_store, path, capsys):
+    operator = kit.open_as(world, "operator")
+    thief = copy_of(operator)
+    assert thief.get("/shift/people/backup").status_code == 200       # the copy works while People is open
+    release = busy_store()
+    resp = operator.post(path)
+    assert resp.status_code == 302
+    if path.endswith("/lock"):
+        assert "It was busy, so it is still finishing" in flashed(operator)[-1]
+    with people_db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM unlocks").fetchone()[0] == 1       # the row could not be removed
+    # ...and the copy is refused all the same, while the store is busy and after
+    assert "/shift/people/unlock" in thief.get("/shift/people/backup").headers["Location"]
+    release()
+    resp = thief.get("/shift/people/backup")
+    assert resp.status_code == 302 and "/shift/people/unlock" in resp.headers["Location"]
+    assert thief.post("/shift/people/backup").status_code == 302      # and no download
+    # the row is removed on a later request, once the store can be written again
+    people._retry_at[0] = 0.0
+    cfa_app.app.test_client().get("/")
+    with people_db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM unlocks").fetchone()[0] == 0
+    assert people._revoked == set()
+    out = capsys.readouterr().out
+    assert "ERROR: People lock failed: OperationalError" in out       # the kind of fault only
+
+
+# --- A-V5: a quote of filler words grounds nothing ----------------------------------------------
+
+@pytest.mark.parametrize("quote, real", [
+    ("i was the", False), ("to it and", False), ("them to it", False), ("it was a", False),
+    ("communication", False), ("the team", False), ("it was a team", False),
+    ("i was the closer", False),                                      # one telling word is not enough
+    ("i was the closing lead", True), ("stayed late to finish", True), ("I OPENED the farm", True),
+])
+def test_va5_a_quote_needs_words_that_say_something(quote, real):
+    answer = ("I was the closing lead and it was a team effort. I opened the farm stand, stayed late to finish "
+              "the count, gave them to it and worked on communication. I was the closer.")
+    assert people_hiring._really_quoted(quote, answer) is real
+    out = people_hiring._ai_validate({"criteria": [{
+        "criterion_id": 1, "evidence_summary": "Shows up.", "quote": quote, "suggested_level": 4, "note": ""}]},
+        {"criteria": [{"criterion_id": 1}], "answers": [{"criterion_id": 1, "text": answer}]})["criteria"][0]
+    assert (out["suggested_level"] == 4) is real
+
+
+# --- A-V6: two-letter names that are everyday words ---------------------------------------------
+
+@pytest.mark.parametrize("text_in, own, others, text_out", [
+    ("My goal this period was speed. I think My did fine. My team closed well.", ["My Nguyen"], [],
+     "My goal this period was speed. I think the leader did fine. My team closed well."),
+    ("An apology was offered. Then An left. An Tran closed.", ["An Tran"], [],
+     "An apology was offered. Then the leader left. The leader closed."),
+    ("Do the count first. I saw Do recount. Do's count was right.", ["Do Kim"], [],
+     "Do the count first. I saw the leader recount. The leader's count was right."),
+    ("So we started. Then So Yeon took over.", ["So Yeon"], [],
+     "So we started. Then the leader took over."),
+    ("Ask Ed about jo's till. Jo's close was clean. Jo ran the line.", ["Jo S."], ["Ed Wu"],
+     "Ask a team member about the leader's till. The leader's close was clean. The leader ran the line."),
+    ("My shift went well. I asked My to help and An's close was clean. An apology.", ["Pat Lee"],
+     ["My Nguyen", "An Tran"],
+     "My shift went well. I asked a team member to help and a team member's close was clean. An apology."),
+    ("My answer is that I was on time. My Nguyen is my name.", ["My Nguyen"], [],
+     "My answer is that I was on time. The applicant is my name."),
+])
+def test_va6_an_everyday_two_letter_name_does_not_rewrite_ordinary_sentences(text_in, own, others, text_out):
+    label = "the applicant" if "applicant" in text_out else "the leader"
+    assert people_ai.deidentify(text_in, own, others, label) == text_out
+
+
+# --- A-V7: a hiring suggestion does not outlive the criterion or the answer it read ------------
+
+def test_va7_a_suggestion_is_not_shown_once_the_criterion_it_was_made_on_has_changed(world, monkeypatch):
+    posting_id = live_with_ai(monkeypatch)
+    made = hdb.apply(posting_id, person(1), ai_shown=True)
+    app_id = made["id"]
+    first, second = (c["id"] for c in hdb.get_posting(posting_id)["criteria"])
+    assert hdb.save_answers(app_id, {first: "I opened the farm stand every Saturday for two summers.",
+                                     second: "A guest was lost, so I walked them to their table."}) == "saved"
+    kit.fake_ai(monkeypatch, lambda system, user: {"criteria": [
+        {"criterion_id": first, "evidence_summary": "Shows up.", "quote": "I opened the farm stand every Saturday",
+         "suggested_level": 3, "note": "Matches the third description: OLDANCHOR"},
+        {"criterion_id": second, "evidence_summary": "Helps.", "quote": "I walked them to their table",
+         "suggested_level": 3, "note": ""}], "human_checks": []})
+    hari = kit.open_as(world, "hari")
+    hari.post(f"/shift/hiring/candidates/{app_id}/ai")
+    hari.post(f"/shift/hiring/candidates/{app_id}/score", data={f"level_{first}": "3", f"level_{second}": "3"})
+    html = page(hari, f"/shift/hiring/candidates/{app_id}")
+    assert "OLDANCHOR" in html and html.count("The AI suggests <strong>level 3</strong>") == 2
+    # a hiring leader rewrites the first criterion's level descriptions on the live posting
+    crit = hdb.get_posting(posting_id)["criteria"][0]
+    raised = {**crit, "anchors": ["No example at all.", "One example.", "Two examples with dates.",
+                                  "Three examples with dates and what changed."]}
+    assert hdb.save_criterion(first, posting_id, raised, "Hari", reviewed=True) == []
+    html = page(hari, f"/shift/hiring/candidates/{app_id}")
+    assert "OLDANCHOR" not in html
+    assert html.count("The AI suggests <strong>level 3</strong>") == 1           # the other one still stands
+    changed = html[html.index(f'id="ai-{first}"'):]
+    assert "changed after the AI suggestion was made, so the suggestion is not shown. Ask again." in changed[:400]
+    # asking again reads the criterion as it is now
+    hari.post(f"/shift/hiring/candidates/{app_id}/ai")
+    assert "OLDANCHOR" in page(hari, f"/shift/hiring/candidates/{app_id}")       # the fake repeats itself: shown again
+
+
+# --- A-V8: a proxy's private address is not counted as a visitor --------------------------------
+
+def test_va8_a_private_counted_address_does_not_let_one_stranger_use_up_the_limits(world, public):
+    live()
+    from tests.test_careers import send, token_of
+    proxy = "10.201.3.7"                                              # every visitor arrives as "them, proxy"
+    tokens = [token_of(send(public, n=n, headers={"X-Forwarded-For": f"203.0.113.{n}, {proxy}"}))
+              for n in range(1, 9)]
+    assert len(tokens) == 8                                           # not stopped at five an hour
+    for n in range(careers.WRONG_LINKS_AN_HOUR + 5):                  # a stranger tries made-up links
+        assert public.get(f"/careers/a/{n:032x}",
+                          headers={"X-Forwarded-For": f"198.51.100.9, {proxy}"}).status_code == 404
+    mine = public.get(f"/careers/a/{tokens[0]}", headers={"X-Forwarded-For": f"203.0.113.1, {proxy}"})
+    assert mine.status_code == 200                                    # a real applicant still gets in
+    # the limits on everyone together still hold
+    for n in range(9, careers.ALL_AN_HOUR + 1):
+        token_of(send(public, n=n, headers={"X-Forwarded-For": f"203.0.113.{n}, {proxy}"}))
+    assert send(public, n=99, headers={"X-Forwarded-For": f"203.0.113.99, {proxy}"}).status_code == 429
+
+
+@pytest.mark.parametrize("address, apart", [
+    ("203.0.113.7", True), ("198.51.100.4", True), ("2001:db8::1", True),
+    ("10.201.3.7", False), ("172.16.5.1", False), ("192.168.1.20", False), ("100.64.0.9", False),
+    ("127.0.0.1", False), ("::1", False), ("fd12:3456::1", False), ("::ffff:10.0.0.1", False),
+    ("", False), ("not an address", False),
+])
+def test_va8_which_addresses_can_tell_visitors_apart(address, apart):
+    assert careers.tells_visitors_apart(address) is apart
+
+
+def test_va8_an_ipv6_visitor_is_counted_by_their_slash_64(world, public):
+    assert careers._counted_as("2001:db8:1:2:aaaa::1") == careers._counted_as("2001:db8:1:2:bbbb::9") \
+        == "2001:db8:1:2::/64"
+    assert careers._counted_as("2001:db8:1:3::1") != careers._counted_as("2001:db8:1:2::1")
+    assert careers._counted_as("203.0.113.7") == "203.0.113.7"
+
+
+def test_va8_the_operator_is_warned_on_the_live_server_and_not_on_a_test_machine(world, monkeypatch):
+    operator, hari = kit.open_as(world, "operator"), kit.open_as(world, "hari")
+    private = {"X-Forwarded-For": "203.0.113.7, 10.201.3.7"}
+    assert "cannot tell visitors apart" not in operator.get("/shift/people", headers=private).data.decode()
+    monkeypatch.setenv("ENV", "production")
+    for client, said in ((operator, "Open Settings</a> and set PEOPLE_PROXY_HOPS"),
+                         (hari, "Tell the Operator: Settings says how to set PEOPLE_PROXY_HOPS")):
+        for path in ("/shift/people", "/shift/hiring"):
+            html = client.get(path, headers=private).data.decode()
+            assert "The careers pages cannot tell visitors apart yet." in html and said in html, path
+    assert "cannot tell visitors apart" not in kit.open_as(world, "rae").get(
+        "/shift/people", headers=private).data.decode()               # not a hiring leader: not theirs to fix
+    settings = operator.get("/shift/people/settings", headers=private).data.decode()
+    assert "The address being counted for you is a private one" in settings
+    public_address = {"X-Forwarded-For": "10.9.0.1, 203.0.113.7"}
+    assert "cannot tell visitors apart" not in operator.get("/shift/people", headers=public_address).data.decode()
+    assert "is a private one" not in operator.get("/shift/people/settings", headers=public_address).data.decode()
+
+
+# --- A-V9 / C-V11 / B4: the documented way to run it locally works ------------------------------
+
+def test_va9_the_documented_run_commands_set_env_dev():
+    for path in ("README.md", "docs/shift-leading-app.md", "docs/people.md"):
+        doc = open(path, encoding="utf-8").read()
+        assert "ENV=dev SHIFT_ADMIN_PIN=1234" in " ".join(doc.split()), path
+        assert not re.search(r"^SHIFT_ADMIN_PIN=1234 python app\.py", doc, re.M), path
+    assert "dev" in people.NOT_PRODUCTION and people.session_key_problem({"ENV": "dev"}) is None
+    assert people.session_key_problem({}) is not None                 # no ENV counts as the live server
+    source = open("app.py", encoding="utf-8").read()
+    assert 'app.config["SESSION_COOKIE_SECURE"]' in source and "start with ENV=dev" in source
+
+
+# --- C-V6: a notice to someone never interviewed goes when their details go ---------------------
+
+def test_vc6_a_never_interviewed_applicants_name_does_not_outlive_the_months_they_were_told(world, monkeypatch):
+    from tests.test_people_hiring_db import interviewed
+    clock(monkeypatch, "2026-09-03 09:00")
+    posting_id = live()
+    plain, met = applied(posting_id, 1), applied(posting_id, 2)
+    interviewed(met, "2026-09-03")
+    for app_id in (plain, met):
+        assert hdb.log_notice(app_id, "not-moving-forward", "email", "We will not be moving forward.",
+                              "2026-09-03", "Hari") is None
+        assert hdb.move_stage(app_id, "new", "not-selected", "Hari", reason="Position filled") is None
+    notice = hdb.privacy_notice(hdb.settings(), False)
+    assert any("any notice we give you after an interview, with your name, for 3 years" in line for line in notice)
+    assert any("for 24 months after the hiring decision" in line for line in notice)
+    clock(monkeypatch, "2028-09-03 09:00")                            # the 24 months they were told
+    assert hdb.purge_all("Operator") == (2, 0)
+    assert [(n["said"], n["given_to"]) for n in hdb.notices(plain)] == [("", "")]
+    assert [(n["said"], n["given_to"]) for n in hdb.notices(met)] == [
+        ("We will not be moving forward.", "Jordan2 Sample")]         # interviewed: the three-year record
+    assert "Jordan1" not in json.dumps(table("hr_notices") + table("hr_applications"))
+    html = page(kit.open_as(world, "operator"), "/shift/hiring/retention")
+    assert "every decision notice given to an applicant who was interviewed" in html
+    assert "a notice logged for someone who was never interviewed" in html
+
+
+# --- C-V7: how an accommodation was met is not shown to someone scoring -------------------------
+
+def test_vc7_the_scoring_page_does_not_show_more_time_or_who_entered_the_answers(world, monkeypatch):
+    clock(monkeypatch, "2026-11-10 12:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    first, second = (c["id"] for c in hdb.get_posting(posting_id)["criteria"])
+    hari = kit.open_as(world, "hari")
+    post(hari, f"/shift/hiring/candidates/{app_id}/more-time")
+    post(hari, f"/shift/hiring/candidates/{app_id}/answers",
+         {f"q_{first}": "I closed the pool every night.", f"q_{second}": "I helped a lost swimmer."})
+    kinds = [(e["kind"], e["detail"]) for e in hdb.events(app_id)]
+    assert ("more_time", "") in kinds and ("answered", hdb.ENTERED_FOR_APPLICANT) in kinds   # the record is whole
+    scoring = page(hari, f"/shift/hiring/candidates/{app_id}")
+    history = scoring[scoring.index('id="history"'):]
+    assert "More time" not in history and "entered for the applicant" not in scoring
+    assert "Answers received" in history
+    row = history[history.index("Answers received") - 200:history.index("Answers received")]
+    assert '<td class="who"></td>' in row                             # not who typed them
+    contact = page(hari, f"/shift/hiring/candidates/{app_id}/contact")
+    assert "More time on their link was given by Hari" in contact
+    assert "Answers they gave another way were entered by Hari" in contact
+    assert "This is not shown on the scoring page." in contact
+
+
+# --- C-V8: answers entered for an applicant can be completed later ------------------------------
+
+def test_vc8_a_leader_can_add_the_answer_that_was_missing_and_never_replaces_one(world, monkeypatch):
+    clock(monkeypatch, "2026-11-10 12:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    first, second = (c["id"] for c in hdb.get_posting(posting_id)["criteria"])
+    hari = kit.open_as(world, "hari")
+    html = post(hari, f"/shift/hiring/candidates/{app_id}/answers", {f"q_{first}": "I closed the pool every night."})
+    assert "1 question still has no answer: you can add it on the contact page." in html
+    assert [q["id"] for q in hdb.unanswered_questions(app_id)] == [second]
+    contact = page(hari, f"/shift/hiring/candidates/{app_id}/contact")
+    assert "1 question still has no answer." in contact and f'name="q_{second}"' in contact
+    assert f'name="q_{first}"' not in contact and "Give more time on their link" not in contact
+    assert "Enter every answer they gave together if you can." in contact
+    # the second answer goes in; an attempt to overwrite the first changes nothing
+    post(hari, f"/shift/hiring/candidates/{app_id}/answers",
+         {f"q_{first}": "REPLACED", f"q_{second}": "I helped a lost swimmer."})
+    answers = hdb.candidate(app_id)["answers"]
+    assert answers == {first: "I closed the pool every night.", second: "I helped a lost swimmer."}
+    assert hdb.unanswered_questions(app_id) == []
+    assert "already answered" in post(hari, f"/shift/hiring/candidates/{app_id}/answers", {f"q_{first}": "Again"})
+    assert 'id="questions"' not in page(hari, f"/shift/hiring/candidates/{app_id}/contact")
+    # the applicant's own link still takes answers once only
+    other = hdb.apply(posting_id, person(2))
+    assert hdb.save_answers(other["id"], {first: "Mine."}) == "saved"
+    assert hdb.save_answers(other["id"], {second: "More."}) == "closed"
+
+
+# --- C-V9, C-V10: what the documents say is what the code does ----------------------------------
+
+def test_vc9_vc10_documents_match_the_code():
+    claude = " ".join(open("CLAUDE.md", encoding="utf-8").read().split())
+    assert "any applicant answer that may mention health or an accommodation" in claude
+    assert "leaves out any note or answer worded about health" not in claude
+    assert "test/testing/dev/development/local" in claude
+    legal = " ".join(open("docs/legal-counsel/hiring-and-leader-reviews.md", encoding="utf-8").read().split())
+    assert "none was found that requires telling employees that AI is used" in legal
+    assert "(not in the matrix" in legal and "that asking is itself the breach (the hiring research rates" in legal
+    settings = open("templates/people/settings.html", encoding="utf-8").read()
+    assert "[Time you spend on your reflection and your review is paid time.]" in settings
+    assert "Time you spend on your reflection and your review is paid time." in legal.replace("> ", "")
+    # an answer about age, religion or family is sent (health and accommodation are not): as CLAUDE.md now says
+    assert not any(f["term"] in people_hiring._NEVER_SEND
+                   for f in people_ai.language_check("At my mosque youth group I ran the food drive."))
+    assert any(f["term"] in people_hiring._NEVER_SEND or f["key"] == "health"
+               for f in people_ai.language_check("I missed a term because of surgery."))
+
+
+# --- B5: a form refused at the lock says plainly that it was not saved --------------------------
+
+def test_vb5_a_post_refused_by_the_idle_lock_says_it_was_not_saved(world, monkeypatch):
+    clock(monkeypatch, "2026-11-20 08:00")
+    operator = kit.open_as(world, "operator")
+    clock(monkeypatch, "2026-11-20 09:00")                            # past the 30 minutes
+    resp = operator.post("/shift/people/settings", data={"lock_minutes": "60"},
+                         headers={"Referer": "http://localhost/shift/people/settings"})
+    assert resp.status_code == 302 and "/shift/people/unlock" in resp.headers["Location"]
+    assert flashed(operator)[-1].startswith("People pages locked themselves before that was saved, so it was "
+                                            "not saved.")
+    assert people_db.get_setting("lock_minutes") == "30"
+
+
+# --- B6: saving one standard keeps what was picked for the others -------------------------------
+
+def test_vb6_one_save_keeps_every_level_picked_on_the_page(world):
+    made = rk.one_review(world)
+    rae = kit.open_as(world, "rae")
+    url = f"/shift/reviews/review/{made['review']}"
+    html = page(rae, url)
+    assert html.count('<form id="rv-rate" method="post"') == 1        # one form for every standard
+    for key in rk.KEYS:
+        assert html.count(f'form="rv-rate" name="level-{key}"') == 5
+        assert f'type="submit" form="rv-rate" name="dimension_key" value="{key}"' in html
+    assert 'form="rv-rate" name="dimension_key" value="">Save all ratings</button>' in html
+    # the reviewer picks two standards and taps the Save beside the second one
+    html = post(rae, url + "/rate", {
+        "dimension_key": "guest-care",
+        "level-reliable": "3", "comment-reliable": "On time for every open I saw.",
+        "level-guest-care": "not_enough", "comment-guest-care": "",
+        "comment-teamwork": "Typed, but no level picked."})
+    rated = rdb.ratings(made["review"])
+    assert (rated["reliable"]["level"], rated["reliable"]["comment"]) == (3, "On time for every open I saw.")
+    assert rated["guest-care"]["not_enough"] == 1 and "teamwork" not in rated
+    assert "Saved 2 standards." in html
+    assert "A comment needs a level to be saved with. Choose a level for: Teamwork." in html
+    # "Save all ratings" with nothing changed restamps nothing
+    before = {key: row["rated_at"] for key, row in rated.items()}
+    with people_db.connect() as conn:
+        conn.execute("UPDATE rv_ratings SET rated_at='2000-01-01 00:00'")
+        conn.commit()
+    post(rae, url + "/rate", {"dimension_key": "", "level-reliable": "3",
+                              "comment-reliable": "On time for every open I saw.", "level-guest-care": "not_enough",
+                              "level-teamwork": "2", "comment-teamwork": "Helped when asked."})
+    rated = rdb.ratings(made["review"])
+    assert rated["reliable"]["rated_at"] == rated["guest-care"]["rated_at"] == "2000-01-01 00:00" and before
+    assert (rated["teamwork"]["level"], rated["teamwork"]["comment"]) == (2, "Helped when asked.")
+    # one standard posted alone still works as it always did
+    assert "Saved." in post(rae, url + "/rate", {"dimension_key": "reliable", "level": "4"})
+    assert rdb.ratings(made["review"])["reliable"]["level"] == 4
+
+
+# --- B7: the employer's name on the careers pages is not cut off on a phone ---------------------
+
+def test_vb7_the_careers_masthead_label_wraps_on_a_phone_and_can_show_an_ellipsis(world, public):
+    html = public.get("/careers/").data.decode()
+    rules = re.findall(r"\.masthead \.under\.left \{([^}]*)\}", html)
+    assert any("display: block" in rule and "text-overflow: ellipsis" in rule for rule in rules)
+    phone = html[html.index("@media (max-width: 719px)"):]
+    phone = phone[:phone.index("}\n}") + 3]
+    assert ".masthead .under.left" in phone and "white-space: normal" in phone and "position: static" in phone
+    assert "overflow: visible" in phone and ".masthead { height: auto" in phone
+
+
+# --- B8: an interview time the way people write it ----------------------------------------------
+
+@pytest.mark.parametrize("typed, stored", [
+    ("15:30", "15:30"), ("2:30 pm", "14:30"), ("2:30pm", "14:30"), ("2pm", "14:00"), ("9 a.m.", "09:00"),
+    ("12:15 am", "00:15"), ("12pm", "12:00"), ("14h30", "14:30"), ("", ""),
+    ("15", None), ("25:00", None), ("13 pm", None), ("after lunch", None), ("2:75 pm", None),
+])
+def test_vb8_a_time_is_read_the_way_people_write_it(typed, stored):
+    assert hdb.clock_time(typed) == stored
+
+
+def test_vb8_the_time_box_is_a_time_picker_and_a_refused_interview_keeps_what_was_entered(world, monkeypatch):
+    clock(monkeypatch, "2026-11-10 12:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    hari = kit.open_as(world, "hari")
+    html = page(hari, f"/shift/hiring/candidates/{app_id}")
+    assert '<input id="iv-time" name="at_time" type="time"' in html
+    assert '<details class="card tool" id="add-interview">' in html   # closed until it is needed
+    resp = hari.post(f"/shift/hiring/candidates/{app_id}/interview",
+                     data={"on_date": "2026-11-12", "at_time": "after lunch", "mode": "phone", "interviewer": "Hari"})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("#add-interview")
+    html = hari.get(resp.headers["Location"].split("#")[0]).data.decode()
+    assert "Enter the time like 3:30 pm or 15:30, or leave it empty." in html
+    assert '<details class="card tool" id="add-interview" open>' in html
+    assert 'name="on_date" type="date" required value="2026-11-12"' in html
+    assert '<option value="phone" selected>' in html
+    post(hari, f"/shift/hiring/candidates/{app_id}/interview",
+         {"on_date": "2026-11-12", "at_time": "2:30 pm", "mode": "phone", "interviewer": "Hari"})
+    assert [(i["on_date"], i["at_time"]) for i in hdb.interviews(app_id)] == [("2026-11-12", "14:30")]
+
+
+# --- B9: everything tapped on a People or careers page is at least 44px tall --------------------
+
+def test_vb9_small_buttons_crumbs_tabs_and_tick_rows_are_44px_on_people_and_careers_pages(world, public):
+    live()
+    people_page = page(kit.open_as(world, "hari"), "/shift/hiring")
+    for rule in (r"\.btn\.sm \{ min-height: 44px; \}",
+                 r"\.crumbs a \{[^}]*min-height: 44px",
+                 r"\.seg a \{ min-height: 44px; \}",
+                 r"\.checkline \{ min-height: 44px; align-items: center; \}"):
+        assert re.search(rule, people_page), rule
+    # those rules come after the shared ones they override (38px buttons), so they win
+    assert people_page.index(".btn.sm { min-height: 44px; }") > people_page.index("min-height: 38px")
+    form = public.get("/careers/team-member/apply").data.decode()
+    assert re.search(r"\.cr-agree \{[^}]*min-height: 44px", form)
+    assert re.search(r"\.btn\.sm \{ min-height: 44px; \}", form)
+    # /shift and /hub keep their own look: the shared style is untouched
+    assert ".btn.sm { min-width: 0; min-height: 38px;" in open("templates/shared/cfa_style.html").read()

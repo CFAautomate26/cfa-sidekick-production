@@ -20,6 +20,9 @@
 {% if follow_up %}
 <p class="callout tan" style="margin-top:12px;">{{ icon('clock') }}<span><strong>{{ follow_up }} {{ 'person was' if follow_up == 1 else 'people were' }} told “no decision yet”, and a decision has since been made.</strong> Tell {{ 'them' }} and log it. <a class="textlink" href="{{ url_for('people.hiring_notices') }}#follow-up">See who</a></span></p>
 {% endif %}
+{% if visitors_mixed %}
+<p class="callout warm" style="margin-top:12px;" id="visitors-mixed">{{ icon('alert') }}<span><strong>The careers pages cannot tell visitors apart yet.</strong> The address they would count for you is a private one, so the limit on applications from one address is off (the limits on everyone together still hold). {% if viewer.is_operator %}<a class="textlink" href="{{ url_for('people.settings') }}#addresses">Open Settings</a> and set PEOPLE_PROXY_HOPS as it says there.{% else %}Tell the Operator: Settings says how to set PEOPLE_PROXY_HOPS.{% endif %}</span></p>
+{% endif %}
 {% for a in attention %}
 <p class="callout warm" style="margin-top:12px;">{{ icon('alert') }}<span><strong>“{{ a.title }}” is live but no longer passes the publish check.</strong> {{ a.problems|join(' ') }} <a class="textlink" href="{{ url_for('people.hiring_posting', posting_id=a.id) }}#check">Fix the posting</a></span></p>
 {% endfor %}

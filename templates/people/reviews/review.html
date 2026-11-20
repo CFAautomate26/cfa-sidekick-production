@@ -162,6 +162,11 @@
 </div>
 {% endif %}
 
+{# One form for every standard's rating (the boxes below belong to it
+   through their form="rv-rate" attribute), so tapping any Save keeps every
+   level picked and every comment typed on the page, not only the one
+   beside the button. #}
+{% if review.editable %}<form id="rv-rate" method="post" action="{{ url_for('people.reviews_rate', review_id=review.id) }}"></form>{% endif %}
 {% for group in model.groups %}
 <section class="sec">
   <div class="sec-head"><h2>{{ group.name }}</h2></div>
@@ -185,19 +190,19 @@
     {% endif %}
 
     {% if review.editable %}
-    <form method="post" action="{{ url_for('people.reviews_rate', review_id=review.id) }}">
-      <input type="hidden" name="dimension_key" value="{{ dim.key }}">
+    <div>
       <fieldset class="rv-set"{{ ' disabled' if drafting }}>
         <legend class="subhead">Your rating</legend>
         {% for name in model.levels %}
-        <label class="rv-choice"><input type="radio" name="level" value="{{ loop.index }}"{{ ' checked' if row and row.level == loop.index }} required><span><b>{{ name }}</b></span></label>
+        <label class="rv-choice"><input type="radio" form="rv-rate" name="level-{{ dim.key }}" value="{{ loop.index }}"{{ ' checked' if row and row.level == loop.index }}><span><b>{{ name }}</b></span></label>
         {% endfor %}
-        <label class="rv-choice"><input type="radio" name="level" value="not_enough"{{ ' checked' if row and row.not_enough }} required><span><b>Not enough to rate yet</b><small>For when you have not seen enough this period. It is never a mark against the leader.</small></span></label>
+        <label class="rv-choice"><input type="radio" form="rv-rate" name="level-{{ dim.key }}" value="not_enough"{{ ' checked' if row and row.not_enough }}><span><b>Not enough to rate yet</b><small>For when you have not seen enough this period. It is never a mark against the leader.</small></span></label>
         <label class="field" for="c-{{ dim.key }}">Comment <span class="muted">(what you saw that puts it at this level)</span></label>
-        <textarea id="c-{{ dim.key }}" name="comment" maxlength="{{ caps.comment }}">{{ row.comment if row else '' }}</textarea>
-        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save {{ dim.name }}</button>{% if is_rated %}<span class="pp-stamp">Saved by {{ stamp(row.rated_by, row.rated_at) }}</span>{% endif %}</div>
+        <textarea id="c-{{ dim.key }}" form="rv-rate" name="comment-{{ dim.key }}" maxlength="{{ caps.comment }}">{{ row.comment if row else '' }}</textarea>
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit" form="rv-rate" name="dimension_key" value="{{ dim.key }}">Save {{ dim.name }}</button>{% if is_rated %}<span class="pp-stamp">Saved by {{ stamp(row.rated_by, row.rated_at) }}</span>{% endif %}</div>
+        <p class="fine-line">Saving here also saves any other standard on this page where you have picked a level.</p>
       </fieldset>
-    </form>
+    </div>
     {% else %}
     <p class="subhead">Rating</p>
     {% if row and row.level %}<p>{{ level_pills(model.levels, row.level) }}</p>
@@ -233,6 +238,13 @@
   {% endfor %}
 </section>
 {% endfor %}
+
+{% if review.editable %}
+<div class="card no-print" id="save-all">
+  <p class="card-meta" style="margin-top:0;">One tap saves every standard above where you have picked a level, with its comment.</p>
+  <div class="btnrow"><button class="btn btn-primary" type="submit" form="rv-rate" name="dimension_key" value=""{{ ' disabled' if drafting }}>Save all ratings</button></div>
+</div>
+{% endif %}
 
 {% if loose %}
 <section class="sec" id="loose">

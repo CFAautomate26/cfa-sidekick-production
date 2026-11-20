@@ -662,8 +662,10 @@ def test_interviews_are_logged_with_a_date_and_an_outcome(world, monkeypatch):
     posting_id = live()
     app_id = applied(posting_id)
     assert hdb.add_interview(app_id, "", "", "in person", "Hari", "Hari") == "Enter the interview date."
-    assert hdb.add_interview(app_id, "2026-11-12", "3pm", "phone", "Hari", "Hari") == (
-        "Enter the time like 15:30, or leave it empty.")
+    # (rewritten after the browser run, finding B8: a time written the way people write it is
+    # understood, see test_people_verify.py; only something that is not a time is refused)
+    assert hdb.add_interview(app_id, "2026-11-12", "after lunch", "phone", "Hari", "Hari") == (
+        "Enter the time like 3:30 pm or 15:30, or leave it empty.")
     assert hdb.add_interview(app_id, "2026-11-12", "15:30", "carrier pigeon", "Hari", "Hari") == (
         "Choose how the interview is held.")
     assert hdb.add_interview(app_id, "2026-11-12", "15:30", "video", "Hari", "Hari") is None

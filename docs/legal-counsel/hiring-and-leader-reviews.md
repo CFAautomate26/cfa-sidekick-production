@@ -40,9 +40,11 @@ notices must be kept three years. The Human Rights Code governs what a
 posting, a form and an interviewer may ask. The AODA employment standard
 requires accommodation notices at three points.
 
-**Leader reviews.** No Ontario statute forbids an AI-drafted,
-human-decided review of an existing employee, and none requires telling
-employees that AI is used. The legal weight sits elsewhere: the Human
+**Leader reviews.** No Ontario statute was found that forbids an
+AI-drafted, human-decided review of an existing employee, and none was
+found that requires telling employees that AI is used. Both are negative
+findings: a search can fail to find a rule, it cannot prove there is none
+(row B9). The legal weight sits elsewhere: the Human
 Rights Code (what may be assessed, and the duty to inquire before treating
 a possible disability as a performance problem), ESA and OHSA leave and
 reprisal protection, the ESA electronic monitoring policy (if app activity
@@ -109,8 +111,8 @@ AODA Integrated Accessibility Standards, IASR).
 | A7 | **The AI statement.** If AI is used to screen, assess or select applicants, the posting itself must say so. A plain statement is enough. It applies equally when a third party does the screening. | ESA s. 8.4; O. Reg. 476/24 s. 2 (definition) | [Checked]; not settled: AI built into a job board the store merely posts on | AI assist can be switched on for a posting only while it is a draft, and a posting with it on cannot be published unless AI can really run (the Settings switch and a server key), so the statement is on the posting from the day it goes live. A posting that has been public without the statement (it never had AI, or AI was switched off and the posting was opened meanwhile) cannot use AI again: the job needs a new posting. AI runs only on applications made while the statement was showing. The tool never prints "no AI is used". Copies of the posting placed elsewhere have to carry the statement too (C4). |
 | A8 | **The 45-day duty.** Anyone interviewed for a posting must be told whether a hiring decision has been made within 45 days after their interview, or their last one. Interviews more than 45 days apart each need a notice. "No decision yet" is a valid answer. Any method is allowed, including a status page the applicant has a link to. | ESA s. 8.6; O. Reg. 476/24 s. 5; Ministry guide | [Checked] on the 45 days; [Partly checked] on the guide points; not settled: whether a second notice is owed once a decision is later made | Every attended interview starts a clock; the Notices page and the menu count show what is owed and overdue (and who is past the store's own 30-day aim); the leader logs who was told, how, when and in what words. An interview held before a decision was recorded can still be logged afterwards. An attended interview whose notice is still owed cannot be changed to "not held" without a tick, and once the notice is overdue only the Operator can. Someone told "no decision yet" stays listed until the decision is passed on: the second notice is sent because whether it is owed is not settled. |
 | A9 | **What counts as an interview.** A meeting in person or by technology where questions are asked and answered to assess suitability. Preliminary screening before applicants are selected for such a meeting is excluded. | O. Reg. 476/24 s. 2 | [Checked] on the text; unsettled: a short phone screen, a one-way video | Treats any interview a leader marks as attended as an interview, phone and video included. The quick written questions are screening, not an interview. |
-| A10 | **Three-year records.** Keep a copy of every posting and its application form for three years after it comes down, and a copy of what each interviewed applicant was told for three years after the day it was given. They must be available for inspection. | ESA ss. 15(7.1), 15(7.1.1), 16 | [Checked]; not settled: whether "application form" means the blank form or each completed one | Keeps an exact copy of the posting with the blank form at every publish, change and close, never deleted; keeps each notice with the applicant's name for three full years after the day it was given (through the third anniversary; longer while a hold is on); one download gives all of it. Completed applications follow the Retention setting instead (see C5). |
-| A11 | **What a form may ask.** A form or interview question may not classify by a prohibited ground: race, ancestry, place of origin, colour, ethnic origin, citizenship, creed, sex (including pregnancy), sexual orientation, gender identity or expression, age, record of offences, marital status, family status, disability. Asking is itself the breach. The only age question is "18 or over?"; the only citizenship question is "legally entitled to work in Canada?". | Code ss. 5(1), 23(1)–(3); OHRC guidance | [Checked] on the grounds and the two permitted questions; [Partly checked]: SIN timing, availability wording | The first step of the form asks for name, contact, the two permitted questions, availability by day and time (never why), how they heard of us and optional experience. The two answers are never on a scoring screen. The second step asks the posting's own questions, which a leader writes. The publish check holds back a question for applicants or for the interview that uses a listed phrase about age, pregnancy or family, religion, citizenship or where someone is from, health or disability, a record of offences, gender or orientation, a SIN, a photo or a licence, its plural, or any word on the lists used for review notes (health, family, religion, age, origin, gender, leave). A held question is reworded, or the Operator alone confirms, per question and on the record, that it is about a guest or the work and not the applicant; the confirmation ends if the question is changed. **The check catches listed words only and cannot read a question for meaning: the Operator reads every question before publishing.** |
+| A10 | **Three-year records.** Keep a copy of every posting and its application form for three years after it comes down, and a copy of what each interviewed applicant was told for three years after the day it was given. They must be available for inspection. | ESA ss. 15(7.1), 15(7.1.1), 16 | [Checked]; not settled: whether "application form" means the blank form or each completed one | Keeps an exact copy of the posting with the blank form at every publish, change and close, never deleted; keeps each notice given to an interviewed applicant, with the applicant's name, for three full years after the day it was given (through the third anniversary; longer while a hold is on); one download gives all of it. A notice logged for an applicant who was never interviewed is outside s. 15(7.1.1): its wording and the name are removed with the rest of that applicant's details, as the privacy notice says (C5). Completed applications follow the Retention setting instead (see C5). |
+| A11 | **What a form may ask.** A form or interview question may not classify by a prohibited ground: race, ancestry, place of origin, colour, ethnic origin, citizenship, creed, sex (including pregnancy), sexual orientation, gender identity or expression, age, record of offences, marital status, family status, disability. Asking can itself be the breach. The only age question is "18 or over?"; the only citizenship question is "legally entitled to work in Canada?". | Code ss. 5(1), 23(1)–(3); OHRC guidance | [Checked] on the grounds and the two permitted questions; [Partly checked]: that asking is itself the breach (the hiring research rates that point medium confidence), SIN timing, availability wording | The first step of the form asks for name, contact, the two permitted questions, availability by day and time (never why), how they heard of us and optional experience. The two answers are never on a scoring screen. The second step asks the posting's own questions, which a leader writes. The publish check holds back a question for applicants or for the interview that uses a listed phrase about age, pregnancy or family, religion, citizenship or where someone is from, health or disability, a record of offences, gender or orientation, a SIN, a photo or a licence, its plural, or any word on the lists used for review notes (health, family, religion, age, origin, gender, leave). A held question is reworded, or the Operator alone confirms, per question and on the record, that it is about a guest or the work and not the applicant; the confirmation ends if the question is changed. **The check catches listed words only and cannot read a question for meaning: the Operator reads every question before publishing.** |
 | A12 | **Neutral rules that screen a group out.** A requirement that disadvantages a protected group infringes the Code unless it is reasonable and bona fide and cannot be accommodated. This reaches scoring rules and AI output. | Code ss. 9, 11 | [Checked] on s. 11; its application to AI is untested | No knock-out rules: an answer only ever raises a flag for a person. No total, no average, no ranking. The AI sees answers only. |
 | A13 | **Accommodation notices.** Tell the public that accommodation is available in recruitment; tell an applicant selected for an interview that it is available for the interview; tell the person you make an offer to about the accommodation policies. Applies at any size. | IASR ss. 22, 23, 24 | [Checked] | Printed on every posting and the form (with a named contact, required before publishing and not removable while a posting is live), in the interview invitation and in the offer message. For the written quick questions a leader can give more time on the applicant's link or enter answers the applicant gave another way; no reason is asked for or kept. |
 | A14 | **Minimum ages.** 14 for a restaurant's serving areas, 15 for its kitchen. Proof of age only after a conditional offer. | Reg. 851 s. 4; Ontario "Minimum age for work" page; Code s. 10(1) | [Checked] | Printed on every posting and in the offer checks. The tool does not verify age: a person does, after the offer. |
@@ -305,6 +307,12 @@ verified (Part E).
 > this use. If you are under 18, you may wish to read this with a parent
 > or guardian.
 
+The three-year sentence is true as written: only a notice given after an
+interview keeps the applicant's name past the stated months. A notice
+logged for someone who was never interviewed (the usual "not moving
+forward" message) loses its wording and the name when the Operator removes
+that applicant's details.
+
 **Two promises in it are kept by a person, not by the tool:** the removal
 after the stated months (the Operator presses the button on the Retention
 page; the People home page shows a reminder when anyone is due), and
@@ -370,7 +378,12 @@ question and an open store fact (Part E).
 
 ## Part D — Escalation flags
 
-Against the tiers in [escalation-matrix.md](./escalation-matrix.md).
+Against the tiers in [escalation-matrix.md](./escalation-matrix.md). The
+matrix was written for employment matters and has not been changed for
+this tool. An item marked **(not in the matrix)** is this reference's own
+recommendation, placed by analogy with the nearest line the matrix does
+have. Until the Operator and counsel decide whether to add these to the
+matrix itself, treat them as written here.
 
 **Tier 1 — handle here**
 
@@ -387,19 +400,22 @@ Against the tiers in [escalation-matrix.md](./escalation-matrix.md).
   matrix; recommended by analogy, because the Code exposure is systemic
   and untested.
 - The AI provider's data terms, and the final applicant privacy notice
-  with the retention period chosen.
-- An applicant's or a leader's accommodation request heading toward
-  "cannot accommodate".
+  with the retention period chosen. **(not in the matrix)**
+- A leader's accommodation request heading toward "cannot accommodate",
+  and, by analogy **(not in the matrix)**, an applicant's.
 - A response to a Ministry of Labour complaint or inquiry about a posting,
   a 45-day notice or the records.
 - Any change that ties pay, bonus, title or leadership status to review
-  results (pay equity and the merit-pay rules were not verified).
+  results (pay equity and the merit-pay rules were not verified). **(not
+  in the matrix)**
 - Any termination of a leader with three or more years of service; any
   package above ESA minimums; any release.
 - A harassment investigation with substantiated findings against a leader.
 - Offer letters or employment agreements: counsel finalises the text.
 - Changing the electronic monitoring policy to cover review use (C7).
-- Any decision to run police or consumer-report checks.
+  **(not in the matrix)**
+- Any decision to run police or consumer-report checks. **(not in the
+  matrix)**
 
 **Tier 3 — STOP: counsel first, before any action at all**
 
@@ -411,7 +427,12 @@ Against the tiers in [escalation-matrix.md](./escalation-matrix.md).
   hold is this flag raised early**: get the risk read before releasing it
   toward any consequence.
 - Refusing to hire because of a disclosed disability, an accommodation
-  request, religion-linked availability or a record of offences.
+  request, religion-linked availability or a record of offences. **(not in
+  the matrix.** The matrix has no line for a hiring refusal. The hiring
+  research placed this one tier lower, by analogy with accommodation
+  files; this reference keeps the stricter tier, and the tool tells
+  leaders that a lawyer is called first, until the Operator and counsel
+  settle which tier it belongs in.**)**
 - A demand letter, HRTO application, OLRB reprisal complaint or civil
   claim that cites a review, a hiring decision, the tool or the AI. Engage
   counsel the same week, put the applicant on **Hold: do not delete**, and

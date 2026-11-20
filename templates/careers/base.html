@@ -15,7 +15,16 @@
 {% include "hub/_style.html" %}
 <style>
 body { padding-bottom: 24px; }
-.masthead .under.left { max-width: calc(50% - 60px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The employer's name. display: block, or the ellipsis never shows (the shared rule makes it a
+   flex box and the text is simply cut off). On a phone there is no room beside the logo, so it
+   sits under it on its own centred line and wraps. */
+.masthead .under.left { display: block; max-width: calc(50% - 60px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 719px) {
+  .masthead { height: auto; min-height: var(--masthead-h); }
+  .masthead .under.left { position: static; max-width: none; overflow: visible; white-space: normal; text-align: center;
+    padding: 86px var(--gutter) 8px; line-height: 1.25; }
+}
+.btn.sm { min-height: 44px; }
 @media (min-width: 960px) { main.wrap { padding-top: 8px; max-width: 760px; } }
 .cr-statement { margin-top: 12px; font-size: 0.9375rem; line-height: 1.5; color: var(--text); }
 .cr-look { list-style: none; margin: 8px 0 0; padding: 0; }
@@ -34,7 +43,7 @@ body { padding-bottom: 24px; }
 .cr-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .cr-hp { position: absolute; left: -6000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
 .cr-privacy p { margin-top: 10px; font-size: 0.9375rem; line-height: 1.5; }
-.cr-agree { margin-top: 16px; font-weight: 700; color: var(--text-strong); align-items: center; }
+.cr-agree { margin-top: 16px; min-height: 44px; font-weight: 700; color: var(--text-strong); align-items: center; }
 .cr-q { margin-top: 22px; }
 .cr-q label { display: block; font-weight: 700; color: var(--text-strong); line-height: 1.4; margin-bottom: 8px; }
 .cr-q textarea { min-height: 150px; }

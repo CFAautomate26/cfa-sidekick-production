@@ -59,7 +59,10 @@ Things to know:
 
 - The lock is kept on the server, not only in the browser. **Lock now**,
   signing out of Team Hub, and signing in as someone else all close it at
-  once, including for any copy of the browser's sign-in cookie.
+  once, including for any copy of the browser's sign-in cookie. If the
+  server is too busy at that moment to record it, the unlock is refused
+  from then on all the same and its record is removed as soon as it can
+  be; Lock now tells you when that happened.
 - **Five wrong PINs hold the lock for ten minutes.** That count belongs to
   the lock and to your own sign-in: wrong PINs typed at the sign-in page,
   by you or by anyone else, never hold your People lock, and wrong PINs
@@ -76,9 +79,10 @@ Things to know:
   **On a phone or computer other people use, don't let the browser save
   your PIN.** This was not tried on the store's own devices when it was
   built: open People on each and check the box stays empty.
-- If the lock closes while a form is open, that form is **not saved**. You
-  are asked for your PIN and brought back to the page to do it again. Save
-  as you go on a long review.
+- If the lock closes while a form is open, that form is **not saved**, and
+  what you typed is not kept: the message says so. You are asked for your
+  PIN and brought back to the page to do it again. Save as you go on a
+  long review.
 - Page titles never carry an applicant's or a leader's name, so the
   browser's history and tab list do not show who a page was about.
 
@@ -199,7 +203,11 @@ Open the leader's review. For **one standard at a time** you see the
 store's definition, what each level looks like, the notes from the period
 filed under it, and then choose a level or **Not enough to rate yet**
 (always a fair answer, never a mark against the leader), with a comment.
-Then:
+The standards are one form: **any Save button keeps every level you have
+picked and every comment beside it**, not only the standard next to the
+button, and **Save all ratings** sits under the last one. A comment with
+no level picked cannot be kept, and the page tells you which standard that
+was. Then:
 
 - **Strengths** and **growth focus**, in your own words.
 - **Agreed actions.** Each needs an action, a measure, a target and a day
@@ -457,7 +465,12 @@ applicant's Contact page, **Give more time on their link** opens their link
 again for the usual number of days, and **Enter answers they gave another
 way** records what they told you by phone, on paper or with someone's help.
 Either way the answers are scored like any others. Don't ask why, and don't
-write why: the history keeps who did it and when, nothing else.
+write why: the record keeps who did it and when, nothing else, and it is
+shown on the Contact page only. **The scoring page never shows it**: there
+the history just says "Answers received", because how an accommodation was
+met is not for the people scoring to see. Enter every answer they gave
+together if you can. If one is missing you can add it later on the same
+page; an answer that is saved is never replaced.
 
 The careers pages limit how many applications one address can send in an
 hour (and how many wrong private links it can try). The address counted is
@@ -467,10 +480,27 @@ whoever set up the server* shows the address being counted for your own
 request. It should be your own (what a "what is my IP" site shows). If it
 is not, set `PEOPLE_PROXY_HOPS` (below).
 
+If the address being counted turns out to be a **private** one (10.x,
+172.16 to 172.31, 192.168.x, 100.64.x and the like), it is a proxy of the
+hosting platform and not a visitor, and every visitor would share one
+count: five applications an hour for the whole town, and one stranger
+trying made-up links could lock every applicant out. So for such an
+address **the per-address limits are left off** (the limits on everyone
+together still hold: 60 applications an hour, 300 a day), and on the live
+server the People home page, the Hiring page and Settings show a warning
+until `PEOPLE_PROXY_HOPS` is right. An IPv6 visitor is counted by their
+/64, which is what one household or phone is given.
+
 One limit to know: like any web address that is opened, a private link's
-address can show up in the hosting service's own request log. The app
-itself never writes it anywhere, including when a careers page fails (the
-log then gets one fixed line naming the kind of error and nothing else).
+address can show up in a request log. The app itself never writes it
+anywhere, including when a careers page fails (the log then gets one fixed
+line naming the kind of error and nothing else), and the request line the
+built-in server writes for every visit (the app is started with `python
+app.py`) has the secret part of a private link, and the token of a
+`/scheduled` call, replaced with `[removed]`. What the app cannot reach is
+a log the hosting platform keeps in front of it: **check in Render whether
+its HTTP request logs record full paths**, and if the service is ever
+started with gunicorn, leave its access log off.
 The page behind the link never shows the applicant's name or contact
 details, a score or a note, and once the questions are answered it only
 shows the status lines above.
@@ -505,7 +535,8 @@ page.
 ### Interviews and the 45-day notice
 
 Add an interview (date, time, in person / phone / video, who led it), then
-record what happened. An **attended** interview does two things:
+record what happened. The time box is a time picker on a phone, and a time
+typed the way people write it ("2:30 pm", "3pm") is understood. An **attended** interview does two things:
 
 - it opens a **scorecard**: the same criteria, in the same order, for every
   applicant. A submitted scorecard is final, and you see other
@@ -540,7 +571,9 @@ offer, not moving forward, no decision yet. **Open in email** and **Open in
 text messages** open your own mail or text app with the message filled in.
 **The tool never sends anything itself.** After you have told the applicant
 (by email, text, phone or in person), **Log this notice**: what they were
-told, how and on which day. That record is kept for three years.
+told, how and on which day. For someone who was interviewed that record is
+kept for three years, as the law asks. For someone who was never
+interviewed it is removed with the rest of their details (see *Retention*).
 
 ### The offer
 
@@ -572,9 +605,14 @@ lists who is due, and the People home page reminds you when anyone is.
   experience, written answers, leaders' notes, the notes on scores, any AI
   copy of the answers and the private link.
 - **Kept:** the bare record (posting, stages, dates, levels) so the numbers
-  stay true; every decision notice for three full years after the day it
-  was given (the same button then removes its wording and the name, and
-  says how many it removed); postings and their kept copies; anyone hired.
+  stay true; every decision notice given to someone who was interviewed,
+  for three full years after the day it was given (the same button then
+  removes its wording and the name, and says how many it removed);
+  postings and their kept copies; anyone hired.
+- **Removed with the rest:** the wording of, and the name on, a notice
+  logged for someone who was never interviewed. The three-year rule covers
+  interviewed applicants, and the privacy notice tells every applicant
+  their name is removed after the stated months.
 - **Hold: do not delete** on an applicant's Contact page exempts them, and
   keeps the wording of their decision notices too. It can be put on even
   after the details have been removed. Use it the day you hear of a
@@ -601,7 +639,10 @@ under People → Settings, with a short go-live checklist above it.
 
 Taking names out is done by matching the names Team Hub knows. A name it
 does not know (a guest, a nickname) can slip through, and so can a
-two-letter name typed without its capital or a single initial, which is one
+two-letter name typed without its capital (unless it carries 's) or a
+single initial, and a two-letter name that is also an everyday word ("My",
+"An") where it opens a sentence, which is left alone so that "My goal this
+period…" is never rewritten. All of which is one
 more reason notes describe what happened and not who. Holding back notes
 about health and the like is done by a word list too: it errs on the side
 of not sending (a note about a guest's "family" is held back as well), and
@@ -626,6 +667,13 @@ it cannot catch what the list does not name.
    Switch it off, or lose the key, and the posting stops saying it and
    nothing more is sent; if anyone opens the posting while it is not saying
    it, AI assist is off for that posting for good.
+
+In hiring, a suggested level is kept only when the AI quoted a real phrase
+from the answer: at least three words, two of them words that say
+something ("i was the" grounds nothing). And a suggestion is shown only
+while the criterion it was made on, and the answer, are word for word what
+was sent: change a criterion's level descriptions on a live posting and
+the page says the suggestion is no longer shown, and to ask again.
 
 Every request is kept on record exactly as it was sent, with the reply,
 the model and the date: it is in the People backup. A request that has not
@@ -656,11 +704,11 @@ the disk. Download it after each review cycle and after each hiring round.
 
 | Variable | What it is |
 |---|---|
-| `FLASK_SECRET_KEY` | **Required on the live server** (32 characters or more): the key that signs the sign-in cookie. Without it People does not load there. Any `ENV` other than `test`, `dev`, `development` or `local` counts as the live server, and there the sign-in cookie is also marked HTTPS-only. |
+| `FLASK_SECRET_KEY` | **Required on the live server** (32 characters or more): the key that signs the sign-in cookie. Without it People does not load there. Any `ENV` other than `test`, `testing`, `dev`, `development` or `local` counts as the live server, and there the sign-in cookie is also marked HTTPS-only. |
 | `PEOPLE_DB_PATH` | Where the People database lives. Leave it unset and it is `people.db` beside the Team Hub database (`SHIFT_DB_PATH`), on the persistent disk. |
 | `OPENAI_API_KEY` | The AI service key. Already set for the GroupMe bot. People uses it only while an AI switch is on. |
 | `PEOPLE_AI_MODEL` | Optional. Which of the AI provider's models to use; the default in `people_ai.py` if unset. |
-| `PEOPLE_PROXY_HOPS` | Optional, 0 to 5, default 1. How many of the hosting platform's proxies stand in front of the app: the careers pages count their limits against the address that many places from the end of `X-Forwarded-For` (0 = the connection itself). Never set it so that it points at an entry a visitor could have typed. Check it on Settings → *For whoever set up the server*. |
+| `PEOPLE_PROXY_HOPS` | Optional, 0 to 5, default 1. How many of the hosting platform's proxies stand in front of the app: the careers pages count their limits against the address that many places from the end of `X-Forwarded-For` (0 = the connection itself). Never set it so that it points at an entry a visitor could have typed. Check it on Settings → *For whoever set up the server*. If the address it lands on is a private one, the per-address limits are left off and People warns you until it is fixed. |
 
 ## Left out of version 1, on purpose
 
@@ -683,6 +731,14 @@ the disk. Download it after each review cycle and after each hiring round.
   AI draft can be asked for.
 
 ## For whoever maintains it
+
+**To try People on your own computer:** `ENV=dev SHIFT_ADMIN_PIN=1234
+python app.py`, then open `http://localhost:5000/shift`. With `ENV=dev`
+(or `test`, `local`) People loads without `FLASK_SECRET_KEY` and the
+sign-in cookie works over plain http. Without it the app counts as the
+live server: People and the careers pages answer 404 until the key is set,
+and sign-in over plain http loops back to the sign-in page.
+
 
 Files: `people.py` (the gate, the lock, the Operator's pages), `people_db.py`
 (the separate store), `people_ai.py` (the AI engine), `people_reviews.py` +

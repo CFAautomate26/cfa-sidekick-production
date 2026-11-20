@@ -145,9 +145,11 @@ Canada.
   restore yet). It is the one place applicant records and leader reviews
   live, and it still never holds discipline files, a person's wage or
   payroll, medical details, or accommodation requests or plans (the only
-  trace of any of those is a reviewer's bare yes/no answers to the six
-  "before you finish" questions, Operator-only, and time-away dates with
-  no reason; every free-text box carries the "never write" guidance and a
+  traces of any of those are a reviewer's bare yes/no answers to the six
+  "before you finish" questions, Operator-only; time-away dates with no
+  reason; and, in hiring, that a leader gave an applicant more time or
+  entered their answers for them, with no reason, shown on the Contact
+  page and in the activity log and never on the scoring page; every free-text box carries the "never write" guidance and a
   word-list check). **Access** is never by role: the Operator, plus leaders
   the Operator ticks on `/shift/people/access` for `hiring` and/or
   `reviewer` (a grant counts only when leader id and sign-in name both
@@ -185,7 +187,10 @@ Canada.
   a private link (HMAC hash kept, never the token; a repeat of the same
   email or phone is kept and flagged for a leader, never refused, so the
   form cannot be used to learn who applied; per-address limits count the
-  hop the platform's proxy added, `PEOPLE_PROXY_HOPS`), a pipeline moved only
+  hop the platform's proxy added, `PEOPLE_PROXY_HOPS`, and are left off,
+  with a warning to the Operator, when that address is a private one; the
+  built-in server's request log has private links and `/scheduled` tokens
+  masked, `careers.mask_request_log`), a pipeline moved only
   by a person's tap, per-criterion scoring (no total), interview
   scorecards, the 45-day decision-notice tracker, copy-ready messages that
   open the leader's own mail/text app (the tool sends nothing), metrics,

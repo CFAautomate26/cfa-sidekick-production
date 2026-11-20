@@ -23,6 +23,9 @@
 {% if wages_to_check %}
 <p class="callout tan" style="margin-top:12px;">{{ icon('clock') }}<span><strong>Check the minimum wage figures.</strong> Ontario's minimum wage usually changes on October 1, and the figures postings are checked against were last confirmed before the most recent one. <a class="textlink" href="{{ url_for('people.settings') }}#wages">Open Settings</a></span></p>
 {% endif %}
+{% if hiring_url and visitors_mixed %}
+<p class="callout warm" style="margin-top:12px;" id="visitors-mixed">{{ icon('alert') }}<span><strong>The careers pages cannot tell visitors apart yet.</strong> The address they would count for you is a private one, which means it belongs to the hosting platform and not to you. Until that is fixed the limit on applications from one address is off (the limits on everyone together still hold). {% if viewer.is_operator %}<a class="textlink" href="{{ url_for('people.settings') }}#addresses">Open Settings</a> and set PEOPLE_PROXY_HOPS as it says there.{% else %}Tell the Operator: Settings says how to set PEOPLE_PROXY_HOPS.{% endif %}</span></p>
+{% endif %}
 {% if hiring_url and counts.attention %}
 <p class="callout warm" style="margin-top:12px;">{{ icon('alert') }}<span><strong>{{ counts.attention }} live posting{{ ' no longer passes' if counts.attention == 1 else 's no longer pass' }} the publish check.</strong> {{ 'It is' if counts.attention == 1 else 'They are' }} still public and still taking applications. <a class="textlink" href="{{ hiring_url }}">Open Hiring to fix or close {{ 'it' if counts.attention == 1 else 'them' }}</a></span></p>
 {% endif %}

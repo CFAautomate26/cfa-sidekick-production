@@ -23,6 +23,12 @@
 .pp-guide-stop { grid-column: 1 / -1; margin-top: 16px; }
 @media (min-width: 960px) { .pp-guide-body { grid-template-columns: 1fr 1fr; } }
 .pp-escalate { margin: 12px 0; }
+/* Everything tapped on a People page is at least 44px tall on a phone. Set here, not in the
+   shared style, so /shift and /hub keep their look. */
+.btn.sm { min-height: 44px; }
+.crumbs a { display: inline-flex; align-items: center; min-height: 44px; }
+.seg a { min-height: 44px; }
+.checkline { min-height: 44px; align-items: center; }
 .pp-levels { display: flex; flex-wrap: wrap; gap: 6px; }
 .pp-level { display: inline-flex; align-items: center; gap: 4px; padding: 6px 11px; border-radius: var(--r-full);
   font-size: 0.8125rem; font-weight: 700; line-height: 1.2; color: var(--text-muted); background: #fff;
@@ -131,7 +137,7 @@
    or 'hiring'. #}
 {% macro escalation(kind) -%}
 {%- if kind == 'hiring' %}
-<p class="callout warm pp-escalate">{{ icon('shield') }}<span><strong>This tool does not decide who is hired or turned down.</strong> A person does, every time. Before turning someone down for a reason connected to a disability, an accommodation request, availability that is limited by religion, or a record of offences: stop and take it to the Operator. The store's escalation matrix applies, and a lawyer is called first.</span></p>
+<p class="callout warm pp-escalate">{{ icon('shield') }}<span><strong>This tool does not decide who is hired or turned down.</strong> A person does, every time. Before turning someone down for a reason connected to a disability, an accommodation request, availability that is limited by religion, or a record of offences: stop and take it to the Operator: a lawyer is called first, before any decision is made.</span></p>
 {%- else %}
 <p class="callout warm pp-escalate">{{ icon('shield') }}<span><strong>This tool does not decide discipline, pay, hours, demotion or dismissal,</strong> and nothing in it happens automatically. If this review could lead toward any of those, stop and go through the store's escalation matrix with the Operator before anyone acts. A lawyer comes first for any dismissal for cause, and before a review is used toward ending the job of someone who is pregnant, on or just back from a leave, has a disability or an accommodation, has a WSIB claim, or has recently raised a concern or complaint.</span></p>
 {%- endif %}

@@ -20,7 +20,7 @@
 </section>
 
 {% if c.purged %}
-<p class="callout tan" style="margin-top:22px;">{{ icon('lock') }}<span><strong>This applicant's details were removed on {{ c.purged_at|pp_day }}.</strong> Only the bare record is kept: the stages, the levels and any decision notice still inside its three years.</span></p>
+<p class="callout tan" style="margin-top:22px;">{{ icon('lock') }}<span><strong>This applicant's details were removed on {{ c.purged_at|pp_day }}.</strong> Only the bare record is kept: the stages, the levels and, if they were interviewed, any decision notice still inside its three years.</span></p>
 {% else %}
   {% if c.hold %}<p class="callout" style="margin-top:22px;">{{ icon('lock') }}<span><strong>On hold: do not delete.</strong> This application is kept until the Operator takes the hold off.</span></p>{% endif %}
   {% if not c.answered_at %}
@@ -99,7 +99,9 @@
       <label class="field" for="note-{{ crit.id }}">Your note <small>(what in the answer led you to this level)</small></label>
       <textarea id="note-{{ crit.id }}" name="note_{{ crit.id }}" rows="2" maxlength="{{ limits.SCORE_NOTE_MAX }}">{{ own.note if own else '' }}</textarea>
       {% set hint = ai.suggestions.get(crit.id) %}
-      {% if hint %}
+      {% if crit.id in ai.stale %}
+      <p class="callout tan" id="ai-{{ crit.id }}">{{ icon('alert') }}<span>The criterion's wording or this answer changed after the AI suggestion was made, so the suggestion is not shown. Ask again.</span></p>
+      {% elif hint %}
       <div class="hr-ai" id="ai-{{ crit.id }}">
         {{ ai_label('Suggested, for reviewer decision. Not a decision.') }}
         <p>{% if hint.suggested_level %}The AI suggests <strong>level {{ hint.suggested_level }}</strong>.{% else %}The AI suggests no level for this answer.{% endif %}{% if hint.quote %} It points to: “{{ hint.quote }}”{% endif %}</p>
@@ -217,16 +219,16 @@
 
   {% if not c.purged %}
   {% set still_open = c.stage in ('new', 'screening', 'interview', 'offer') %}
-  <details class="card tool" id="add-interview">
+  <details class="card tool" id="add-interview"{{ ' open' if request.args.get('iv_on_date') }}>
     <summary class="row"><span class="lead-ico">{{ icon('plus') }}</span><span class="row-main"><span class="row-title">Add an interview</span><span class="row-meta">{{ 'Planned, or one that already happened.' if still_open else 'One that was held and never logged. It still starts the 45-day clock.' }}</span></span>{{ icon('chev', 'chev') }}</summary>
     <div class="tool-body">
       <form method="post" action="{{ url_for('people.hiring_interview', application_id=c.id) }}">
         <div class="hr-two">
-          <div><label class="field" for="iv-date" style="margin-top:0;">Date</label><input id="iv-date" name="on_date" type="date" required value="{{ today }}"></div>
-          <div><label class="field" for="iv-time" style="margin-top:0;">Time <small>(optional, like 15:30)</small></label><input id="iv-time" name="at_time" type="text" inputmode="numeric" maxlength="5" placeholder="15:30"></div>
+          <div><label class="field" for="iv-date" style="margin-top:0;">Date</label><input id="iv-date" name="on_date" type="date" required value="{{ request.args.get('iv_on_date') or today }}"></div>
+          <div><label class="field" for="iv-time" style="margin-top:0;">Time <small>(optional)</small></label><input id="iv-time" name="at_time" type="time" value="{{ request.args.get('iv_at_time', '') }}"></div>
         </div>
         <label class="field" for="iv-mode">How</label>
-        <select id="iv-mode" name="mode">{% for mode in modes %}<option value="{{ mode }}">{{ mode|capitalize }}</option>{% endfor %}</select>
+        <select id="iv-mode" name="mode">{% for mode in modes %}<option value="{{ mode }}"{{ ' selected' if request.args.get('iv_mode') == mode }}>{{ mode|capitalize }}</option>{% endfor %}</select>
         <label class="field" for="iv-who">Interviewer</label>
         <input id="iv-who" name="interviewer" type="text" maxlength="80" value="{{ viewer.name }}">
         <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add interview</button></div>
@@ -292,7 +294,7 @@
       <table class="plain">
         {% for e in history %}
         <tr><td class="nowrap">{{ e.at|pp_when }}</td><td class="who">{{ 'The applicant' if e.by == 'applicant' else e.by }}</td>
-          <td>{% if e.kind == 'stage' %}{{ stage_labels.get(e.from_stage, e.from_stage) }} to {{ stage_labels.get(e.to_stage, e.to_stage) }}{% if e.detail %} ({{ e.detail }}){% endif %}{% else %}{{ e.kind|replace('_', ' ')|capitalize }}{% if e.detail %}: {{ e.detail }}{% endif %}{% endif %}</td></tr>
+          <td>{% if e.kind == 'answered' %}Answers received{% elif e.kind == 'stage' %}{{ stage_labels.get(e.from_stage, e.from_stage) }} to {{ stage_labels.get(e.to_stage, e.to_stage) }}{% if e.detail %} ({{ e.detail }}){% endif %}{% else %}{{ e.kind|replace('_', ' ')|capitalize }}{% if e.detail %}: {{ e.detail }}{% endif %}{% endif %}</td></tr>
         {% endfor %}
       </table>
     </div>

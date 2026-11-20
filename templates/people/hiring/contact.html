@@ -16,7 +16,7 @@
 <p class="callout" style="margin-top:22px;">{{ icon('shield') }}<span>Nothing on this page is part of a score. It is kept off the scoring page on purpose.</span></p>
 
 {% if c.purged %}
-<p class="callout tan">{{ icon('lock') }}<span><strong>This applicant's details were removed on {{ c.purged_at|pp_day }}.</strong> The decision notices below are kept until they are three years old.</span></p>
+<p class="callout tan">{{ icon('lock') }}<span><strong>This applicant's details were removed on {{ c.purged_at|pp_day }}.</strong> A decision notice given after an interview is kept, with the name, until it is three years old. One given to someone who was never interviewed had its wording and name removed with the rest.</span></p>
 {% else %}
 {% if contact.work_entitled == 'no' %}
 <p class="callout warm" id="check-work">{{ icon('alert') }}<span><strong>Check before any offer: said they are not legally entitled to work in Canada.</strong> It is a yes or no check for the offer stage, never part of a score. A person checks it; nothing is decided automatically.</span></p>
@@ -48,18 +48,19 @@
 </section>
 
 {# ---------- the quick questions, with more time or another way ---------- #}
-{% set asked = c.criteria|selectattr('question')|list %}
-{% if asked and not c.answered_at and c.stage in active_stages %}
+{% if unanswered and c.stage in active_stages %}
 <section class="sec" id="questions">
   <div class="sec-head"><h2>Quick questions</h2></div>
   <div class="card">
-    <p class="card-meta" style="margin-top:0;">{% if c.link_expired %}Not answered, and their link has closed.{% else %}Not answered yet. Their link is open until {{ c.answers_until|pp_when }}.{% endif %} Accommodation is offered at every stage, including this one. If the applicant needs more time, or needs to answer another way (by phone, on paper, with someone's help), do it here. Don't ask why, and don't write why.</p>
+    <p class="card-meta" style="margin-top:0;">{% if c.answered_at %}{{ unanswered|length }} question{{ ' still has' if unanswered|length == 1 else 's still have' }} no answer.{% elif c.link_expired %}Not answered, and their link has closed.{% else %}Not answered yet. Their link is open until {{ c.answers_until|pp_when }}.{% endif %} Accommodation is offered at every stage, including this one. If the applicant needs more time, or needs to answer another way (by phone, on paper, with someone's help), do it here. Don't ask why, and don't write why.</p>
+    {% if not c.answered_at %}
     <form method="post" action="{{ url_for('people.hiring_more_time', application_id=c.id) }}" class="btnrow"><button class="btn btn-secondary sm" type="submit">Give more time on their link</button></form>
-    <details class="hr-fold" id="another-way">
+    {% endif %}
+    <details class="hr-fold" id="another-way"{{ ' open' if c.answered_at }}>
       <summary>{{ icon('chev', 'sm') }}Enter answers they gave another way</summary>
-      <p class="fine-line">Write what they said, in their words. These answers are scored like any others, against the same criteria.</p>
+      <p class="fine-line">Write what they said, in their words. These answers are scored like any others, against the same criteria. Enter every answer they gave together if you can. An answer that is saved can't be changed here; a question left empty can be answered later, on this page.</p>
       <form method="post" action="{{ url_for('people.hiring_enter_answers', application_id=c.id) }}" autocomplete="off">
-        {% for q in asked %}
+        {% for q in unanswered %}
         <label class="field" for="q-{{ q.id }}">{{ q.question }}</label>
         <textarea id="q-{{ q.id }}" name="q_{{ q.id }}" rows="4" maxlength="{{ limits.ANSWER_MAX }}"></textarea>
         {% endfor %}
@@ -68,6 +69,10 @@
     </details>
   </div>
 </section>
+{% endif %}
+{% if help_given %}
+{# Kept here, with the contact details, and never on the scoring screen. #}
+<p class="fine-line" id="help-given">{% for e in help_given %}{{ 'More time on their link was given' if e.kind == 'more_time' else 'Answers they gave another way were entered' }} by {{ e.by }}, {{ e.at|pp_when }}.{{ ' ' if not loop.last }}{% endfor %} This is not shown on the scoring page.</p>
 {% endif %}
 
 {% if same_contact %}
@@ -117,7 +122,7 @@
 {# ---------- decision notices ---------- #}
 <section class="sec" id="notices">
   <div class="sec-head"><h2>Decision notices</h2></div>
-  <p class="sec-note">Anyone we interview must be told whether a hiring decision has been made within 45 days of their last interview, even when the answer is “not yet”. Each notice is kept three years.</p>
+  <p class="sec-note">Anyone we interview must be told whether a hiring decision has been made within 45 days of their last interview, even when the answer is “not yet”. A notice given after an interview is kept three years.</p>
   {% for clock in clocks %}
   <p class="callout {{ 'warm' if clock.status == 'overdue' else 'tan' if clock.status == 'due' else '' }}">{{ icon('clock') }}<span>Interviewed {{ clock.interviewed|pp_day }}.
     {% if clock.status == 'overdue' %}<strong>A notice is overdue</strong>: it was due {{ clock.deadline|pp_day }}.
@@ -128,7 +133,7 @@
   {% for n in notices %}
   <div class="card" id="g{{ n.id }}">
     <div class="row-between"><span class="card-title">{{ notice_kinds[n.kind] }}</span><span class="badge">{{ n.method|capitalize }} · {{ n.given_on|pp_day }}</span></div>
-    {% if n.said %}<p class="hr-said">{{ n.said }}</p>{% else %}<p class="card-meta">The wording was removed when this notice turned three years old.</p>{% endif %}
+    {% if n.said %}<p class="hr-said">{{ n.said }}</p>{% else %}<p class="card-meta">The wording was removed: this notice turned three years old, or it was given to someone who was never interviewed and went with the rest of their details.</p>{% endif %}
     <p class="card-meta">Logged by {{ stamp(n.logged_by, n.logged_at) }}</p>
   </div>
   {% else %}
@@ -200,7 +205,7 @@
 <section class="sec" id="records">
   <div class="sec-head"><h2>This record</h2></div>
   <div class="card">
-    <p class="card-meta" style="margin-top:0;">{% if c.hold %}<span class="badge b-navy">On hold: do not delete</span>{% elif c.purged %}Their details have been removed. The decision notices above lose their wording once they are more than three years old, unless a hold is on.{% else %}If they are not hired, their details are due to be removed {{ c.keep_months }} months after the decision, which is what they were told when they applied.{% endif %}</p>
+    <p class="card-meta" style="margin-top:0;">{% if c.hold %}<span class="badge b-navy">On hold: do not delete</span>{% elif c.purged %}Their details have been removed. A decision notice given after an interview loses its wording once it is more than three years old, unless a hold is on.{% else %}If they are not hired, their details are due to be removed {{ c.keep_months }} months after the decision, which is what they were told when they applied.{% endif %}</p>
     <p class="card-meta">Put a hold on if you know of a complaint, a claim or a lawyer's letter about this application. A record on hold is never removed, and neither is the wording of its decision notices. Tell the Operator at once: the store's escalation matrix applies.</p>
     {% if not c.hold %}
     <form method="post" action="{{ url_for('people.hiring_hold', application_id=c.id) }}" class="btnrow"><input type="hidden" name="on" value="1"><button class="btn btn-secondary sm" type="submit">Hold: do not delete</button></form>

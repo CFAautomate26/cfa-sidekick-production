@@ -23,9 +23,16 @@ environment variables, Render persistent-disk setup, and backup story.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-SHIFT_ADMIN_PIN=1234 python app.py     # http://localhost:5000 (/shift for the app)
-python -m pytest tests/                # full test suite
+ENV=dev SHIFT_ADMIN_PIN=1234 python app.py   # http://localhost:5000 (/shift for the app)
+python -m pytest tests/                      # full test suite
 ```
+
+`ENV=dev` (or `test`, `local`) is what makes a plain `http://` address work.
+Without it the app behaves as the live server: the sign-in cookie is
+HTTPS-only, so signing in over plain http loops back to the sign-in page
+(on a phone at your computer's LAN address, and in Safari even on
+localhost), and People and the careers pages do not load unless
+`FLASK_SECRET_KEY` is set to 32 characters or more.
 
 `GET /` is the health check; it reports the deployed git revision on Render.
 

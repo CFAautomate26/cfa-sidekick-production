@@ -14,14 +14,24 @@ cap on what can be sent, and a check that a form came from our own page.
 The limits live in memory only, and the address is never stored: only a
 salted hash of it is held, and only while the limit needs it. The address
 is the one the hosting platform's proxy reports, never one the visitor
-can type (client_address).
+can type (client_address). If that turns out to be a private address (a
+proxy of the platform's own, because PEOPLE_PROXY_HOPS does not fit this
+server), every visitor would share one count: the per-address limits are
+then left off rather than let one stranger lock everyone out, the limits
+on everyone together still hold, and the Operator is warned.
 
 Nothing here prints a name, a contact detail, an answer or a link, and an
 error on these pages is answered here so that the server's error log
-never carries the address of an applicant's private link.
+never carries the address of an applicant's private link. The server
+this app is started with (`python app.py`) also writes a line for every
+request, with its address: mask_request_log() takes the private link out
+of those lines too. A log kept by the hosting platform in front of the
+app is outside this file's reach (docs/people.md says what to check).
 """
 
 import hashlib
+import ipaddress
+import logging
 import os
 import re
 import secrets
@@ -67,6 +77,41 @@ def _now() -> float:
     return shift_db.now_local().timestamp()
 
 
+# ---------------------------------------------------------------------------
+# The server's own request log
+# ---------------------------------------------------------------------------
+
+_PRIVATE_LINK = re.compile(r"(/careers/a/)[^\s/?#\"']+")
+_TOKEN_VALUE = re.compile(r"([?&]token=)[^\s&#\"']+")
+
+
+def mask_addresses(line: str) -> str:
+    """A log line with the secret part of any address taken out: the last
+    part of an applicant's private link, and the token on a /scheduled
+    call (which opens the Team Hub backup)."""
+    return _TOKEN_VALUE.sub(r"\1[removed]", _PRIVATE_LINK.sub(r"\1[removed]", str(line)))
+
+
+class RequestLogMask(logging.Filter):
+    """Rewrites each line of the built-in server's request log before it is
+    written, so a private link is never in the hosting log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.msg, record.args = mask_addresses(record.getMessage()), ()
+        except Exception:
+            record.msg, record.args = "request (line withheld)", ()
+        return True
+
+
+def mask_request_log() -> None:
+    """Put the mask on the built-in server's request logger, once. app.py
+    calls this when it registers these pages."""
+    logger = logging.getLogger("werkzeug")
+    if not any(isinstance(f, RequestLogMask) for f in logger.filters):
+        logger.addFilter(RequestLogMask())
+
+
 PROXY_HOPS_ENV = "PEOPLE_PROXY_HOPS"
 
 
@@ -92,11 +137,50 @@ def client_address(forwarded: str | None, remote_addr: str | None, hops: int | N
     return chain[-hops][:64]
 
 
-def _address_key() -> str:
-    """A salted hash of where the request came from (see client_address).
-    The address itself is never kept anywhere."""
+# Addresses that are never a visitor's own on the public internet: private
+# networks, the carrier-shared range, this machine, link-local.
+_NOT_A_VISITOR = tuple(ipaddress.ip_network(block) for block in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "127.0.0.0/8",
+    "169.254.0.0/16", "0.0.0.0/8", "::1/128", "fc00::/7", "fe80::/10"))
+
+
+def tells_visitors_apart(address: str) -> bool:
+    """Is this an address a limit can fairly be counted against? Not when
+    it is empty, unreadable, or inside a private or reserved range: that is
+    a proxy in front of the app (PEOPLE_PROXY_HOPS is wrong for this
+    server), and every visitor would share one count, so one stranger
+    could use it up for everyone."""
+    try:
+        ip = ipaddress.ip_address((address or "").strip())
+    except ValueError:
+        return False
+    if getattr(ip, "ipv4_mapped", None):
+        ip = ip.ipv4_mapped
+    return not any(ip.version == block.version and ip in block for block in _NOT_A_VISITOR)
+
+
+def _counted_as(address: str) -> str:
+    """What a limit is keyed on: the address, or for IPv6 its /64 (one
+    household or phone is handed a whole /64, not one address)."""
+    try:
+        ip = ipaddress.ip_address((address or "").strip())
+    except ValueError:
+        return address or ""
+    if ip.version == 6 and not getattr(ip, "ipv4_mapped", None):
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False).network_address) + "/64"
+    return str(getattr(ip, "ipv4_mapped", None) or ip)
+
+
+def _address_key() -> str | None:
+    """A salted hash of where the request came from (see client_address),
+    or None when that address cannot tell one visitor from another (see
+    tells_visitors_apart): the per-address limits are then not applied,
+    and only the limits on everyone together hold. The address itself is
+    never kept anywhere."""
     address = client_address(request.headers.get("X-Forwarded-For"), request.remote_addr)
-    return hashlib.sha256(_salt + address.encode("utf-8", "replace")).hexdigest()[:24]
+    if not tells_visitors_apart(address):
+        return None
+    return hashlib.sha256(_salt + _counted_as(address).encode("utf-8", "replace")).hexdigest()[:24]
 
 
 def _trim(table: dict, now: float, window: float) -> None:
@@ -111,27 +195,34 @@ def _trim(table: dict, now: float, window: float) -> None:
             del table[key]
 
 
-def _take_application_slot(key: str, now: float) -> bool:
-    """Count one application against the limits; False when one is used up."""
+def _take_application_slot(key: str | None, now: float) -> bool:
+    """Count one application against the limits; False when one is used
+    up. key None (an address that cannot tell visitors apart) is counted
+    only against the limits on everyone together."""
     with _lock:
-        mine = [t for t in _applied.get(key, []) if now - t < HOUR]
+        mine = [t for t in _applied.get(key, []) if now - t < HOUR] if key else []
         _applied_all[:] = [t for t in _applied_all if now - t < DAY]
         last_hour = sum(1 for t in _applied_all if now - t < HOUR)
         if (len(mine) >= PER_ADDRESS_AN_HOUR or last_hour >= ALL_AN_HOUR
                 or len(_applied_all) >= ALL_A_DAY):
             return False
-        _trim(_applied, now, HOUR)
-        _applied[key] = mine + [now]
+        if key:
+            _trim(_applied, now, HOUR)
+            _applied[key] = mine + [now]
         _applied_all.append(now)
         return True
 
 
-def _too_many_wrong_links(key: str, now: float) -> bool:
+def _too_many_wrong_links(key: str | None, now: float) -> bool:
+    if not key:
+        return False
     with _lock:
         return sum(1 for t in _wrong_links.get(key, []) if now - t < HOUR) >= WRONG_LINKS_AN_HOUR
 
 
-def _count_wrong_link(key: str, now: float) -> None:
+def _count_wrong_link(key: str | None, now: float) -> None:
+    if not key:
+        return
     with _lock:
         _trim(_wrong_links, now, HOUR)
         _wrong_links[key] = [t for t in _wrong_links.get(key, []) if now - t < HOUR] + [now]

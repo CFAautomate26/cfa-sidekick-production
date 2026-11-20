@@ -99,9 +99,10 @@ if shift_db is not None:
             load_features()     # no-op unless a feature was imported ahead of people.py
             app.register_blueprint(people_bp)
             try:
-                from careers import careers_bp
+                from careers import careers_bp, mask_request_log
 
                 app.register_blueprint(careers_bp)
+                mask_request_log()      # an applicant's private link never goes into the request log
             except Exception as e:  # the public careers pages can't take People down
                 print(f"WARNING: careers pages failed to load, People unaffected: {e!r}")
             print("People registered at /shift/people")
@@ -620,4 +621,8 @@ def scheduled_shift_backup():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    if app.config["SESSION_COOKIE_SECURE"]:
+        # Started the way the README shows, on what may be a plain http address.
+        print("NOTE: the sign-in cookie is HTTPS-only on this server (ENV is not dev, test or local). "
+              "To run on a plain http address, start with ENV=dev.")
     app.run(host="0.0.0.0", port=port)

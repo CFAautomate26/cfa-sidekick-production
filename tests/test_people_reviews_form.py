@@ -52,13 +52,16 @@ def test_the_form_puts_each_standard_beside_its_evidence(world):
     model = people_db.active_model()
     for dim in model["dimensions"]:
         card = html[html.index(f'id="d-{dim["key"]}"'):]
-        card = card[:card.index("</form>")]
+        # (rewritten after the browser run, finding B6: the standards are no longer eleven separate
+        # forms; each one's boxes belong to the page's single rating form and carry its key)
+        card = card[:card.index("</fieldset>")]
         assert dim["name"] in card and dim["definition"] in card
         assert "What each level looks like" in card
         for level, anchor in zip(model["levels"], dim["anchors"]):
             assert level in card and anchor in card
         assert card.count('type="radio"') == 5 and "Not enough to rate yet" in card
-        assert 'name="comment"' in card
+        assert card.count(f'form="rv-rate" name="level-{dim["key"]}"') == 5
+        assert f'form="rv-rate" name="comment-{dim["key"]}"' in card
     reliable = html[html.index('id="d-reliable"'):html.index('id="d-guest-care"')]
     assert "Opened on time all week." in reliable and "Did well" in reliable
     assert "Helped a new starter" not in reliable
@@ -87,7 +90,9 @@ def test_one_standard_is_saved_at_a_time(world):
         == (3, 0, "On time for every open I saw.", "Rae")
     html = post(rae, url(made, "/rate"), {"dimension_key": "teamwork", "level": "not_enough"})
     assert "Saved." in html and rdb.ratings(made["review"])["teamwork"]["not_enough"] == 1
-    assert re.search(r'name="level" value="3" checked', html)
+    # (rewritten after the browser run, finding B6: every standard's boxes now belong to one form,
+    # so each radio group carries its standard's key)
+    assert re.search(r'name="level-reliable" value="3" checked', html)
     assert "On time for every open I saw.</textarea>" in html
     html = post(rae, url(made, "/rate"), {"dimension_key": "guest-care", "comment": "No level picked."})
     assert "Choose a level, or “Not enough to rate yet”, then save." in html

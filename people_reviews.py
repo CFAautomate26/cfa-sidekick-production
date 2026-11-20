@@ -520,18 +520,61 @@ def _draft_to_write(review_id: int):
     return found, model, None
 
 
+def _rate_others(review_id: int, model: dict, tapped: str) -> tuple[int, list[str]]:
+    """The review page is one form: whichever "Save" was tapped, every
+    other standard on it arrives too (level-<key>, comment-<key>). Save
+    each one that has a level picked and differs from what is stored, so
+    nothing picked or typed elsewhere on the page is thrown away.
+    (how many were saved, the names of standards with a comment typed but
+    no level picked: a comment cannot be kept without one)."""
+    stored = rdb.ratings(review_id)
+    saved, comment_only = 0, []
+    for dim in model["dimensions"]:
+        key = dim["key"]
+        if key == tapped or f"level-{key}" not in request.form and f"comment-{key}" not in request.form:
+            continue
+        choice = request.form.get(f"level-{key}", "")
+        comment = request.form.get(f"comment-{key}", "")
+        if not choice:
+            if comment.strip() and not (stored.get(key) or {}).get("comment"):
+                comment_only.append(dim["name"])
+            continue
+        not_enough = choice == "not_enough"
+        row = stored.get(key) or {}
+        same = (bool(row.get("not_enough")) == not_enough
+                and (not_enough or str(row.get("level") or "") == choice)
+                and (row.get("comment") or "") == hub_text.clean(comment).strip()
+                and (row.get("level") or row.get("not_enough")))
+        if not same and rdb.save_rating(review_id, key, None if not_enough else choice, not_enough,
+                                        comment, people.actor()):
+            saved += 1
+    return saved, comment_only
+
+
 def rate(review_id: int):
-    found, _, stop = _draft_to_write(review_id)
+    found, model, stop = _draft_to_write(review_id)
     if stop:
         return stop
     key = request.form.get("dimension_key", "")
-    choice = request.form.get("level", "")
+    # One standard posted alone (level, comment), or the whole page
+    # (level-<key>, comment-<key> for every standard, see _rate_others).
+    choice = request.form.get("level", "") or request.form.get(f"level-{key}", "")
+    comment = request.form.get("comment", "") or request.form.get(f"comment-{key}", "")
     not_enough = choice == "not_enough"
-    if rdb.save_rating(review_id, key, None if not_enough else choice, not_enough,
-                       request.form.get("comment", ""), people.actor()):
+    done = bool(key) and rdb.save_rating(review_id, key, None if not_enough else choice, not_enough,
+                                         comment, people.actor())
+    others, comment_only = _rate_others(review_id, model, key)
+    if done and not others:
         flash("Saved.")
-    else:
+    elif done or others:
+        count = others + (1 if done else 0)
+        flash(f"Saved {count} standard{'' if count == 1 else 's'}.")
+    if key and not done:
         flash("Choose a level, or “Not enough to rate yet”, then save.")
+    elif not key and not others:
+        flash("Choose a level for at least one standard, then save.")
+    if comment_only:
+        flash("A comment needs a level to be saved with. Choose a level for: " + ", ".join(comment_only) + ".")
     return _back(review_id, f"d-{key}" if re.fullmatch(r"[a-z0-9-]{2,40}", key) else "")
 
 

@@ -20,6 +20,7 @@ import hmac
 import importlib
 import json
 import os
+import time
 from dataclasses import dataclass
 from datetime import date
 from functools import wraps
@@ -133,6 +134,8 @@ def _unlocked(who: Viewer) -> bool:
     stamp = session.get("people_unlock_at")
     if stamp is None or session.get("people_unlock_for") != _identity(who):
         return False
+    if session.get("people_unlock_id") in _revoked:   # locked or signed out; the store was busy
+        return False
     try:
         idle = _now() - int(stamp)
     except (TypeError, ValueError):
@@ -144,6 +147,46 @@ def _unlocked(who: Viewer) -> bool:
                                   UNLOCK_MAX_HOURS * 3600)
 
 
+# Unlocks that were closed (Lock now, signing out) at a moment the People
+# store could not be written. The row is still in the store, so until it
+# is gone this process refuses the unlock itself, for every copy of the
+# cookie, and tries the delete again on later requests.
+_revoked: set[str] = set()
+_REVOKED_MAX = 2000
+_RETRY_EVERY = 20                # seconds between tries, so a busy store is not hammered
+_retry_at = [0.0]
+
+
+def _close_unlock(unlock_id, timeout: float | None = None) -> bool:
+    """Close one unlock in the store. If the store cannot be written, the
+    unlock must still not survive: it is remembered as revoked (refused by
+    _unlocked from now on, and deleted on a later request). False when the
+    delete did not go through."""
+    if not unlock_id or not isinstance(unlock_id, str):
+        return True
+    try:
+        people_db.unlock_close(unlock_id, timeout)
+    except Exception as e:
+        if len(_revoked) < _REVOKED_MAX:
+            _revoked.add(unlock_id)
+        _retry_at[0] = time.monotonic()         # not again straight away: the store is busy
+        people_db.report_fault("lock", e)
+        return False
+    _revoked.discard(unlock_id)
+    return True
+
+
+def _retry_revoked() -> None:
+    """Try again to delete the unlocks that could not be closed, with a
+    short wait so a request is never held up by it."""
+    if not _revoked or time.monotonic() - _retry_at[0] < _RETRY_EVERY:
+        return
+    _retry_at[0] = time.monotonic()
+    for unlock_id in list(_revoked):
+        if not _close_unlock(unlock_id, timeout=1):
+            break                               # still busy: leave the rest for next time
+
+
 @people_bp.before_app_request
 def _lock_when_signing_out_or_in():
     """Signing out of Team Hub (or signing in as someone else) closes the
@@ -152,7 +195,8 @@ def _lock_when_signing_out_or_in():
     try:
         if request.method == "POST" and request.endpoint in ("shift.logout", "hub.logout",
                                                              "shift.login", "hub.login"):
-            people_db.unlock_close(session.get("people_unlock_id"))
+            _close_unlock(session.get("people_unlock_id"))
+        _retry_revoked()
     except Exception:
         pass
     return None
@@ -199,9 +243,11 @@ def _gate():
         return None
     if reading:
         return redirect(url_for("people.unlock", next=request.full_path.rstrip("?")))
-    # A form post is never carried out while locked. After the PIN they
-    # land back on the page the form was on, to try again.
-    flash("People pages locked themselves. Enter your PIN and try again.")
+    # A form post is never carried out while locked, and what was typed is
+    # not kept: say so plainly. After the PIN they land back on the page
+    # the form was on, to do it again.
+    flash("People pages locked themselves before that was saved, so it was not saved. "
+          "Enter your PIN and try again.")
     came_from = urlparse(request.referrer or "")
     back = _safe_next(came_from.path) if came_from.netloc == request.host else ""
     return redirect(url_for("people.unlock", next=back or None))
@@ -356,7 +402,7 @@ def unlock():
         flash("Wrong PIN.")
         return redirect(again)
     people_db.pin_clear(identity)
-    people_db.unlock_close(session.get("people_unlock_id"))
+    _close_unlock(session.get("people_unlock_id"))
     session["people_unlock_at"] = _now()
     session["people_unlock_for"] = identity
     session["people_unlock_id"] = people_db.unlock_open(identity, _now(), UNLOCK_MAX_HOURS * 3600)
@@ -366,10 +412,14 @@ def unlock():
 
 @people_bp.route("/people/lock", methods=["POST"])
 def lock():
-    people_db.unlock_close(session.pop("people_unlock_id", None))
+    closed = _close_unlock(session.pop("people_unlock_id", None))
     session.pop("people_unlock_at", None)
     session.pop("people_unlock_for", None)
-    flash("People pages are locked.")
+    # If the store was busy the unlock is refused from here on all the
+    # same, and its record is removed as soon as the store can be written.
+    flash("People pages are locked." if closed else
+          "People pages are locked on this server. It was busy, so it is still finishing: if you "
+          "think someone has a copy of your sign-in, tap Lock now again in a minute.")
     return redirect(url_for("shift.today"))
 
 
@@ -486,6 +536,19 @@ def _retention_due() -> tuple[int, str | None]:
         return 0, None
 
 
+def visitors_not_told_apart() -> bool:
+    """On the live server, would the careers pages count this very request
+    against an address that is not a visitor's own (a private address: a
+    proxy)? Then their per-address limits are off, and whoever set up the
+    server has to fix PEOPLE_PROXY_HOPS. Never raised on a test or
+    development machine, where every request comes from the machine
+    itself."""
+    if (os.getenv("ENV") or "production").strip().lower() in NOT_PRODUCTION:
+        return False
+    check = _address_check()
+    return bool(check) and not check["apart"]
+
+
 @people_bp.route("/people", strict_slashes=False)
 def home():
     who = viewer()
@@ -500,6 +563,7 @@ def home():
                   else None),
         has_model=bool(people_db.active_model()) if who.caps else True,
         ai_ready=people_ai.available(),
+        visitors_mixed=visitors_not_told_apart() if "hiring" in who.caps else False,
         wages_to_check=people_db.wages_to_check() if who.is_operator else [])
 
 
@@ -679,9 +743,10 @@ def _address_check() -> dict | None:
             return None
         import careers
         forwarded = request.headers.get("X-Forwarded-For")
+        counted = careers.client_address(forwarded, request.remote_addr)
         return {"hops": careers.proxy_hops(), "variable": careers.PROXY_HOPS_ENV,
                 "chain": [part.strip()[:64] for part in (forwarded or "").split(",") if part.strip()],
-                "counted": careers.client_address(forwarded, request.remote_addr)}
+                "counted": counted, "apart": careers.tells_visitors_apart(counted)}
     except Exception:
         return None
 

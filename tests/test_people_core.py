@@ -489,7 +489,9 @@ def test_pages_stay_locked_until_the_pin_is_entered_again(world, who):
     # a form post while locked is never carried out
     resp = client.post("/shift/people/settings", data={"lock_minutes": "99"})
     assert resp.status_code == 302 and resp.headers["Location"] == UNLOCK
-    assert "People pages locked themselves. Enter your PIN and try again." in flashed(client)
+    # (rewritten after the browser run, finding B5: the message now says the form was not saved)
+    assert ("People pages locked themselves before that was saved, so it was not saved. "
+            "Enter your PIN and try again.") in flashed(client)
     assert people_db.get_setting("lock_minutes") == "30"
     # ... and after the PIN they land back on the page the form was on
     resp = client.post("/shift/people/settings", data={"lock_minutes": "99"},

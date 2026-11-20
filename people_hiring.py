@@ -23,6 +23,7 @@ messages and the offer checks.
 Nothing here prints a name, a contact detail, an answer or a note.
 """
 
+import json
 import re
 from urllib.parse import quote
 
@@ -107,15 +108,25 @@ def _ai_build(payload: dict) -> tuple[str, dict]:
 
 
 QUOTE_MIN_WORDS = 3
-QUOTE_MIN_LETTERS = 12
+QUOTE_MIN_TELLING_WORDS = 2
+# Words that are in every answer and tell a reader nothing by themselves.
+_FILLER_WORDS = frozenset((
+    "the", "a", "an", "and", "or", "to", "of", "in", "on", "it", "i", "was", "is", "were", "we",
+    "they", "them", "my", "so", "that", "this", "for", "with", "at", "be", "had", "have", "you",
+    "he", "she", "me", "our", "us", "his", "her", "their", "are", "am", "been", "do", "did", "not",
+    "but", "as", "by", "from", "then", "when", "there", "what", "which", "who", "if", "up", "out",
+    "just", "very", "would", "could", "will", "can", "its", "it's", "im", "i'm", "also", "too"))
 
 
 def _really_quoted(quoted: str, answer: str) -> bool:
-    """Is this a real quotation from the answer: at least three words (or
-    twelve characters), found in the answer as whole words? A single letter
-    or a common word is "in" every answer and proves nothing."""
+    """Is this a real quotation from the answer: at least three words, at
+    least two of them words that say something, found in the answer as
+    whole words? A single word, or a run of words such as "i was the", is
+    "in" every answer and grounds nothing."""
     quote_text, text = _squash(quoted), _squash(answer)
-    if len(quote_text.split()) < QUOTE_MIN_WORDS and len(quote_text) < QUOTE_MIN_LETTERS:
+    words = [word.strip(".,;:!?\"'()") for word in quote_text.split()]
+    telling = [word for word in words if word and word not in _FILLER_WORDS]
+    if len(words) < QUOTE_MIN_WORDS or len(telling) < QUOTE_MIN_TELLING_WORDS:
         return False
     return re.search(r"(?<![\w])" + re.escape(quote_text) + r"(?![\w])", text) is not None
 
@@ -178,6 +189,22 @@ def _overall_checks(output: dict) -> list[str]:
 
 
 people_ai.register_kind(AI_KIND, _ai_build, _ai_validate)
+
+
+def _still_as_sent(job: dict, record: dict) -> set:
+    """The criterion ids whose suggestion still stands: the criterion's
+    name, definition and level descriptions, and the answer, are exactly
+    what was sent to the AI when it was asked (kept on the job)."""
+    try:
+        sent = json.loads(job.get("input_json") or "")["data"]
+        now = ai_payload(record)
+        by_id = lambda rows: {row["criterion_id"]: row for row in rows}      # noqa: E731
+        was, is_now = (by_id(sent["criteria"]), by_id(sent["answers"])), (by_id(now["criteria"]),
+                                                                          by_id(now["answers"]))
+        return {key for key in was[0] if was[0][key] == is_now[0].get(key)
+                and was[1].get(key) == is_now[1].get(key)}
+    except (TypeError, ValueError, KeyError):
+        return set()
 
 
 def ai_blocked(record: dict) -> str | None:
@@ -427,6 +454,7 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
                                follow_up=hdb.notices_to_follow_up(),
                                stage_labels=hdb.STAGE_LABELS, active_stages=hdb.ACTIVE_STAGES,
                                stages=hdb.STAGES, attention=hdb.needs_attention(),
+                               visitors_mixed=people.visitors_not_told_apart(),
                                drafts=sum(1 for p in hdb.postings() if p["status"] == "draft"))
 
     # --- postings ----------------------------------------------------------
@@ -649,10 +677,16 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
         job = None if blocked else people_ai.latest_job(AI_KIND, record["id"])
         out = {"blocked": blocked, "status": job["status"] if job else None,
                "error": job["error"] if job else None, "by": job["requested_by"] if job else "",
-               "at": job["finished_at"] if job else "", "suggestions": {}, "checks": [], "waiting": 0}
+               "at": job["finished_at"] if job else "", "suggestions": {}, "checks": [], "waiting": 0,
+               "stale": set()}
         if job and job["status"] == "done" and job["output"]:
+            current = _still_as_sent(job, record)
             for item in job["output"].get("criteria", []):
-                if item["criterion_id"] in scores["mine"]:
+                if item["criterion_id"] not in current:
+                    # The criterion's wording or the answer has changed
+                    # since: the suggestion was about something else.
+                    out["stale"].add(item["criterion_id"])
+                elif item["criterion_id"] in scores["mine"]:
                     out["suggestions"][item["criterion_id"]] = item
                 else:
                     out["waiting"] += 1
@@ -661,6 +695,20 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             # sent and needs reading by a person).
             out["checks"] = _overall_checks(job["output"])
         return out
+
+    def scoring_history(application_id: int) -> list[dict]:
+        """The application's history as a scoring screen may show it. That
+        an applicant was given more time, or that a leader entered their
+        answers for them, is how an accommodation was met: it is never put
+        in front of someone scoring (it is on the contact page instead)."""
+        shown = []
+        for event in hdb.events(application_id):
+            if event["kind"] == "more_time":
+                continue
+            if event["kind"] == "answered":
+                event = {**event, "by": "", "detail": ""}
+            shown.append(event)
+        return shown
 
     @bp.route("/hiring/candidates/<int:application_id>")
     @hiring
@@ -675,7 +723,7 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
         return render_template(
             "people/hiring/candidate.html", tabs=_tabs("pipeline"), c=record, scores=scores, talks=talks,
             has_notes=any(note for card in scores["cards"] for note in card["notes"].values()),
-            notes=hdb.notes(application_id), history=hdb.events(application_id),
+            notes=hdb.notes(application_id), history=scoring_history(application_id),
             moves=hdb.allowed_moves(record["stage"], who.is_operator) if not record["purged"] else [],
             reasons=hdb.NOT_SELECTED_REASONS, stage_labels=hdb.STAGE_LABELS,
             outcome_labels=hdb.OUTCOME_LABELS, modes=hdb.INTERVIEW_MODES, days=hdb.DAYS,
@@ -751,9 +799,12 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
                                     request.form.get("interviewer", ""), people.actor())
         if problem:
             flash(problem)
-        else:
-            _log("interview added", "application", application_id)
-            flash("Interview added. Record what happened once it has been held.")
+            # What was entered comes back with the form, open, to be put right.
+            kept = {f"iv_{key}": request.form.get(key, "")[:20] for key in ("on_date", "at_time", "mode")}
+            return redirect(url_for("people.hiring_candidate", application_id=application_id, **kept)
+                            + "#add-interview")
+        _log("interview added", "application", application_id)
+        flash("Interview added. Record what happened once it has been held.")
         return to_candidate(application_id, "#interviews")
 
     @bp.route("/hiring/candidates/<int:application_id>/interviews/<int:interview_id>/outcome",
@@ -848,6 +899,9 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             active_stages=hdb.ACTIVE_STAGES, same_contact=record["same_contact"],
             on_roster=any(m["name"].casefold() == record["name"].casefold()
                           for m in shift_db.roster(include_inactive=True)),
+            unanswered=hdb.unanswered_questions(application_id),
+            help_given=[e for e in hdb.events(application_id)
+                        if e["kind"] == "more_time" or (e["kind"] == "answered" and e["detail"])],
             today=shift_db.now_local().date().isoformat(), limits=hdb)
 
     @bp.route("/hiring/candidates/<int:application_id>/more-time", methods=["POST"])
@@ -872,7 +926,10 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
         result = hdb.save_answers(application_id, typed, entered_by=people.actor())
         if result == "saved":
             _log("answers entered for the applicant", "application", application_id)
-            flash("Answers saved. They are scored like any others.")
+            left = hdb.unanswered_questions(application_id)
+            flash("Answers saved. They are scored like any others."
+                  + (f" {len(left)} question{' still has' if len(left) == 1 else 's still have'} no answer: "
+                     "you can add it on the contact page." if left else ""))
             return to_candidate(application_id, "#answers")
         flash("Write the answer to at least one question." if result == "empty"
               else "The questions are already answered, or the application is no longer open.")
@@ -902,7 +959,7 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             flash(problem)
         else:
             _log("notice logged", "application", application_id, kind)
-            flash("Notice logged. It is kept for three years.")
+            flash("Notice logged. A notice given after an interview is kept for three years.")
         return to_contact(application_id, "#notices")
 
     @bp.route("/hiring/candidates/<int:application_id>/offer", methods=["POST"])

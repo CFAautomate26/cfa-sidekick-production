@@ -1480,22 +1480,46 @@ def application_by_token(token: str) -> dict | None:
     return out
 
 
+def _open_questions(conn, application_id: int, posting_id: int) -> list[dict]:
+    """The posting's questions this application has no answer to yet."""
+    answered = {r["criterion_id"] for r in conn.execute(
+        "SELECT criterion_id FROM hr_answers WHERE application_id=?", (application_id,))}
+    return [c for c in _criteria(conn, posting_id) if c["question"] and c["id"] not in answered]
+
+
+def unanswered_questions(application_id: int) -> list[dict]:
+    """The questions a leader can still enter an answer to for this
+    applicant ([{"id", "question"}]): asked by the posting, not answered,
+    on an application that is still open."""
+    with closing(people_db.connect()) as conn:
+        row = _open_application(conn, application_id)
+        if not row or row["stage"] not in ACTIVE_STAGES:
+            return []
+        return [{"id": c["id"], "question": c["question"]}
+                for c in _open_questions(conn, application_id, row["posting_id"])]
+
+
 def save_answers(application_id: int, answers: dict, entered_by: str | None = None) -> str:
-    """Step two, once: "saved", "empty" (nothing was written), or "closed"
+    """Step two: "saved", "empty" (nothing was written), or "closed"
     (already answered, or the window has ended). answers: {criterion id:
-    text}; only this posting's own questions are kept. `entered_by` is the
-    leader recording answers the applicant gave another way (by phone, on
-    paper, with someone's help): that works after the link has closed too,
-    and the history says who entered them, never why."""
+    text}; only this posting's own questions are kept. The applicant
+    answers once, on their own link. `entered_by` is the leader recording
+    answers the applicant gave another way (by phone, on paper, with
+    someone's help): that works after the link has closed too, and again
+    later for any question that still has no answer (one that has an
+    answer is never replaced), and the history says who entered them,
+    never why."""
     now = _stamp()
     with closing(people_db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT posting_id, stage FROM hr_applications WHERE id=? AND answered_at IS NULL "
-                           "AND purged_at IS NULL AND (answers_until>=? OR ?)",
+        row = conn.execute("SELECT posting_id, stage FROM hr_applications WHERE id=? "
+                           "AND purged_at IS NULL AND ((answered_at IS NULL AND answers_until>=?) OR ?)",
                            (application_id, now, 1 if entered_by else 0)).fetchone()
         if not row or row["stage"] not in ACTIVE_STAGES:
             return "closed"
-        asked = {c["id"] for c in _criteria(conn, row["posting_id"]) if c["question"]}
+        asked = {c["id"] for c in _open_questions(conn, application_id, row["posting_id"])}
+        if not asked:
+            return "closed"
         kept = {}
         for criterion_id, body in (answers or {}).items():
             text = _block(body, ANSWER_MAX)
@@ -1504,7 +1528,7 @@ def save_answers(application_id: int, answers: dict, entered_by: str | None = No
         if not kept:
             return "empty"
         for criterion_id, text in kept.items():
-            conn.execute("INSERT OR REPLACE INTO hr_answers (application_id, criterion_id, body) "
+            conn.execute("INSERT INTO hr_answers (application_id, criterion_id, body) "
                          "VALUES (?,?,?)", (application_id, criterion_id, text))
         conn.execute("UPDATE hr_applications SET answered_at=? WHERE id=? AND answered_at IS NULL",
                      (now, application_id))
@@ -1886,6 +1910,26 @@ def scores_for(application_id: int, scorer_name: str, scorer_leader_id: int | No
 # Interviews
 # ---------------------------------------------------------------------------
 
+_CLOCK = re.compile(r"([0-9]{1,2})(?:[:.h]([0-5][0-9]))?\s*(a\.?m\.?|p\.?m\.?)?", re.I)
+
+
+def clock_time(text) -> str | None:
+    """A time of day as people write it ("15:30", "3:30 pm", "3pm", "9 a.m.")
+    as HH:MM; "" for nothing typed; None when it cannot be read."""
+    text = " ".join(str(text or "").split())
+    if not text:
+        return ""
+    match = _CLOCK.fullmatch(text)
+    if not match or (match.group(2) is None and not match.group(3)):     # a bare "15" could mean anything
+        return None
+    hour, minute, half = int(match.group(1)), int(match.group(2) or 0), (match.group(3) or "").lower()
+    if half:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if half.startswith("p") else 0)
+    return f"{hour:02d}:{minute:02d}" if hour <= 23 else None
+
+
 def add_interview(application_id: int, on_date: str, at_time: str, mode: str, interviewer: str,
                   by: str) -> str | None:
     """Log an interview (in person, phone or video; planned or already
@@ -1896,9 +1940,9 @@ def add_interview(application_id: int, on_date: str, at_time: str, mode: str, in
         return "Enter the interview date."
     if not today - timedelta(days=366) <= day <= today + timedelta(days=366):
         return "That interview date is more than a year away."
-    at_time = str(at_time or "").strip()
-    if at_time and not _TIME.fullmatch(at_time):
-        return "Enter the time like 15:30, or leave it empty."
+    at_time = clock_time(at_time)
+    if at_time is None:
+        return "Enter the time like 3:30 pm or 15:30, or leave it empty."
     if mode not in INTERVIEW_MODES:
         return "Choose how the interview is held."
     with closing(people_db.connect()) as conn, conn:
@@ -2166,8 +2210,10 @@ def clocks_for(application_id: int) -> list[dict]:
 def log_notice(application_id: int, kind: str, method: str, said: str, given_on: str,
                by: str) -> str | None:
     """Record what an applicant was told about the hiring decision, how and
-    when. The record keeps the applicant's name with it for three years.
-    Returns None, or why it could not be saved."""
+    when. For an applicant who was interviewed the record keeps their name
+    with it for three years; for one who never was, it goes when their
+    details are removed (see purge_all). Returns None, or why it could not
+    be saved."""
     if kind not in NOTICE_KINDS:
         return "Choose what the applicant was told."
     if method not in NOTICE_METHODS:
@@ -2427,12 +2473,16 @@ def purge_all(by: str) -> tuple[int, int]:
     duplicate-check key, private link, yes/no answers, availability,
     referrer, experience, written answers, leaders' notes, score notes and
     any AI copies of the answers are blanked or deleted. The row, its stage
-    history and its levels stay, and so does every decision notice until
-    three full years after the day it was given (after that the wording
-    and the name go, in this same run, unless the application is on hold).
-    Hired applicants, applications on hold, postings and the kept copies of
-    postings are never touched. Returns (applications purged, notices whose
-    wording was removed)."""
+    history and its levels stay. A decision notice given to someone who
+    was interviewed stays, with their name, until three full years after
+    the day it was given (after that the wording and the name go, in this
+    same run, unless the application is on hold): that is the record the
+    law asks for. A notice logged for someone who was never interviewed is
+    not that record, and applicants are told their name goes with the rest:
+    its wording and the name are removed with the application. Hired
+    applicants, applications on hold, postings and the kept copies of
+    postings are never touched. Returns (applications purged, notices more
+    than three years old whose wording was removed)."""
     today = _today()
     now = _stamp()
     with closing(people_db.connect()) as conn, conn:
@@ -2460,6 +2510,12 @@ def purge_all(by: str) -> tuple[int, int]:
         # whole of its third anniversary is still inside that, so only a
         # notice given before this day three years ago goes. A record on
         # hold is never removed, and that covers its notices.
+        # A notice to someone who never had an interview is not the
+        # three-year record: it goes with the rest of their details.
+        conn.execute(
+            "UPDATE hr_notices SET said='', given_to='' WHERE (said != '' OR given_to != '') "
+            "AND application_id IN (SELECT id FROM hr_applications WHERE purged_at IS NOT NULL AND hold=0) "
+            "AND application_id NOT IN (SELECT application_id FROM hr_interviews WHERE outcome='attended')")
         cutoff = _add_months(today, -NOTICE_KEEP_MONTHS).isoformat()
         notices = conn.execute(
             "UPDATE hr_notices SET said='', given_to='' WHERE given_on < ? AND (said != '' OR given_to != '') "
