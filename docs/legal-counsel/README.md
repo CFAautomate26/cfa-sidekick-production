@@ -71,6 +71,7 @@ situation, include as much of the following as applies:
 | [situation-playbooks.md](./situation-playbooks.md) | Step-by-step playbooks for recurring situations: discipline, termination, accommodation, harassment investigations, medical leaves, wage complaints. |
 | [document-templates.md](./document-templates.md) | Skeleton templates for warnings, PIPs, termination letters, accommodation correspondence, and investigation reports, with the legally load-bearing language flagged. |
 | [escalation-matrix.md](./escalation-matrix.md) | The bright lines: which situations Claude handles end-to-end, which get a "verify with counsel" flag, and which stop and go to a lawyer before anything is issued. |
+| [hiring-and-leader-reviews.md](./hiring-and-leader-reviews.md) | The rules behind Team Hub's People section: job postings, the 45-day notice, what an application may ask, AI disclosure, leader reviews, the wording the tool uses, escalation flags, and what could not be verified. |
 | [legal-updates.md](./legal-updates.md) | The Alerts function: a change log of Ontario employment-law developments affecting the store, plus the protocol for running a fresh legal update briefing. |
 
 ## Maintenance

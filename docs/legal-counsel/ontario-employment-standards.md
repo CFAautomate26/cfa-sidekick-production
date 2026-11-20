@@ -5,14 +5,20 @@ Statutory baseline for the store under the *Employment Standards Act, 2000*
 agreement or store policy can give more, never less. A contract term that
 gives less than the ESA is void and the ESA standard applies instead.
 
-Figures verified as of **August 2026**. Minimum wage changes every October 1;
-confirm current rates at ontario.ca/minimumwage before quoting them.
+Figures verified as of **August 2026**, except the minimum wage rates and
+the hiring rules under "Other statutes", corrected on **20 November 2026**
+from secondary sources (the official pages could not be opened that day).
+Minimum wage changes every October 1; confirm current rates at
+ontario.ca/minimumwage before quoting them.
 
 ## Wages
 
-- **General minimum wage**: $17.60/hr (since Oct 1, 2025; indexed to Ontario
-  CPI each Oct 1 — check for the 2026 rate after it is announced in spring).
-- **Student minimum wage**: $16.60/hr — applies to students **under 18** who
+- **General minimum wage**: $17.95/hr (since Oct 1, 2026; was $17.60 from
+  Oct 1, 2025; indexed to Ontario CPI each Oct 1). **Verify current rate**
+  at ontario.ca/minimumwage: the next change is Oct 1, 2027, announced in
+  spring.
+- **Student minimum wage**: $16.90/hr (since Oct 1, 2026; was $16.60).
+  **Verify current rate.** Applies to students **under 18** who
   work ≤ 28 hours/week during the school year, or work during school
   holidays/summer. A 17-year-old working 30+ hrs/week while school is in
   session must get the general rate.
@@ -141,11 +147,19 @@ ESA-protected absences is **reprisal**, which the Ministry treats seriously.
   needing health care or lost time → Form 7 within 3 business days.
   Re-employment obligations apply after work injuries (1+ year of service).
 - **ESA poster/information**: provide the current "Employment Standards in
-  Ontario" info to each employee within 30 days of hiring. Since Jan 1, 2026,
-  employers with **25+ employees** must give new hires written information
-  (legal name, contact, work location, starting wage, pay period, anticipated
-  hours) before or as soon as practicable after the first day. Job postings
-  now require expected compensation ranges and disclosure of AI screening use,
-  and cannot require "Canadian experience"; retain postings 3 years.
+  Ontario" info to each employee within 30 days of hiring. Since
+  **July 1, 2025** (not Jan 1, 2026, as this page first said), employers
+  with **25+ employees** must give new hires written information (legal
+  name, contact, work location, starting wage, pay period, anticipated
+  hours) before or as soon as practicable after the first day. **Verify
+  current rule** on e-Laws (O. Reg. 285/01 s. 1.2). Since Jan 1, 2026, job
+  postings require expected compensation or a range (no wider than $50,000
+  a year), a statement of whether the vacancy exists, and disclosure of AI
+  screening use, and cannot require "Canadian experience"; anyone
+  interviewed must be told within 45 days whether a hiring decision has
+  been made; keep each posting and its application form 3 years after it
+  comes down, and each notice to an interviewed applicant 3 years from the
+  day it was given. Full detail, wording and open points:
+  [hiring-and-leader-reviews.md](./hiring-and-leader-reviews.md).
 - **Payroll records**: keep employment records generally 3–5 years depending
   on record type; keep them longer as litigation hygiene.
