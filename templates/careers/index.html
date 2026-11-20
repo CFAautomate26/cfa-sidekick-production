@@ -1,0 +1,18 @@
+{% extends "careers/base.html" %}
+{% block title %}{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">Careers</p>
+  <h1 class="headline">Work with us</h1>
+  <p class="lede">Open positions at {{ employer }}.</p>
+</section>
+{% if postings %}
+<div class="card list" style="margin-top:22px;">
+  {% for p in postings %}
+  <a class="row" href="{{ url_for('careers.posting', slug=p.slug) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span><span class="row-meta">{{ p.type_label }} · {{ p.pay }}</span></span>{{ icon('chev', 'chev') }}</a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty" style="margin-top:22px;">We're not hiring for a posted position right now. Check back soon.</div>
+{% endif %}
+{% endblock %}

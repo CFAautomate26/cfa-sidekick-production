@@ -201,7 +201,8 @@ NOTICE_METHODS = ("email", "text", "phone", "in person")
 CONTACT_METHODS = ("phone", "email", "text", "in person")
 OFFER_REPLIES = ("accepted", "declined")
 EVENT_KINDS = ("applied", "answered", "stage", "contacted", "interview", "outcome", "notice",
-               "offer", "offer_reply", "purged", "note", "score", "scorecard", "hold", "roster", "ai")
+               "offer", "offer_reply", "purged", "note", "score", "scorecard", "hold", "roster", "ai",
+               "corrected")
 
 NOTICE_DAYS = 45                 # days after the last interview to tell the applicant
 NOTICE_SOON_DAYS = 7
@@ -936,6 +937,52 @@ def set_ai(posting_id: int, on: bool, by: str) -> bool:
     return True
 
 
+SETTINGS_CHANGE = "A change in People settings"
+
+
+def keep_current_copy(posting_id: int) -> bool:
+    """A live posting also changes when a setting it prints changes: the
+    hiring contact, the employer name, a wage floor, the months
+    applications are kept. The careers pages call this before they show a
+    posting: if what is about to be shown no longer matches the last kept
+    copy, a new copy is kept first, so every version the public saw is on
+    record. True when a copy was taken."""
+    with closing(people_db.connect()) as conn:
+        def current():
+            posting = _posting(conn, posting_id)
+            if not posting or posting["status"] != "open":
+                return None, None
+            conf = _settings(conn)
+            last = conn.execute("SELECT body FROM hr_snapshots WHERE posting_id=? ORDER BY id DESC LIMIT 1",
+                                (posting_id,)).fetchone()
+            same = bool(last) and last["body"] == document_text(public_view(posting, conf))
+            return (None, None) if same else (posting, conf)
+
+        if current()[0] is None:                 # the usual case: one read, nothing to do
+            return False
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            posting, conf = current()            # again, now that nobody else can write
+            if posting is None:
+                return False
+            _take_snapshot(conn, posting, conf, "changed", SETTINGS_CHANGE)
+    return True
+
+
+def needs_attention() -> list[dict]:
+    """Live postings that no longer pass the publish check (a wage floor
+    went up, or the hiring contact was removed), each with its problems."""
+    out = []
+    with closing(people_db.connect()) as conn:
+        conf = _settings(conn)
+        for row in conn.execute("SELECT id FROM hr_postings WHERE status='open' ORDER BY id").fetchall():
+            posting = _posting(conn, row["id"])
+            problems = _problems(posting, posting["criteria"], conf)
+            if problems:
+                out.append({"id": posting["id"], "title": posting["title"], "problems": problems})
+    return out
+
+
 def copy_posting(posting_id: int, by: str) -> int | None:
     """A new draft with the same wording and criteria (for the next time
     the same job is posted). Never copies applications."""
@@ -1229,6 +1276,27 @@ def candidate_contact(application_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def correct_details(application_id: int, raw: dict, by: str) -> list[str]:
+    """Change an applicant's name, email or phone when they ask for a
+    correction (applicants are told they can). The same checks as the form
+    they filled in. Returns the problems; nothing is saved while there are
+    any."""
+    fields, problems = clean_application({**raw, "work_entitled": "yes", "adult": "yes", "consent": "1"})
+    if problems:
+        return problems
+    keys = _contact_keys(fields["email"], fields["phone"])
+    with closing(people_db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _open_application(conn, application_id)
+        if not row:
+            return ["That application isn't there any more."]
+        conn.execute("UPDATE hr_applications SET first_name=?, last_name=?, email=?, phone=?, contact_key=? "
+                     "WHERE id=?", (fields["first_name"], fields["last_name"], fields["email"],
+                                    fields["phone"], " ".join(keys), application_id))
+        _event(conn, application_id, row["posting_id"], by, "corrected", "name or contact details")
+    return []
+
+
 def events(application_id: int) -> list[dict]:
     """The application's history, oldest first."""
     with closing(people_db.connect()) as conn:
@@ -1356,15 +1424,17 @@ def _level(raw) -> int | None:
 def save_answer_scores(application_id: int, scorer_name: str, scorer_leader_id: int | None,
                        entries: dict) -> int:
     """This leader's own level and note for each written answer. entries:
-    {criterion id: (level 1-4 or None, note)}. A criterion left with no
-    level and no note is cleared. Returns how many were saved."""
+    {criterion id: (level 1-4 or None, note)}; only criteria the applicant
+    answered count. An entry with no level clears that score. Returns how
+    many were saved."""
     saved = 0
     with closing(people_db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
         row = _open_application(conn, application_id)
         if not row:
             return 0
-        known = {c["id"] for c in _criteria(conn, row["posting_id"])}
+        known = {r["criterion_id"] for r in conn.execute(
+            "SELECT criterion_id FROM hr_answers WHERE application_id=?", (application_id,))}
         mine = {r["criterion_id"]: r["id"] for r in conn.execute(
             "SELECT * FROM hr_scores WHERE application_id=? AND source='answers'", (application_id,))
             if _mine(r, scorer_name, scorer_leader_id)}

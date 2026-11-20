@@ -1,0 +1,15 @@
+{% extends "careers/base.html" %}
+{% from "careers/_posting.html" import posting_body %}
+{% block title %}{{ view.title }}{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">{{ view.employer }}</p>
+  <h1 class="headline">{{ view.title }}</h1>
+  <p class="triage"><b>{{ view.type_label }}</b> · <b>{{ view.pay }}</b></p>
+</section>
+{{ posting_body(view, body) }}
+<div class="btnrow" style="margin-top:24px;">
+  <a class="btn btn-primary block" href="{{ url_for('careers.apply', slug=view.slug) }}">Apply now</a>
+</div>
+<p class="fine-line" style="text-align:center;">About a minute, then a few quick questions.</p>
+{% endblock %}

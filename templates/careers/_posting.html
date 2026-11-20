@@ -1,0 +1,25 @@
+{# What a published posting shows, in the order the law's statements are
+   read: used by the public page and by the leaders' preview, so both are
+   always the same. `view` is people_hiring_db.public_view(); `body` is the
+   description already rendered by hub_text.render. #}
+{% macro posting_body(view, body) -%}
+{% if view.student_line %}<p class="cr-statement" id="student-rate">{{ view.student_line }}</p>{% endif %}
+<article class="card doc" style="margin-top:18px;">{{ body }}</article>
+{% if view.criteria %}
+<section class="sec" id="what-we-look-for">
+  <div class="sec-head"><h2>What we look for</h2></div>
+  <div class="card"><ul class="cr-look">
+    {% for c in view.criteria %}<li><b>{{ c.name }}</b>{{ c.definition }}</li>{% endfor %}
+  </ul></div>
+</section>
+{% endif %}
+<section class="sec" id="about-this-posting">
+  <div class="sec-head"><h2>About this posting</h2></div>
+  <div class="card">
+    <p class="cr-statement" style="margin-top:0;" id="vacancy">{{ view.vacancy_statement }}</p>
+    {% if view.ai_statement %}<p class="cr-statement" id="ai-statement">{{ view.ai_statement }}</p>{% endif %}
+    <p class="cr-statement" id="accommodation">{{ view.accommodation }}</p>
+    <p class="cr-statement" id="minimum-age">{{ view.age_line }}</p>
+  </div>
+</section>
+{%- endmacro %}

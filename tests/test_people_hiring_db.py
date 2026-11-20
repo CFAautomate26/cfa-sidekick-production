@@ -569,6 +569,7 @@ def test_scores_on_written_answers_are_each_leaders_own(world):
     app_id = applied(posting_id)
     first, second = (c["id"] for c in hdb.get_posting(posting_id)["criteria"])
     hari, ada = world["ids"]["hari"], world["ids"]["ada"]
+    hdb.save_answers(app_id, {first: "I opened the stand every Saturday.", second: "I helped a lost guest."})
     assert hdb.save_answer_scores(app_id, "Hari", hari, {first: ("3", "Gave a clear example."),
                                                          second: ("", ""), 999: ("4", "x")}) == 1
     assert hdb.save_answer_scores(app_id, "Ada", ada, {first: ("2", ""), second: ("4", "")}) == 2
@@ -964,3 +965,73 @@ def test_the_records_export_holds_every_copy_and_every_notice(world, monkeypatch
         "application_id": app_id, "posting": "Team member", "given_to": "Jordan1 Sample",
         "kind": "no-decision-yet", "method": "email", "given_on": "2026-11-10",
         "said": "No decision has been made yet.", "logged_at": "2026-11-10 10:00", "logged_by": "Hari"}]
+
+
+# --- settings a live posting prints, and corrections ------------------------------------
+
+def test_a_settings_change_that_alters_a_live_posting_is_kept_as_a_copy_too(world):
+    posting_id = live()
+    draft_id = draft(title="Still a draft")
+    assert not hdb.keep_current_copy(posting_id) and len(hdb.snapshots(posting_id)) == 1
+    people_db.set_setting("hiring_contact_name", "Riley Example", "Operator")
+    assert hdb.keep_current_copy(posting_id) and not hdb.keep_current_copy(posting_id)
+    copies = hdb.snapshots(posting_id)
+    assert [(c["reason"], c["taken_by"]) for c in copies] == [
+        ("published", "Operator"), ("changed", "A change in People settings")]
+    assert "contact Morgan Example" in hdb.get_snapshot(copies[0]["id"])["body"]
+    assert "contact Riley Example" in hdb.get_snapshot(copies[1]["id"])["body"]
+    people_db.set_setting("retention_months", "36", "Operator")
+    assert hdb.keep_current_copy(posting_id)
+    assert "for 36 months after" in hdb.get_snapshot(hdb.snapshots(posting_id)[-1]["id"])["body"]
+    people_db.set_setting("lock_minutes", "45", "Operator")           # nothing the posting prints
+    assert not hdb.keep_current_copy(posting_id)
+    assert not hdb.keep_current_copy(draft_id) and not hdb.keep_current_copy(999)
+    hdb.close_posting(posting_id, "Operator")
+    people_db.set_setting("hiring_contact_name", "Someone Else", "Operator")
+    assert not hdb.keep_current_copy(posting_id)                       # closed: nothing is shown any more
+
+
+def test_a_live_posting_that_stops_passing_the_check_is_called_out(world):
+    posting_id = live()
+    live(title="Kitchen team", pay_min="19.00", pay_max="21.00")
+    assert hdb.needs_attention() == []
+    people_db.set_setting("min_wage_general", "18.40", "Operator")    # the floor went up on October 1
+    attention = hdb.needs_attention()
+    assert [a["id"] for a in attention] == [posting_id] and attention[0]["title"] == "Team member"
+    assert "below Ontario's general minimum wage ($18.40" in attention[0]["problems"][0]
+    people_db.set_setting("hiring_contact_name", "", "Operator")
+    assert len(hdb.needs_attention()) == 2
+
+
+def test_an_applicants_details_can_be_corrected_when_they_ask(world, monkeypatch):
+    clock(monkeypatch, "2026-11-01 09:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    fixed = {"first_name": "Jordan", "last_name": "Sample-Lee", "email": "", "phone": "519 555 0199"}
+    assert hdb.correct_details(app_id, {**fixed, "phone": "123"}, "Hari") == [
+        "That phone number needs 10 to 15 digits."]
+    assert hdb.correct_details(app_id, {**fixed, "phone": ""}, "Hari") == [
+        "Give us a phone number or an email so we can reach you."]
+    assert hdb.candidate(app_id)["name"] == "Jordan1 Sample"
+    assert hdb.correct_details(app_id, fixed, "Hari") == []
+    assert hdb.candidate(app_id)["name"] == "Jordan Sample-Lee"
+    assert hdb.candidate_contact(app_id)["phone"] == "519 555 0199" and hdb.candidate_contact(app_id)["email"] == ""
+    last = table("hr_events")[-1]
+    assert (last["kind"], last["by"], last["detail"]) == ("corrected", "Hari", "name or contact details")
+    # the duplicate check follows the corrected details, and nothing else about the application changed
+    assert hdb.apply(posting_id, person(2, email="", phone="(519) 555-0199"))["status"] == "duplicate"
+    assert hdb.apply(posting_id, person(1))["status"] == "created"
+    row = table("hr_applications")[0]
+    assert (row["work_entitled"], row["adult"], row["stage"], row["heard_from"]) == ("yes", "yes", "new", "school")
+    assert hdb.correct_details(999, fixed, "Hari") == ["That application isn't there any more."]
+
+
+def test_a_score_is_only_kept_for_an_answer_that_was_written(world):
+    posting_id = live()
+    app_id = applied(posting_id)
+    first, second = (c["id"] for c in hdb.get_posting(posting_id)["criteria"])
+    hari = world["ids"]["hari"]
+    assert hdb.save_answer_scores(app_id, "Hari", hari, {first: ("3", "")}) == 0      # nothing written yet
+    hdb.save_answers(app_id, {first: "An answer."})
+    assert hdb.save_answer_scores(app_id, "Hari", hari, {first: ("3", ""), second: ("4", "")}) == 1
+    assert set(hdb.scores_for(app_id, "Hari", hari)["mine"]) == {first}

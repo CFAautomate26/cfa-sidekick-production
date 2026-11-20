@@ -1,0 +1,85 @@
+{% extends "careers/base.html" %}
+{% block title %}Apply: {{ view.title }}{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">Step 1 of 2 · about a minute</p>
+  <h1 class="headline">Apply: {{ view.title }}</h1>
+  <p class="triage">{{ view.type_label }} · {{ view.pay }} · <a class="textlink" href="{{ url_for('careers.posting', slug=view.slug) }}">Read the posting</a></p>
+</section>
+
+<p class="callout" style="margin-top:22px;">{{ icon('info') }}<span>{{ view.accommodation }}</span></p>
+{% if view.ai_statement %}<p class="callout tan" id="ai-statement">{{ icon('info') }}<span>{{ view.ai_statement }}</span></p>{% endif %}
+
+{% if problems %}
+<div class="callout warm" role="alert" id="problems">{{ icon('alert') }}<span><strong>Please fix {{ 'this' if problems|length == 1 else 'these' }} and send it again.</strong>
+  <ul class="cr-problems">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul></span></div>
+{% endif %}
+
+<form method="post" action="{{ url_for('careers.apply', slug=view.slug) }}" class="card" style="margin-top:12px;" autocomplete="on">
+  {% if view.ai %}<input type="hidden" name="ai" value="1">{% endif %}
+  <div class="cr-hp" aria-hidden="true">
+    <label for="a-website">Leave this box empty</label>
+    <input id="a-website" name="website" type="text" tabindex="-1" autocomplete="off" value="">
+  </div>
+
+  <label class="field" for="a-first">First name</label>
+  <input id="a-first" name="first_name" type="text" maxlength="60" required autocomplete="given-name" value="{{ f.first_name }}">
+  <label class="field" for="a-last">Last name</label>
+  <input id="a-last" name="last_name" type="text" maxlength="60" required autocomplete="family-name" value="{{ f.last_name }}">
+
+  <p class="subhead">How to reach you</p>
+  <p class="fine-line" style="margin-top:0;">Give us a phone number, an email, or both.</p>
+  <label class="field" for="a-phone">Phone</label>
+  <input id="a-phone" name="phone" type="tel" maxlength="30" autocomplete="tel" value="{{ f.phone }}">
+  <label class="field" for="a-email">Email</label>
+  <input id="a-email" name="email" type="email" maxlength="120" autocomplete="email" autocapitalize="none" value="{{ f.email }}">
+
+  <fieldset class="cr-set">
+    <legend>Are you legally entitled to work in Canada?</legend>
+    <label class="checkline"><input type="radio" name="work_entitled" value="yes" required{{ ' checked' if f.work_entitled == 'yes' }}><span>Yes</span></label>
+    <label class="checkline"><input type="radio" name="work_entitled" value="no"{{ ' checked' if f.work_entitled == 'no' }}><span>No</span></label>
+  </fieldset>
+
+  <fieldset class="cr-set">
+    <legend>Are you 18 or older?</legend>
+    <p class="fine-line" style="margin-top:0;">{{ adult_reason }}</p>
+    <label class="checkline"><input type="radio" name="adult" value="yes" required{{ ' checked' if f.adult == 'yes' }}><span>Yes</span></label>
+    <label class="checkline"><input type="radio" name="adult" value="no"{{ ' checked' if f.adult == 'no' }}><span>No</span></label>
+  </fieldset>
+
+  <fieldset class="cr-set">
+    <legend>When could you work?</legend>
+    <p class="fine-line" style="margin-top:0;">Tick every time that could work for you.</p>
+    <div class="cr-scroll"><table class="cr-grid">
+      <thead><tr><td></td>{% for part, part_label in dayparts %}<th scope="col">{{ part_label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for day, day_label in days %}
+      <tr><th scope="row">{{ day_label }}</th>
+        {% for part, part_label in dayparts %}<td><label><input type="checkbox" name="av_{{ day }}_{{ part }}" value="1" aria-label="{{ day_label }} {{ part_label|lower }}"{{ ' checked' if part in f.availability.get(day, []) }}></label></td>{% endfor %}
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </fieldset>
+
+  <label class="field" for="a-heard" style="margin-top:22px;">How did you hear about us?</label>
+  <select id="a-heard" name="heard_from">
+    <option value="">Choose one</option>
+    {% for key, label in heard %}<option value="{{ key }}"{{ ' selected' if f.heard_from == key }}>{{ label }}</option>{% endfor %}
+  </select>
+  <label class="field" for="a-referrer">If a friend or family member who works here told you about us, their name <small>(optional)</small></label>
+  <input id="a-referrer" name="referrer" type="text" maxlength="80" value="{{ f.referrer }}">
+
+  <label class="field" for="a-experience">Any work or volunteer experience you would like us to know about? <small>(optional)</small></label>
+  <textarea id="a-experience" name="experience" rows="4" maxlength="1000">{{ f.experience }}</textarea>
+
+  <div class="cr-privacy" id="privacy" style="margin-top:22px; padding-top:16px; border-top:1px solid var(--rule);">
+    <span class="card-title">How we look after your information</span>
+    {% for line in view.privacy %}<p>{{ line }}</p>{% endfor %}
+    <label class="checkline cr-agree"><input type="checkbox" name="consent" value="1" required{{ ' checked' if f.consent }}><span>{{ view.consent_label }}</span></label>
+  </div>
+
+  <div class="btnrow"><button class="btn btn-primary block" type="submit">Send my application</button></div>
+  <p class="fine-line" style="text-align:center;">Next: a few quick questions, about five minutes.</p>
+</form>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "careers/base.html" %}
+{% block title %}Your application{% endblock %}
+{% block robots %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+{% if mine.can_answer %}
+<section class="hero compact">
+  <p class="eyebrow">Step 2 of 2 · about five minutes</p>
+  <h1 class="headline">A few quick questions</h1>
+  <p class="triage">We have your application for <b>{{ mine.title }}</b>. These answers help us get to know how you work.</p>
+</section>
+
+<p class="callout" style="margin-top:22px;">{{ icon('info') }}<span>{{ mic_hint }} There are no trick questions: a real example in a few sentences is perfect. If you need these questions another way, or an accommodation, contact {{ mine.contact }}.</span></p>
+
+{% if problem %}
+<p class="callout warm" role="alert">{{ icon('alert') }}<span>{{ problem }}</span></p>
+{% endif %}
+
+<form method="post" action="{{ url_for('careers.private', token=token) }}" class="card" style="margin-top:12px;">
+  {% for q in mine.questions %}
+  <div class="cr-q"{% if loop.first %} style="margin-top:0;"{% endif %}>
+    <label for="q-{{ q.id }}">{{ loop.index }}. {{ q.question }}</label>
+    <textarea id="q-{{ q.id }}" name="q_{{ q.id }}" rows="6" maxlength="{{ answer_max }}" required>{{ typed.get(q.id, '') }}</textarea>
+  </div>
+  {% endfor %}
+  <p class="fine-line">You can send your answers once, so read them over first. You have until {{ mine.answers_until|pp_when }}.</p>
+  <div class="btnrow"><button class="btn btn-primary block" type="submit">Send my answers</button></div>
+</form>
+<p class="fine-line">This page is your own private link. Save it to come back and see where your application stands.</p>
+{% else %}
+<section class="hero compact">
+  <p class="eyebrow">{{ mine.employer }}</p>
+  <h1 class="headline">Your application</h1>
+  <p class="triage">{{ mine.title }}</p>
+</section>
+<div class="card" style="margin-top:22px;" id="status">
+  <p class="cr-status">We have your application for {{ mine.title }}, received {{ mine.created_at|pp_day }}.</p>
+  {% if mine.decision == 'made' %}
+  <p class="cr-status">A hiring decision has been made for this posting.</p>
+  {% elif mine.decision == 'pending' %}
+  <p class="cr-status">A hiring decision has not yet been made for this posting.</p>
+  {% endif %}
+  {% if mine.answered_at %}
+  <p class="cr-statement">Thank you. We have your answers to the quick questions.</p>
+  {% elif mine.questions %}
+  <p class="cr-statement">The quick questions for this application are now closed.</p>
+  {% endif %}
+  <p class="cr-statement">Questions, or need an accommodation? Contact {{ mine.contact }}.</p>
+</div>
+<p class="fine-line">This page is your own private link. Save it to come back and see where your application stands.</p>
+{% endif %}
+{% endblock %}

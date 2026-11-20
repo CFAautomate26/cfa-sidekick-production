@@ -1,0 +1,58 @@
+{# The public careers pages. On purpose these share none of Team Hub's
+   chrome: no menu, no install prompt, no staff sign-in link. No scripts,
+   no cookies, nothing loaded from another site. `employer` comes from
+   careers.py's context processor. #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF">
+{% block robots %}{% endblock %}
+<link rel="icon" href="{{ url_for('static', filename='teamhub/icon-192.png') }}" type="image/png">
+<title>{% block title %}{% endblock %}{% if self.title() %} · {% endif %}Careers at {{ employer }}</title>
+{% include "shared/cfa_style.html" %}
+{% include "hub/_style.html" %}
+<style>
+body { padding-bottom: 24px; }
+.masthead .under.left { max-width: calc(50% - 60px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 960px) { main.wrap { padding-top: 8px; max-width: 760px; } }
+.cr-statement { margin-top: 12px; font-size: 0.9375rem; line-height: 1.5; color: var(--text); }
+.cr-look { list-style: none; margin: 8px 0 0; padding: 0; }
+.cr-look li { padding: 10px 0; border-top: 1px solid var(--rule); line-height: 1.45; }
+.cr-look li:first-child { border-top: 0; }
+.cr-look b { display: block; color: var(--text-strong); }
+.cr-set { border: 0; margin-top: 22px; min-width: 0; }
+.cr-set legend { font-weight: 700; color: var(--text-strong); padding: 0; margin-bottom: 4px; }
+.cr-set .checkline { min-height: 44px; align-items: center; margin: 2px 0; }
+.cr-set .checkline input, .cr-agree input { width: 22px; height: 22px; }
+.cr-grid { border-collapse: collapse; width: 100%; margin-top: 8px; }
+.cr-grid th, .cr-grid td { padding: 4px; text-align: center; font-size: var(--fs-small); border-bottom: 1px solid var(--rule); }
+.cr-grid th[scope=row] { text-align: left; font-weight: 400; color: var(--text-strong); }
+.cr-grid label { display: flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; cursor: pointer; }
+.cr-grid input { width: 24px; height: 24px; }
+.cr-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cr-hp { position: absolute; left: -6000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+.cr-privacy p { margin-top: 10px; font-size: 0.9375rem; line-height: 1.5; }
+.cr-agree { margin-top: 16px; font-weight: 700; color: var(--text-strong); align-items: center; }
+.cr-q { margin-top: 22px; }
+.cr-q label { display: block; font-weight: 700; color: var(--text-strong); line-height: 1.4; margin-bottom: 8px; }
+.cr-q textarea { min-height: 150px; }
+.cr-status { font-size: var(--fs-lede); line-height: 1.45; color: var(--text-strong); }
+.cr-status + .cr-status { margin-top: 10px; }
+.cr-problems { margin: 4px 0 0 18px; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="masthead">
+  <div class="rule"></div>
+  <a class="logo" href="{{ url_for('careers.index') }}" aria-label="All open positions"><img src="{{ url_for('static', filename='teamhub/logo-round.png') }}" alt="Chick-fil-A" width="64" height="64"></a>
+  <span class="under left">{{ employer }}</span>
+</header>
+<main class="wrap">
+  {% block content %}{% endblock %}
+  <footer class="foot"><span>Careers · {{ employer }}</span></footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{% extends "careers/base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+{% block robots %}<meta name="robots" content="noindex">{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">{{ employer }}</p>
+  <h1 class="headline">{{ heading }}</h1>
+  <p class="triage">{{ text }}</p>
+</section>
+<div class="btnrow" style="margin-top:22px;"><a class="btn btn-primary block" href="{{ url_for('careers.index') }}">See all open positions</a></div>
+{% endblock %}
