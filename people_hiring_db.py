@@ -30,6 +30,7 @@ from datetime import date, datetime, timedelta
 from statistics import median
 
 import hub_text
+import people_ai
 import people_db
 import shift_db
 
@@ -413,9 +414,9 @@ def privacy_notice(conf: dict, ai: bool) -> list[str]:
     ]
     if ai:
         lines.append(
-            "Your written answers to the quick questions are sent to an AI service run by an "
-            "outside company, which may process them outside Canada. Your name and contact "
-            "details are not sent.")
+            "Your written answers to the quick questions may be sent to an AI service run by "
+            "an outside company, which may process them outside Canada. Your name and contact "
+            "details are not sent with them.")
     lines += [
         "We do not sell your information or use it for marketing.",
         f"If you are not hired, we keep your application for {months} months after the hiring "
@@ -431,13 +432,22 @@ def privacy_notice(conf: dict, ai: bool) -> list[str]:
     return lines
 
 
+def says_ai(posting: dict, conf: dict) -> bool:
+    """Does this posting tell applicants that AI is used? Only while that
+    is true: AI assist is on for the posting, the Operator's switch in
+    Settings is on, and the server has a key for the AI service. Take any
+    of the three away and the posting stops saying it, and nothing is
+    sent."""
+    return bool(posting.get("ai_assist")) and conf.get("ai_hiring") == "1" and people_ai.available()
+
+
 def public_view(posting: dict, conf: dict | None = None) -> dict:
     """Everything a published posting and its application form show, in one
     place, so the page an applicant sees and the copy that is kept can never
     say different things."""
     conf = conf or settings()
     criteria = [c for c in posting.get("criteria", []) if c.get("active", 1)]
-    ai = bool(posting.get("ai_assist"))
+    ai = says_ai(posting, conf)
     return {
         "id": posting["id"], "slug": posting["slug"], "title": posting["title"],
         "status": posting["status"],
@@ -922,8 +932,8 @@ def close_posting(posting_id: int, by: str) -> bool:
 
 def set_ai(posting_id: int, on: bool, by: str) -> bool:
     """Switch AI assist on or off for one posting (never a closed one).
-    On a live posting the AI statement appears or disappears with it, and a
-    new exact copy is kept. True when something changed."""
+    On a live posting the AI statement appears or disappears with it (see
+    says_ai), and a new exact copy is kept. True when something changed."""
     with closing(people_db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
         cur = conn.execute("UPDATE hr_postings SET ai_assist=? WHERE id=? AND ai_assist=? "
@@ -943,7 +953,8 @@ SETTINGS_CHANGE = "A change in People settings"
 def keep_current_copy(posting_id: int) -> bool:
     """A live posting also changes when a setting it prints changes: the
     hiring contact, the employer name, a wage floor, the months
-    applications are kept. The careers pages call this before they show a
+    applications are kept, or whether AI is in use at all. The careers
+    pages call this before they show a
     posting: if what is about to be shown no longer matches the last kept
     copy, a new copy is kept first, so every version the public saw is on
     record. True when a copy was taken."""
@@ -1105,6 +1116,9 @@ def apply(posting_id: int, raw: dict, ai_shown: bool = False) -> dict:
         if not posting:
             return {"status": "closed"}
         conf = _settings(conn)
+        # AI may only ever read an application whose applicant was shown the
+        # AI statement, on a posting that was really saying it.
+        told_ai = bool(ai_shown) and says_ai(dict(posting), conf)
         since = (now - timedelta(days=DUPLICATE_DAYS)).strftime(_STAMP)
         for key in keys:
             if conn.execute(
@@ -1121,7 +1135,7 @@ def apply(posting_id: int, raw: dict, ai_shown: bool = False) -> dict:
             (posting_id, fields["first_name"], fields["last_name"], fields["email"], fields["phone"],
              " ".join(keys), fields["work_entitled"], fields["adult"],
              json.dumps(fields["availability"]), fields["heard_from"], fields["referrer"],
-             fields["experience"], 1 if posting["ai_assist"] and ai_shown else 0, stamp, hashed,
+             fields["experience"], 1 if told_ai else 0, stamp, hashed,
              until, stamp, stamp, int(conf["retention_months"]))).lastrowid
         _event(conn, application_id, posting_id, "applicant", "applied", to_stage="new", at=stamp)
     return {"status": "created", "token": token, "id": application_id}

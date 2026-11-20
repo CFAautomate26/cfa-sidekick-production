@@ -36,7 +36,6 @@ import people_hiring_db as hdb
 import shift_db
 
 AI_KIND = "hiring_score"
-LEVEL_NAMES = ("1", "2", "3", "4")
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +223,11 @@ def messages(record: dict, contact: dict, conf: dict, talks: list[dict]) -> list
     """The four messages a leader may need, worded from the legal brief:
     an interview invitation (with the accommodation line), an offer (with
     the accommodation-policies line), not moving forward, and no decision
-    yet. Each is {"key", "label", "kind" (the notice kind it would be
-    logged as, or None), "subject", "body", "mailto", "sms"}."""
+    yet. "A hiring decision has been made for this posting" is only said to
+    someone who was interviewed, because that is who the sentence is owed
+    to and the only time this page knows it to be true. Each is {"key",
+    "label", "kind" (the notice kind it would be logged as, or None),
+    "subject", "body", "mailto", "sms"}."""
     first = _one_line(record["first_name"]) or "there"
     title = _one_line(record["posting_title"])
     employer = _one_line(conf["employer_name"])
@@ -236,6 +238,9 @@ def messages(record: dict, contact: dict, conf: dict, talks: list[dict]) -> list
     met = any(t["outcome"] == "attended" for t in talks)
     thanks = (f"Hi {first}, thank you for interviewing for {posting}." if met
               else f"Hi {first}, thank you for applying for {posting}.")
+    decided = ("A hiring decision has been made for this posting, and we will not be moving "
+               "forward with your application." if met
+               else "We will not be moving forward with your application.")
     planned = next((t for t in talks if t["outcome"] == "scheduled"), None)
     if planned:
         when = _long_day(planned["on_date"]) + (f" at {planned['at_time']}" if planned["at_time"] else "")
@@ -257,8 +262,7 @@ def messages(record: dict, contact: dict, conf: dict, talks: list[dict]) -> list
          f"We have policies for accommodating employees with disabilities. {who} will share "
          f"them with you, and you can ask for an accommodation at any time.\n\n{employer}"),
         ("no", "Not moving forward", "not-moving-forward", f"Your application for {title} at {employer}",
-         f"{thanks} A hiring decision has been made for this posting, and we will not be moving "
-         f"forward with your application. We appreciate the time you gave us and wish you well.\n\n{employer}"),
+         f"{thanks} {decided} We appreciate the time you gave us and wish you well.\n\n{employer}"),
         ("waiting", "No decision yet", "no-decision-yet", f"Your application for {title} at {employer}",
          f"{thanks} A hiring decision has not yet been made for this posting. We will contact "
          f"you when it has.\n\n{employer}"),
@@ -418,8 +422,7 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             problems=hdb.compliance_problems(posting) if posting["status"] != "closed" else [],
             flags=hdb.wording_flags(posting), copies=hdb.snapshots(posting_id),
             standards=[d for d in (model["dimensions"] if model else []) if d["key"] not in used],
-            has_model=bool(model), ai_setting=people_db.setting_on("ai_hiring"),
-            ai_ready=people_ai.available(), limits=hdb,
+            has_model=bool(model), ai_setting=people_db.setting_on("ai_hiring"), limits=hdb,
             public_url=url_for("careers.posting", slug=posting["slug"], _external=True)
             if "careers" in current_app.blueprints else "")
 
@@ -522,8 +525,11 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             flash("Switch on AI assist for hiring in People settings first.")
         elif hdb.set_ai(posting_id, on, people.actor()):
             _log("posting AI switched " + ("on" if on else "off"), "posting", posting_id)
-            flash("AI assist is on for this posting, and the posting now says so."
-                  if on else "AI assist is off for this posting.")
+            flash("AI assist is off for this posting." if not on
+                  else "AI assist is on for this posting, and the posting now says so."
+                  if people_ai.enabled("hiring")
+                  else "Switched on for this posting. It will say so, and work, once an AI key is "
+                       "set up on the server.")
         else:
             flash("Nothing changed.")
         return to_posting(posting_id, "#ai")
@@ -589,6 +595,7 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
         talks = hdb.interviews(application_id)
         return render_template(
             "people/hiring/candidate.html", tabs=_tabs("pipeline"), c=record, scores=scores, talks=talks,
+            has_notes=any(note for card in scores["cards"] for note in card["notes"].values()),
             notes=hdb.notes(application_id), history=hdb.events(application_id),
             moves=hdb.allowed_moves(record["stage"], who.is_operator) if not record["purged"] else [],
             reasons=hdb.NOT_SELECTED_REASONS, stage_labels=hdb.STAGE_LABELS,

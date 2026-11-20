@@ -18,7 +18,7 @@ import people_hiring
 import people_hiring_db as hdb
 import shift_db
 from tests import people_testkit as kit
-from tests.test_people_hiring_db import DESCRIPTION, applied, clock, criterion, draft, live, table
+from tests.test_people_hiring_db import DESCRIPTION, ai_in_use, applied, clock, criterion, draft, live, table
 
 EMAIL, PHONE = "jordan1@example.com", "519-555-0142"
 
@@ -301,7 +301,7 @@ def test_writing_a_posting_and_working_through_the_publish_check(world):
     assert "Live" in listing and "Draft" in listing and "Part-time or full-time" in listing
 
 
-def test_ai_on_a_posting_needs_the_setting_and_is_said_on_the_posting(world):
+def test_ai_on_a_posting_needs_the_setting_and_is_said_on_the_posting(world, monkeypatch):
     posting_id = live()
     operator = kit.open_as(world, "operator")
     detail = page(operator, f"/shift/hiring/postings/{posting_id}")
@@ -312,11 +312,21 @@ def test_ai_on_a_posting_needs_the_setting_and_is_said_on_the_posting(world):
     people_db.set_setting("ai_hiring", "1", "Operator")
     post(operator, f"/shift/hiring/postings/{posting_id}/ai", on="1")
     assert hdb.get_posting(posting_id)["ai_assist"] == 1
-    assert [(c["reason"], c["ai_statement"]) for c in hdb.snapshots(posting_id)] == [("published", 0), ("changed", 1)]
+    assert any("once an AI key is set up on the server" in m for m in flashed(operator))
+    # no key on the server yet: it is switched on but not in use, and the posting says nothing about AI
+    detail = page(operator, f"/shift/hiring/postings/{posting_id}")
+    assert "Switched on, but not in use" in detail and "no AI key is set up on the server" in detail
+    assert "We use artificial intelligence" not in detail
+    assert [(c["reason"], c["ai_statement"]) for c in hdb.snapshots(posting_id)] == [("published", 0), ("changed", 0)]
+    assert "No AI" not in shown(detail) and "no AI is used" not in shown(detail)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     detail = page(operator, f"/shift/hiring/postings/{posting_id}")
     assert "On for this posting" in detail and "We use artificial intelligence (AI) to help assess" in detail
-    assert "No AI key is set up on the server" in detail
-    assert "No AI" not in shown(detail).replace("No AI key is set up on the server", "")
+    assert "artificial intelligence" in cfa_app.app.test_client().get("/careers/team-member").data.decode()
+    assert hdb.snapshots(posting_id)[-1]["ai_statement"] == 1          # what the public saw is on record
+    post(operator, f"/shift/hiring/postings/{posting_id}/ai", on="0")
+    post(operator, f"/shift/hiring/postings/{posting_id}/ai", on="1")
+    assert "AI assist is on for this posting, and the posting now says so." in flashed(operator)
 
 
 # --- the pipeline -------------------------------------------------------------------------
@@ -515,6 +525,7 @@ def test_interviews_and_scorecards_from_the_page(world, monkeypatch):
     summary = html[html.index('id="summary"'):html.index('id="notes"')]
     assert "will show here once you submit" not in summary
     assert re.findall(r"<td>([^<]*)</td>", summary) == ["Reliable", "3", "4", "Guest care", "2", "1"]
+    assert "The notes behind these levels" in summary and "Named the dates." in summary     # now it is shared
     assert "You submitted your scorecard." in html and "Submit scorecard" not in html
     post(hari, scorecard, action="submit", **{f"level_{first}": "1"})
     assert "You have already submitted your scorecard for that interview." in flashed(hari)
@@ -540,8 +551,9 @@ def test_messages_use_the_brief_wording_and_open_the_leaders_own_app(world, monk
             "you with the details.") in text
     assert ("We have policies for accommodating employees with disabilities. Morgan Example will share them "
             "with you, and you can ask for an accommodation at any time.") in text
-    assert ("A hiring decision has been made for this posting, and we will not be moving forward with your "
-            "application. We appreciate the time you gave us and wish you well.") in text
+    # not interviewed yet: nobody is told a decision "has been made" that this page cannot know
+    assert ("thank you for applying for Team member (posted November 10, 2026). We will not be moving forward "
+            "with your application. We appreciate the time you gave us and wish you well.") in text
     assert "A hiring decision has not yet been made for this posting. We will contact you when it has." in text
     assert "Nothing is sent from Team Hub" in text
     links = re.findall(r'href="((?:mailto|sms):[^"]+)"', html)
@@ -557,6 +569,8 @@ def test_messages_use_the_brief_wording_and_open_the_leaders_own_app(world, monk
     kit.unlock(hari, "hari")                                             # two days on: the pages had locked
     text = page(hari, f"/shift/hiring/candidates/{app_id}/contact").replace("&#39;", "'")
     assert "Hi Jordan1, thank you for interviewing for Team member (posted November 10, 2026)." in text
+    assert ("A hiring decision has been made for this posting, and we will not be moving forward with your "
+            "application. We appreciate the time you gave us and wish you well.") in text
     assert "A notice is due by Dec 27" in text
     for promo in ("coupon", "free", "discount", "deal"):
         assert promo not in " ".join(m["body"] for m in people_hiring.messages(
@@ -684,10 +698,10 @@ def test_only_the_name_reaches_the_team_hub_roster(world):
 
 # --- AI assist ---------------------------------------------------------------------------------
 
-def ai_world(world, posting_id=None, **changes):
-    """A live posting with AI assist on, and an applicant who was shown the
-    AI statement."""
-    people_db.set_setting("ai_hiring", "1", "Operator")
+def ai_world(world, monkeypatch, posting_id=None, **changes):
+    """A live posting with AI assist on and in use, and an applicant who
+    was shown the AI statement."""
+    ai_in_use(monkeypatch)
     posting_id = posting_id or live()
     hdb.set_ai(posting_id, True, "Operator")
     result = hdb.apply(posting_id, {
@@ -733,15 +747,16 @@ def test_ai_assist_runs_only_where_it_was_disclosed(world, monkeypatch):
     hdb.save_answers(stale_form, {hdb.get_posting(posting_id)["criteria"][0]["id"]: "An answer."})
     post(hari, f"/shift/hiring/candidates/{stale_form}/ai")
     assert calls == [] and table("ai_jobs") == []                        # nothing was ever sent
-    # with no key on the server it is off, whatever the switches say
+    # with no key on the server it is off, whatever the switches say, even for someone who was told
+    _, shown_to, _, _ = ai_world(world, monkeypatch, posting_id, phone="519-555-0177")
+    assert table("hr_applications")[-1]["ai_disclosed"] == 1
     monkeypatch.delenv("OPENAI_API_KEY")
-    _, shown_to, _, _ = ai_world(world, posting_id, phone="519-555-0177")
     post(hari, f"/shift/hiring/candidates/{shown_to}/ai")
     assert "AI assist for hiring is switched off in People settings." in flashed(hari) and calls == []
 
 
 def test_what_the_ai_is_sent_has_no_name_contact_details_or_anything_else(world, monkeypatch):
-    posting_id, app_id, first, second = ai_world(world)
+    posting_id, app_id, first, second = ai_world(world, monkeypatch)
     calls = kit.fake_ai(monkeypatch, lambda system, user: good_reply(first, second))
     hari = kit.open_as(world, "hari")
     post(hari, f"/shift/hiring/candidates/{app_id}/ai")
@@ -768,7 +783,7 @@ def test_what_the_ai_is_sent_has_no_name_contact_details_or_anything_else(world,
 
 
 def test_the_ai_reply_is_checked_before_anyone_sees_it(world, monkeypatch):
-    posting_id, app_id, first, second = ai_world(world)
+    posting_id, app_id, first, second = ai_world(world, monkeypatch)
     kit.fake_ai(monkeypatch, lambda system, user: good_reply(first, second))
     hari = kit.open_as(world, "hari")
     post(hari, f"/shift/hiring/candidates/{app_id}/ai")
@@ -805,7 +820,7 @@ def test_the_ai_reply_is_checked_before_anyone_sees_it(world, monkeypatch):
 
 
 def test_a_suggestion_shows_only_after_the_leader_has_saved_their_own_level(world, monkeypatch):
-    posting_id, app_id, first, second = ai_world(world)
+    posting_id, app_id, first, second = ai_world(world, monkeypatch)
     kit.fake_ai(monkeypatch, lambda system, user: good_reply(first, second))
     hari, operator = kit.open_as(world, "hari"), kit.open_as(world, "operator")
     html = page(hari, f"/shift/hiring/candidates/{app_id}")
@@ -833,7 +848,7 @@ def test_a_suggestion_shows_only_after_the_leader_has_saved_their_own_level(worl
 
 
 def test_an_answer_that_may_mention_health_is_never_sent(world, monkeypatch):
-    people_db.set_setting("ai_hiring", "1", "Operator")
+    ai_in_use(monkeypatch)
     posting_id = live()
     hdb.set_ai(posting_id, True, "Operator")
     app_id = hdb.apply(posting_id, {"first_name": "Jordan", "last_name": "Sample", "email": "jordan@example.com",
@@ -916,7 +931,7 @@ def test_the_retention_page_and_the_purge(world, monkeypatch):
 
 
 def test_nothing_about_an_applicant_is_printed_by_the_leader_pages(world, monkeypatch, capsys):
-    posting_id, app_id, first, second = ai_world(world)
+    posting_id, app_id, first, second = ai_world(world, monkeypatch)
     kit.fake_ai(monkeypatch, lambda system, user: good_reply(first, second))
     hari = kit.open_as(world, "hari")
     page(hari, f"/shift/hiring/candidates/{app_id}")
@@ -952,3 +967,22 @@ def test_correcting_details_and_the_banner_for_a_posting_that_needs_attention(wo
     html = page(hari, "/shift/hiring/")
     assert "no longer passes the publish check" in html and "below Ontario&#39;s general minimum wage ($18.40" in html
     assert "This live posting needs attention." in page(hari, f"/shift/hiring/postings/{posting_id}")
+
+
+def test_reaching_out_and_a_hold_are_recorded_from_the_contact_page(world):
+    posting_id = live()
+    app_id = candidate(posting_id)
+    hari = kit.open_as(world, "hari")
+    post(hari, f"/shift/hiring/candidates/{app_id}/contacted", method="smoke signal")
+    assert "Choose how you reached out." in flashed(hari)
+    post(hari, f"/shift/hiring/candidates/{app_id}/contacted", method="text")
+    assert "Recorded that you reached out." in flashed(hari)
+    resp = post(hari, f"/shift/hiring/candidates/{app_id}/hold", on="1")
+    assert resp.headers["Location"].endswith(f"/candidates/{app_id}/contact#records")
+    assert "On hold: it will not be deleted." in flashed(hari)
+    contact = page(hari, f"/shift/hiring/candidates/{app_id}/contact")
+    assert "On hold: do not delete" in contact and "Only the Operator can take a hold off." in contact
+    assert "On hold: do not delete." in page(hari, f"/shift/hiring/candidates/{app_id}")
+    assert [(e["kind"], e["detail"]) for e in table("hr_events")][-2:] == [("contacted", "text"), ("hold", "on")]
+    assert "they were told when they applied" in page(kit.open_as(world, "operator"),
+                                                     f"/shift/hiring/candidates/{applied(posting_id, 2)}/contact")

@@ -26,6 +26,12 @@ def world(monkeypatch, tmp_path):
     return w
 
 
+def ai_in_use(monkeypatch) -> None:
+    """The Operator's switch is on and the server has a key: AI can run."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    assert people_db.set_setting("ai_hiring", "1", "Operator")
+
+
 def clock(monkeypatch, stamp: str) -> None:
     """Set the store's clock: '2026-11-20 10:00'."""
     fixed = datetime.strptime(stamp, "%Y-%m-%d %H:%M").replace(tzinfo=shift_db.STORE_TZ)
@@ -256,22 +262,31 @@ def test_a_posting_shows_every_required_statement_in_order(world):
     assert "artificial intelligence" not in text and " AI " not in text and "No AI" not in text
 
 
-def test_the_ai_statement_is_shown_only_while_ai_assist_is_on(world):
+def test_the_ai_statement_is_shown_only_while_ai_assist_is_on(world, monkeypatch):
     posting_id = live()
     assert hdb.public_view(hdb.get_posting(posting_id))["ai_statement"] == ""
     assert hdb.set_ai(posting_id, True, "Operator") and not hdb.set_ai(posting_id, True, "Operator")
+    # on for the posting is not enough: the statement is only made while AI can really run
+    assert hdb.public_view(hdb.get_posting(posting_id))["ai_statement"] == ""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    assert hdb.public_view(hdb.get_posting(posting_id))["ai_statement"] == ""         # the switch is off
+    people_db.set_setting("ai_hiring", "1", "Operator")
+    monkeypatch.delenv("OPENAI_API_KEY")
+    assert hdb.public_view(hdb.get_posting(posting_id))["ai_statement"] == ""         # no key on the server
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     view = hdb.public_view(hdb.get_posting(posting_id))
     assert view["ai_statement"].startswith("We use artificial intelligence (AI) to help assess applications")
     assert "A member of our leadership team reads every application and makes every decision." in view["ai_statement"]
-    assert any("sent to an AI service" in line and "name and contact details are not sent" in line
-               for line in view["privacy"])
+    assert any("may be sent to an AI service" in line and "may process them outside Canada" in line
+               and "Your name and contact details are not sent with them." in line for line in view["privacy"])
     text = hdb.document_text(view)
     assert text.count(hdb.AI_STATEMENT) == 2                       # on the posting and on the form
     assert hdb.set_ai(posting_id, False, "Operator")
     assert not any("AI service" in line for line in hdb.public_view(hdb.get_posting(posting_id))["privacy"])
 
 
-def test_an_exact_copy_is_kept_on_publish_on_every_change_and_on_close(world):
+def test_an_exact_copy_is_kept_on_publish_on_every_change_and_on_close(world, monkeypatch):
+    ai_in_use(monkeypatch)
     posting_id = live()
     copies = hdb.snapshots(posting_id)
     assert [(c["reason"], c["ai_statement"]) for c in copies] == [("published", 0)]
@@ -423,14 +438,20 @@ def test_nobody_can_apply_to_a_posting_that_is_not_open(world):
     assert table("hr_applications") == []
 
 
-def test_ai_disclosed_is_recorded_only_when_the_applicant_was_shown_the_statement(world):
+def test_ai_disclosed_is_recorded_only_when_the_applicant_was_shown_the_statement(world, monkeypatch):
+    ai_in_use(monkeypatch)
     posting_id = live()
     without = hdb.apply(posting_id, person(1), ai_shown=True)["id"]   # the posting has no AI
     hdb.set_ai(posting_id, True, "Operator")
     stale_form = hdb.apply(posting_id, person(2), ai_shown=False)["id"]   # form opened before the switch
     shown = hdb.apply(posting_id, person(3), ai_shown=True)["id"]
+    people_db.set_setting("ai_hiring", "0", "Operator")              # the Operator turns AI off again
+    switched_off = hdb.apply(posting_id, person(4), ai_shown=True)["id"]
+    people_db.set_setting("ai_hiring", "1", "Operator")
+    monkeypatch.delenv("OPENAI_API_KEY")                              # or the server loses its key
+    no_key = hdb.apply(posting_id, person(5), ai_shown=True)["id"]
     flags = {r["id"]: r["ai_disclosed"] for r in table("hr_applications")}
-    assert flags == {without: 0, stale_form: 0, shown: 1}
+    assert flags == {without: 0, stale_form: 0, shown: 1, switched_off: 0, no_key: 0}
 
 
 # --- the private link -------------------------------------------------------------

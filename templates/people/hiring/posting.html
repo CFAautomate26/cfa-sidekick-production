@@ -53,13 +53,15 @@
 <section class="sec" id="ai">
   <div class="sec-head"><h2>AI assist</h2></div>
   <div class="card">
-    <p class="card-meta" style="margin-top:0;">{% if posting.ai_assist %}<span class="badge b-green">{{ icon('check', 'xs') }}On for this posting</span>{% else %}<span class="badge">Off for this posting</span>{% endif %}</p>
+    <p class="card-meta" style="margin-top:0;">{% if view.ai %}<span class="badge b-green">{{ icon('check', 'xs') }}On for this posting</span>{% elif posting.ai_assist %}<span class="badge b-tan">Switched on, but not in use</span>{% else %}<span class="badge">Off for this posting</span>{% endif %}</p>
+    {% if posting.ai_assist and not view.ai %}
+    <p class="callout tan">{{ icon('info') }}<span>AI assist is switched on for this posting, but it can't run right now: {{ 'the switch in People settings is off' if not ai_setting else 'no AI key is set up on the server' }}. While that is so, the posting does not tell applicants that AI is used, nothing is sent to an AI service, and anyone who applies now can never have AI used on their application.</span></p>
+    {% endif %}
     <p class="card-meta">When it is on, the posting tells applicants that AI helps assess applications, and a leader can ask for a suggested level on a written answer after saving their own. It works only for people who applied while the posting said so. A person makes every decision.</p>
     {% if viewer.is_operator and posting.status != 'closed' %}
       {% if not ai_setting and not posting.ai_assist %}
       <p class="fine-line">To use it, first switch on AI assist for hiring in <a class="textlink" href="{{ url_for('people.settings') }}#ai-hiring">People settings</a>.</p>
       {% else %}
-      {% if not ai_ready %}<p class="fine-line">No AI key is set up on the server, so nothing is sent to an AI service yet.</p>{% endif %}
       <form method="post" action="{{ url_for('people.hiring_posting_ai', posting_id=posting.id) }}" class="btnrow">
         <input type="hidden" name="on" value="{{ '0' if posting.ai_assist else '1' }}">
         <button class="btn btn-secondary sm" type="submit">{{ 'Switch AI assist off for this posting' if posting.ai_assist else 'Switch AI assist on for this posting' }}</button>

@@ -13,9 +13,8 @@ import app as cfa_app
 import careers
 import people_db
 import people_hiring_db as hdb
-import shift_db
 from tests import people_testkit as kit
-from tests.test_people_hiring_db import DESCRIPTION, clock, criterion, draft, live, person, table
+from tests.test_people_hiring_db import DESCRIPTION, ai_in_use, clock, draft, live, person, table
 
 
 @pytest.fixture()
@@ -89,10 +88,12 @@ def test_a_posting_shows_every_required_statement_and_the_apply_button(world, pu
     assert "artificial intelligence" not in page and "No AI" not in page and "no AI" not in page
 
 
-def test_the_ai_statement_appears_only_when_ai_assist_is_on_for_the_posting(world, public):
+def test_the_ai_statement_appears_only_when_ai_assist_is_on_for_the_posting(world, public, monkeypatch):
     posting_id = live()
     assert "artificial intelligence" not in text(public.get("/careers/team-member/apply"))
     hdb.set_ai(posting_id, True, "Operator")
+    assert "artificial intelligence" not in text(public.get("/careers/team-member"))   # AI can't run yet
+    ai_in_use(monkeypatch)
     statement = ("We use artificial intelligence (AI) to help assess applications for this position. "
                  "The AI tool compares your written answers with the job-related criteria in this posting "
                  "and suggests a score. A member of our leadership team reads every application and makes "
@@ -103,8 +104,14 @@ def test_the_ai_statement_appears_only_when_ai_assist_is_on_for_the_posting(worl
         < posting.index("welcomes applications from people with disabilities")
     form = text(public.get("/careers/team-member/apply"))
     assert statement in form and 'name="ai" value="1"' in form
-    assert "sent to an AI service run by an outside company" in form
-    assert "Your name and contact details are not sent." in form
+    assert "may be sent to an AI service run by an outside company" in form
+    assert "Your name and contact details are not sent with them." in form
+    # the Operator switches AI off: the posting stops saying it, and that version is kept too
+    copies = len(hdb.snapshots(posting_id))
+    people_db.set_setting("ai_hiring", "0", "Operator")
+    quiet = text(public.get("/careers/team-member/apply"))
+    assert "artificial intelligence" not in quiet and 'name="ai"' not in quiet and "AI service" not in quiet
+    assert len(hdb.snapshots(posting_id)) == copies + 1 and hdb.snapshots(posting_id)[-1]["ai_statement"] == 0
 
 
 def test_the_student_rate_is_explained_and_never_says_students_only(world, public):
@@ -414,8 +421,10 @@ def test_wrong_links_get_the_ordinary_missing_page_and_are_limited(world, public
 def test_public_pages_set_no_cookie_and_carry_the_strict_headers(world, public, monkeypatch):
     clock(monkeypatch, "2026-11-01 09:00")
     hub_csp = cfa_app.app.test_client().get("/hub/login").headers["Content-Security-Policy"]
+    ai_in_use(monkeypatch)
     posting_id = live()
     hdb.set_ai(posting_id, True, "Operator")
+    assert "artificial intelligence" in text(public.get("/careers/team-member"))
     seen = [("list", public.get("/careers/")), ("posting", public.get("/careers/team-member")),
             ("form", public.get("/careers/team-member/apply")),
             ("form with a problem", send(public, first_name="")),
@@ -495,7 +504,7 @@ def test_careers_source_has_no_session_flash_or_script():
 def test_the_old_leadership_application_form_still_works(world, public):
     resp = public.get("/apply")
     assert resp.status_code == 200 and b"Leadership" in resp.data
-    assert shift_db is not None
+    assert "/apply" in {r.rule for r in cfa_app.app.url_map.iter_rules()}
 
 
 def test_what_the_public_is_shown_is_always_on_record_first(world, public):

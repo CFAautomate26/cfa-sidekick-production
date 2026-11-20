@@ -241,6 +241,17 @@
       </tbody>
     </table>
   </div>
+  {% if has_notes and not c.purged %}
+  <details class="card tool" id="why">
+    <summary class="row"><span class="row-main"><span class="row-title">The notes behind these levels</span><span class="row-meta">What each scorer wrote down about what the applicant said.</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      {% for card in scores.cards %}{% for crit in c.criteria if card.notes.get(crit.id) %}
+      <p class="hr-said"><strong>{{ card.scorer }}</strong> · {{ 'written answer' if card.source == 'answers' else 'interview' }} · {{ crit.name }}{% if card.levels.get(crit.id) %} · level {{ card.levels.get(crit.id) }}{% endif %}
+{{ card.notes[crit.id] }}</p>
+      {% endfor %}{% endfor %}
+    </div>
+  </details>
+  {% endif %}
   {% else %}
   {{ empty('No levels to show yet.') }}
   {% endif %}
