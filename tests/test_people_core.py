@@ -729,11 +729,17 @@ def test_home_lists_only_what_each_person_can_open(world, monkeypatch):
     assert "2 on hold" in operator and "3 new" in operator and "1 notice overdue" in operator
 
 
-def test_home_without_feature_pages_links_nowhere_that_is_not_there(world):
-    """With the placeholder features there is nothing to open yet."""
-    home = page(kit.open_as(world, "operator"), "/shift/people")
-    assert "/shift/reviews" not in home and "/shift/hiring" not in home
-    assert people._page_url("/shift/reviews") is None
+def test_home_without_feature_pages_links_nowhere_that_is_not_there(world, monkeypatch):
+    """A link must never point at a page that isn't there: when a feature
+    has no page (it did not load), People home offers nothing for it."""
+    with cfa_app.app.test_request_context("/shift/people"):
+        assert people._page_url("/shift/nothing-here") is None       # no such page, so no link
+        for path in ("/shift/reviews", "/shift/hiring", "/shift/reviews/mine"):
+            assert (people._page_url(path) or "").rstrip("/") == path, path   # the real pages
+    monkeypatch.setattr(people, "_page_url", lambda path: None)      # as if neither feature loaded
+    for who in ("operator", "hari", "rae", "lena"):
+        home = page(kit.open_as(world, who), "/shift/people")
+        assert "/shift/reviews" not in home and "/shift/hiring" not in home, who
 
 
 def test_view_helpers_for_the_feature_pages(world):

@@ -27,6 +27,9 @@
   <div class="sec-head"><h2>Publish check</h2></div>
   {% if problems %}
   {{ problem_list(problems, 'This posting can\'t go live yet.' if posting.status == 'draft' else 'This live posting needs attention.') }}
+  {% if not view.contact_name or not (view.contact_email or view.contact_phone) %}
+  <p class="fine-line">{% if viewer.is_operator %}<a class="textlink" href="{{ url_for('people.settings') }}#contact">Open People settings</a> to set the hiring contact.{% else %}The Operator sets the hiring contact in People settings.{% endif %}</p>
+  {% endif %}
   {% else %}
   <p class="callout">{{ icon('checkcircle') }}<span><strong>The publish check passes.</strong> Pay, a vacancy statement, the accommodation notice and a named contact are all here.</span></p>
   {% endif %}

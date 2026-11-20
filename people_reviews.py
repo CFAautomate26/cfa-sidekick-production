@@ -1055,6 +1055,15 @@ def nav_counts(kind, leader_id, name) -> dict:
     return rdb.nav_counts(kind, leader_id, name)
 
 
+def own_count(kind, leader_id, name) -> int:
+    """How many of their own reviews this leader can open at all (people.py
+    keeps the "My review" link while there is one). Never the Operator."""
+    if kind == "operator":
+        return 0
+    people_db.ensure()
+    return rdb.own_count(leader_id, name)
+
+
 def register(bp) -> None:
     """Add the /shift/reviews routes to the People blueprint. Endpoints are
     people.reviews_*."""

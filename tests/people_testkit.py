@@ -22,9 +22,11 @@ NAMES = {"operator": "Operator", "lena": "Lena", "ada": "Ada", "hari": "Hari", "
 MEMBER = ("Sam Patel", "1042")
 
 
-def make_world(monkeypatch, tmp_path) -> dict:
+def make_world(monkeypatch, tmp_path, bare: bool = False) -> dict:
     """A fresh store: a new shift database and a new People database beside
     it, the sign-in throttles cleared, and one of each kind of person.
+    bare=True leaves People as it is on day one: the leaders exist, but
+    nobody has been given access and no standards are loaded.
 
     The Operator (PIN 9999); leaders Lena (lead, 1111), Ada (admin role,
     2222), Hari (lead, 3333, granted "hiring") and Rae (lead, 4444, granted
@@ -48,14 +50,15 @@ def make_world(monkeypatch, tmp_path) -> dict:
         assert shift_db.add_leader(NAMES[who], PINS[who], role) is None
     by_name = {l["name"]: l["id"] for l in shift_db.leaders()}
     ids = {who: by_name[NAMES[who]] for who in ("lena", "ada", "hari", "rae")}
-    assert people_db.grant(ids["hari"], NAMES["hari"], "hiring", "Operator")
-    assert people_db.grant(ids["rae"], NAMES["rae"], "reviewer", "Operator")
     shift_db.add_member(MEMBER[0])
     member = next(m for m in shift_db.roster() if m["name"] == MEMBER[0])
     assert hub_db.grant(member["id"], MEMBER[1], "Operator") is None
     ids["member"] = member["id"]
-    ids["model"], problems = people_db.save_model(people_db.PEOPLE_EXAMPLE_MODEL, "Operator")
-    assert not problems
+    if not bare:
+        assert people_db.grant(ids["hari"], NAMES["hari"], "hiring", "Operator")
+        assert people_db.grant(ids["rae"], NAMES["rae"], "reviewer", "Operator")
+        ids["model"], problems = people_db.save_model(people_db.PEOPLE_EXAMPLE_MODEL, "Operator")
+        assert not problems
     return {"client": cfa_app.app.test_client(), "ids": ids, "pins": dict(PINS)}
 
 

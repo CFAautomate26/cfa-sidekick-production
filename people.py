@@ -362,6 +362,14 @@ def _feature_counts(kind: str, leader_id: int | None, name: str, caps: frozenset
             counts.update({key: max(int(value or 0), 0) for key, value in got.items()})
         except Exception:
             continue
+    try:
+        # Everything of their own a leader can open, waiting or not, so the
+        # link to a review they have already confirmed stays.
+        own = getattr(_FEATURE_MODULES.get("reviews"), "own_count", None)
+        if own and kind != "operator":
+            counts["mine_all"] = max(int(own(kind, leader_id, name) or 0), 0)
+    except Exception:
+        pass
     return counts
 
 
@@ -387,7 +395,8 @@ def nav_rows(kind: str, leader_id: int | None, name: str) -> list[dict]:
     """The People rows for the Team Hub menu (teamhub_nav calls this for
     leaders and the Operator only, inside its own guard). "People" for the
     Operator and for leaders holding a capability; "My review" for a leader
-    only while the reviews feature has something waiting for them."""
+    only while the reviews feature has something of their own for them to
+    open, with a badge while it is waiting on them."""
     operator = kind == "operator"
     caps = OPERATOR_CAPS if operator else people_db.capabilities(leader_id, name)
     counts = _feature_counts(kind, leader_id, name, caps)
@@ -398,9 +407,9 @@ def nav_rows(kind: str, leader_id: int | None, name: str) -> list[dict]:
                      "badge": badge, "tone": tone})
     mine = counts.get("mine", 0)
     mine_url = _page_url("/shift/reviews/mine")
-    if not operator and mine and mine_url:
+    if not operator and (mine or counts.get("mine_all")) and mine_url:
         rows.append({"icon": "file", "label": "My review", "url": mine_url,
-                     "badge": f"{mine} waiting", "tone": "b-red"})
+                     "badge": f"{mine} waiting" if mine else "", "tone": "b-red"})
     return rows
 
 
@@ -408,16 +417,33 @@ def nav_rows(kind: str, leader_id: int | None, name: str) -> list[dict]:
 # Home
 # ---------------------------------------------------------------------------
 
+def _retention_due() -> tuple[int, str | None]:
+    """(how many applications are past the months their applicants were
+    told, where the Operator removes them). Applicants are told the
+    Operator removes their details after that time and nothing does it
+    automatically, so the Operator is reminded on the People home page."""
+    url = _page_url("/shift/hiring/retention")
+    if not url or "hiring" not in FEATURES:
+        return 0, None
+    try:
+        import people_hiring_db
+        return len(people_hiring_db.retention()["due"]), url
+    except Exception:
+        return 0, None
+
+
 @people_bp.route("/people", strict_slashes=False)
 def home():
     who = viewer()
     counts = _feature_counts(who.kind, who.leader_id, who.name, who.caps)
+    retention_due, retention_url = _retention_due() if who.is_operator else (0, None)
     return render_template(
-        "people/home.html", counts=counts,
+        "people/home.html", counts=counts, retention_due=retention_due, retention_url=retention_url,
         reviews_url=_page_url("/shift/reviews") if can("reviewer") else None,
         hiring_url=_page_url("/shift/hiring") if can("hiring") else None,
         mine_url=(_page_url("/shift/reviews/mine")
-                  if not who.is_operator and counts.get("mine") else None),
+                  if not who.is_operator and (counts.get("mine") or counts.get("mine_all"))
+                  else None),
         has_model=bool(people_db.active_model()) if who.caps else True,
         ai_ready=people_ai.available())
 

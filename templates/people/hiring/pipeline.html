@@ -43,6 +43,6 @@
   {% if not p.active %}<div class="empty">Nobody is waiting on this posting.</div>{% endif %}
 </section>
 {% else %}
-<div class="empty" style="margin-top:22px;">No posting is live. {% if drafts %}{{ drafts }} draft{{ '' if drafts == 1 else 's' }} waiting under Postings.{% else %}Write one under Postings.{% endif %}</div>
+<div class="empty" style="margin-top:22px;">No posting is live. {% if drafts %}{{ drafts }} draft{{ '' if drafts == 1 else 's' }} waiting under <a class="textlink" href="{{ url_for('people.hiring_postings') }}">Postings</a>.{% else %}<a class="textlink" href="{{ url_for('people.hiring_posting_new') }}">Write the first posting</a>.{% endif %}</div>
 {% endfor %}
 {% endblock %}

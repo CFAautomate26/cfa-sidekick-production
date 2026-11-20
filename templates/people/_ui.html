@@ -40,6 +40,8 @@
 .pp-anchors li b { display: block; font-size: 0.8125rem; color: var(--text-strong); white-space: normal; }
 .pp-problems { margin: 6px 0 0 18px; line-height: 1.45; }
 .pp-problems li { margin: 4px 0; }
+.pp-ai-label { display: block; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--info); }
 .pp-lockbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px;
   margin-top: 32px; padding: 10px 14px; border-radius: var(--r-xl); background: var(--cool-white); color: var(--info);
   font-size: 0.8125rem; font-weight: 600; }
@@ -145,6 +147,12 @@
 {% macro bar(count, total) -%}
 {%- set width = [[(100 * count / total)|round|int, 0]|max, 100]|min if total else 0 -%}
 <span class="pp-bar"><span class="bar navy"><span style="width: {{ width }}%"></span></span><span class="pp-bar-n">{{ count }} of {{ total }}</span></span>
+{%- endmacro %}
+
+{# The line that heads anything the AI prepared, on every page that shows
+   it. Reviews head a draft; hiring heads a suggested level. #}
+{% macro ai_label(text='Draft prepared with AI assistance. Not a decision.') -%}
+<span class="pp-ai-label">{{ text }}</span>
 {%- endmacro %}
 
 {% macro empty(text) -%}

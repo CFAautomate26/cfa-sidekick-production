@@ -1034,6 +1034,14 @@ def waiting_for_leader(review: dict) -> bool:
     return review["status"] == "shared" or (reflection_open(review) and not review["reflection_at"])
 
 
+def own_count(leader_id, name) -> int:
+    """How many of their own reviews a leader can open (shared, confirmed,
+    or a reflection the cycle asked for). The menu keeps "My review" while
+    this is above zero, so the way back to a review someone has already
+    confirmed never disappears."""
+    return len(reviews_for_leader(leader_id, name))
+
+
 def nav_counts(kind: str, leader_id, name) -> dict:
     """Counts for the Team Hub menu and the People home page. The Operator:
     on_hold, past_due, drafts (their own to write). A leader: drafts (the

@@ -2,7 +2,7 @@
    applicant's email, phone number, 18-or-over or work-entitlement answer,
    or how they heard of us: those are on the contact page. #}
 {% extends "people/base.html" %}
-{% from "people/_ui.html" import crumbs, guidance, escalation, empty, stamp %}
+{% from "people/_ui.html" import crumbs, guidance, escalation, empty, stamp, ai_label %}
 {% from "people/hiring/_bits.html" import hiring_styles, level_picker, stage_badge %}
 {% block title %}{{ c.name }}{% endblock %}
 {% block head %}{{ hiring_styles() }}
@@ -94,7 +94,7 @@
       {% set hint = ai.suggestions.get(crit.id) %}
       {% if hint %}
       <div class="hr-ai" id="ai-{{ crit.id }}">
-        <b>Suggested, for reviewer decision. Not a decision.</b>
+        {{ ai_label('Suggested, for reviewer decision. Not a decision.') }}
         <p>{% if hint.suggested_level %}The AI suggests <strong>level {{ hint.suggested_level }}</strong>.{% else %}The AI suggests no level for this answer.{% endif %}{% if hint.quote %} It points to: “{{ hint.quote }}”{% endif %}</p>
         {% if hint.evidence_summary %}<p>{{ hint.evidence_summary }}</p>{% endif %}
         {% if hint.note %}<p>{{ hint.note }}</p>{% endif %}

@@ -1,5 +1,5 @@
 {% extends "people/base.html" %}
-{% from "people/_ui.html" import crumbs, guidance, escalation, level_pills, stamp %}
+{% from "people/_ui.html" import crumbs, guidance, escalation, level_pills, stamp, ai_label %}
 {% from "people/reviews/_parts.html" import rv_styles, status_badge, note_list %}
 {% set drafting = ai.status == 'running' %}
 {% block title %}{{ review.display_name }} · review{% endblock %}
@@ -177,7 +177,7 @@
       {% set panel = ai.panels.get(dim.key) %}
       {% if panel %}
     <div class="rv-ai" id="ai-{{ dim.key }}">
-      <span class="rv-ai-label">Draft prepared with AI assistance. Not a decision.</span>
+      {{ ai_label() }}
       <p>{{ panel.evidence_summary }}</p>
       {% if panel.cited %}<p>Notes it used: {% for id in panel.cited %}<a href="#e-{{ id }}">note {{ id }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
       <p><strong>Suggested level:</strong> {% if panel.suggested_level %}{{ model.levels[panel.suggested_level - 1] }}{% elif panel.withheld %}none (see the checks below){% else %}Not enough evidence{% endif %}</p>
@@ -232,7 +232,7 @@
   {% if ai.status == 'done' %}
     {% if ai.strengths or ai.growth %}
   <div class="rv-ai" id="ai-summary">
-    <span class="rv-ai-label">Draft prepared with AI assistance. Not a decision.</span>
+    {{ ai_label() }}
     <p class="rv-quiet">Wording to copy from if it is true and useful. Nothing is filled in for you.</p>
     {% if ai.strengths %}<p><strong>Strengths</strong></p><ul>{% for item in ai.strengths %}<li>{{ item.text }} ({% for id in item.cited %}<a href="#e-{{ id }}">note {{ id }}</a>{{ ', ' if not loop.last }}{% endfor %})</li>{% endfor %}</ul>{% endif %}
     {% if ai.growth %}<p><strong>Growth focus</strong></p><ul>{% for item in ai.growth %}<li>{{ item.text }} ({% for id in item.cited %}<a href="#e-{{ id }}">note {{ id }}</a>{{ ', ' if not loop.last }}{% endfor %})</li>{% endfor %}</ul>{% endif %}
@@ -247,7 +247,7 @@
 <section class="sec" id="questions">
   <div class="sec-head"><h2>Questions for the conversation</h2></div>
   <div class="rv-ai" style="margin-top:0;">
-    <span class="rv-ai-label">Draft prepared with AI assistance. Not a decision.</span>
+    {{ ai_label() }}
     <ul>{% for q in ai.questions %}<li>{{ q }}</li>{% endfor %}</ul>
     <p class="rv-quiet">Open questions to ask, so the leader does the thinking. They are not saved on the review.</p>
   </div>
