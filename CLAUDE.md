@@ -98,7 +98,11 @@ Canada.
   off by default), `SHIFT_ROSTER_SLACK_CHANNEL` (Operator-only "Pull team
   from Slack" roster sync; empty = #general; bot needs `channels:read` +
   `users:read`; stores names + Slack user IDs only). Never store
-  HR/discipline/wage/medical content in it. The office QR poster in
+  HR/discipline/wage/medical content, or any record about a named
+  applicant or a leader's performance, in it, in the Hub or in their
+  backups: applicant records and leader reviews live only in the People
+  store (below), and nothing else of that kind lives anywhere in this app.
+  The office QR poster in
   `assets/shift-qr/` points at the live `/shift` URL;
   `scripts/generate_shift_qr.py` regenerates it (pass a different URL as
   an argument if the service ever moves).
@@ -124,6 +128,68 @@ Canada.
   person. Templates in `templates/hub/`; guide:
   [docs/team-hub.md](docs/team-hub.md); crew-room QR poster in
   `assets/hub-qr/` (`scripts/generate_hub_qr.py`).
+- `people.py` + `people_db.py` + `people_ai.py`, `people_reviews.py` +
+  `people_reviews_db.py`, `people_hiring.py` + `people_hiring_db.py`,
+  `careers.py` — **People**: leader reviews at `/shift/reviews`, hiring at
+  `/shift/hiring`, the Operator's pages under `/shift/people` (home,
+  unlock/lock, who has access, Our standards, settings, activity log,
+  backup) and the public careers pages at `/careers` (no sign-in, no
+  session, no cookie). **The separate store**: `people_db.py` keeps
+  everything in its own SQLite file (`people.db` beside the shift database,
+  or `PEOPLE_DB_PATH`), never in the shift database, `EXPORT_TABLES`,
+  `/scheduled/shift-backup`, Slack, GroupMe, email or stdout; its only
+  backup is the Operator-only JSON download on `/shift/people/backup` (no
+  restore yet). It is the one place applicant records and leader reviews
+  live, and it still never holds discipline files, a person's wage or
+  payroll, medical details, or accommodation requests or plans (the only
+  trace of any of those is a reviewer's bare yes/no answers to the six
+  "before you finish" questions, Operator-only, and time-away dates with
+  no reason; every free-text box carries the "never write" guidance and a
+  word-list check). **Access** is never by role: the Operator, plus leaders
+  the Operator ticks on `/shift/people/access` for `hiring` and/or
+  `reviewer` (a grant counts only when leader id and sign-in name both
+  match; an admin-role leader without a tick gets nothing). A reviewer sees
+  only the leaders assigned to them, never their own review; every leader
+  sees their own review once shared (`/shift/reviews/mine`); team members
+  are sent back to `/hub/`. **The lock**: every People page needs the PIN
+  again (`/shift/people/unlock`) and re-locks after `lock_minutes` idle
+  (setting, default 30, 5–120). **Our standards**: one four-level model
+  shared by reviews and hiring, loaded by the Operator from a JSON file and
+  versioned (this repo is public and must never hold the store's wording;
+  `PEOPLE_EXAMPLE_MODEL` is a neutral example). **Reviews**: observation
+  log → cycle (optional reflection) → a level or "Not enough to rate yet"
+  per standard → six "before you finish" questions (any yes = on hold, the
+  Operator releases) → finalise → Operator calibration and process health →
+  share → the leader confirms receipt (never agreement) → print view; no
+  overall score, ranking or comparison. **Hiring**: postings with a publish
+  check (pay range, vacancy statement, accommodation notice with a named
+  contact, minimum-wage settings) that only the Operator publishes, an
+  exact kept copy of each posting and blank form, a two-step application on
+  a private link (HMAC hash kept, never the token), a pipeline moved only
+  by a person's tap, per-criterion scoring (no total), interview
+  scorecards, the 45-day decision-notice tracker, copy-ready messages that
+  open the leader's own mail/text app (the tool sends nothing), metrics,
+  and a manual Operator purge on `/shift/hiring/retention` (nothing is
+  deleted automatically; "Hold: do not delete" exempts). **AI rules**
+  (`people_ai.py`): off by default; needs `OPENAI_API_KEY` plus the
+  `ai_reviews` / `ai_hiring` setting (hiring also per posting, which then
+  prints the AI statement, and only for applicants who applied while it
+  showed); input is de-identified and stored exactly as sent; output is a
+  labelled draft or suggested level shown only after the person saved their
+  own, validated by code, never copied into a record, never a decision. It
+  is never sent Team Hub activity, and People code never reads the 1:1 or
+  goals tables (test-pinned). Registered fault-isolated after the Hub; the
+  menu rows come from the guarded `teamhub_nav._people_rows`. No scripts;
+  strict CSP. Templates in `templates/people/` and `templates/careers/`;
+  tests `tests/test_people_*.py` + `tests/test_careers.py` (kit
+  `tests/people_testkit.py`, first-run walk `tests/people_walk.py`,
+  who-may-open-what `tests/test_people_roles.py`, privacy
+  `tests/test_people_privacy.py`). Guide: [docs/people.md](docs/people.md);
+  legal reference:
+  [docs/legal-counsel/hiring-and-leader-reviews.md](docs/legal-counsel/hiring-and-leader-reviews.md)
+  (the escalation matrix applies to anything a review or a hiring decision
+  leads to). Env vars: `PEOPLE_DB_PATH`, `PEOPLE_AI_MODEL` (optional),
+  `OPENAI_API_KEY`.
 - `slack_coverage.py` — Slack Events API blueprint (`POST /slack/events`)
   that auto-responds in-thread in the #shift-coverage Slack channel:
   validates `🔄 COVERAGE REQUEST` template posts, nags un-released shifts

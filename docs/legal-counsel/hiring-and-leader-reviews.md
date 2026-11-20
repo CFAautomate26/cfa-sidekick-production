@@ -117,6 +117,8 @@ AODA Integrated Accessibility Standards, IASR).
 | A15 | **At the offer.** A trial shift is paid work. An employer with 25 or more employees must give a new hire written job information before their first day (legal and operating name, contact details and a contact name, first work location, starting wage, pay period and pay day, expected hours). In force **1 July 2025**. | ESA s. 1(1); O. Reg. 285/01 s. 1.2 | [Checked] on the duty and date; [Partly checked]: the list of items was not seen in an extract | Both are reminders in the offer checks. The tool does not produce the written information. |
 | A16 | **Organizational liability.** What a leader, or a vendor acting for the store, does in hiring is treated as the store's act. | Code s. 46.3 | [Not checked] (firm summary only) | Shown as the reason a person, not the tool, decides. |
 | A17 | **Time limit for a Code application.** Generally one year from the incident; late filing is possible for good-faith delay. | Code s. 34(1), (2) | [Checked] | Why the Retention setting cannot be set below 12 months. |
+| A18 | **Applicant privacy.** No general privacy statute governs this employer's applicant records (PIPEDA covers applicant data only in federal works; Ontario has no private-sector Act). Common-law privacy torts, contract and the Code still apply. No rule was found that specifically governs sending applicant answers to an outside AI provider. | OPC guidance; a negative finding | [Checked] on PIPEDA; the AI-provider point is a negative and was [Not checked] beyond "nothing contrary found" | A privacy notice above the consent tick (C5); a separate store; names and contact details are never sent to the AI; removal after the stated months is a button the Operator presses. |
+| A19 | **Messages to applicants (CASL).** Most recruitment messages are not "commercial electronic messages", because they promote nothing. One that carried a promotion would be, and would need consent, sender identification and a way to unsubscribe. | CASL s. 6; CRTC FAQ | [Partly checked]: one search extract of the FAQ; nothing found on interview texts specifically | The four ready messages are about the application only. The tool sends nothing: a leader sends each from their own app. Never add an offer, a coupon or marketing to one. |
 
 Also relevant and **not built**: police and consumer-report checks (if
 ever wanted, after a conditional offer, with written consent first, and a
@@ -138,7 +140,7 @@ Source: the reviewed leader-review brief of 20 November 2026.
 | B7 | **Paid time.** Time an hourly leader is required or allowed to spend on their reflection, reading their review or in the review meeting is working time. | O. Reg. 285/01 s. 1.1 | [Checked] | The leader's pages say so. The tool does not record the time: payroll has to. |
 | B8 | **Accessibility in performance management.** Take a leader's accessibility needs and any accommodation plan into account, and provide the review in an accessible format on request. | O. Reg. 191/11 s. 30 (and s. 26) | [Checked] on s. 30 | The leader's page says to ask the Operator for another format; there is a print view. |
 | B9 | **No AI-disclosure statute for existing employees.** No Ontario or federal law in force was found that requires telling existing employees that AI is used, or gives a right to explanation or human review. The posting rule (A7) covers external applicants only. | A negative finding | [Checked] on the listed items; a negative cannot be proven | Telling leaders is still the recommended path (below). |
-| B10 | **Privacy.** No general privacy statute governs this employer's employee records (PIPEDA covers employee data only in federal works; Ontario has no private-sector Act). Common-law privacy torts apply. Guest personal information **is** covered by PIPEDA. | *Jones v. Tsige*, 2012 ONCA 32; OPC guidance | [Checked] | A separate store, Operator-granted access, PIN re-entry, an activity log, no review content in any other system. Names, emails and phone numbers are removed before anything goes to the AI provider; guidance tells reviewers never to write guest details. |
+| B10 | **Privacy.** No general privacy statute governs this employer's employee records (PIPEDA covers employee data only in federal works; Ontario has no private-sector Act). Common-law privacy torts apply. Guest personal information **is** covered by PIPEDA. | *Jones v. Tsige*, 2012 ONCA 32; OPC guidance | [Checked] on PIPEDA and *Jones v. Tsige*; [Not checked]: that no statute restricts sending employees' work notes to an outside AI provider, or storing them outside Canada, is a negative finding that was not re-searched | A separate store, Operator-granted access, PIN re-entry, an activity log, no review content in any other system. Names, emails and phone numbers are removed before anything goes to the AI provider; guidance tells reviewers never to write guest details. |
 | B11 | **Reviews are evidence.** A run of positive reviews undercuts a later cause allegation; a sudden negative one, or one written after a decision, reads as pretext. AI inputs and drafts are documents too. | *Brake v. PJ-M2R Restaurant Inc.*, 2017 ONCA 402; firm commentary | [Checked] | Every rating has a named person and a time; observations in a finished review are locked; the AI request and reply are kept; calibration changes need a reason. The acknowledgement confirms receipt, never agreement. |
 | B12 | **Dismissal for poor performance** is rarely "cause": it needs communicated standards, support, a clear warning, time to improve and continued failure. The ordinary route is without cause, on notice or pay in lieu, never for a discriminatory or reprisal reason. | Firm commentary; playbooks 2 and 3 | [Partly checked] | The tool recommends no consequence and the AI is forbidden the words. The escalation note is shown wherever a review could lead that way. |
 | B13 | **Harassment includes virtual conduct.** Review text and comments count, and a harassment complaint raised in a leader's response starts the duty to investigate. | OHSA Part III.0.1 | [Checked] as to the definition | A leader's comments are scanned for harassment and safety words; the Operator sees a quiet flag with the escalation note. The leader is never blocked. |
@@ -148,8 +150,12 @@ Three reasons. A review that someone later learns was partly machine-drafted
 looks like concealment, and concealment is what turns an ordinary review
 into evidence of bad faith (B11). The cautious reading of B1 is that any
 AI step belongs in the monitoring policy the moment app activity is used.
-And honesty and good faith in how the employment contract is performed is
-a common-law duty in its own right. The cost is one written notice.
+And the brief relies on the courts' honesty-in-performance cases (*Bhasin*,
+*Callow*) for the point that a review must be true to the evidence and
+never a paper trail for a decision already made; those cases were not
+re-checked on review, and the Supreme Court has left open whether there is
+a general duty of good faith during employment (Part E). The cost of
+telling leaders is one written notice.
 
 **Retention of reviews.** No statute sets a period. The brief's suggestion
 (a synthesis, not a statutory figure) is employment plus three years, and
@@ -185,8 +191,13 @@ send a sentence that is not true of this store.**
 > [contact].
 
 Leave the bracketed AI sentences out while AI drafting is off. The
-Settings page carries this wording, with the AI sentences in, for the day
-AI drafting is switched on.
+Settings page carries the same notice with the AI sentences in, for the
+day AI drafting is switched on; there "may process information outside
+Canada" and the paid-time sentence sit in square brackets, as facts to
+confirm before sending. The leader's own pages state the paid-time point
+outright ("Your reflection counts as paid time", "Reading your review and
+talking it through counts as paid time"), so it has to be true in
+practice: see Part E.
 
 ### C2. Reviewer guidance (shown beside every box where a reviewer writes)
 
@@ -450,6 +461,21 @@ waive rights. Decision-critical figures need a "verify current" check.
     Bill C-36 (sources conflict). Neither changes the rules above.
 20. The review retention suggestion in Part B is a synthesis, not a
     statutory figure.
+21. Not re-searched on review in the leader-review brief (a search limit
+    was reached): that no statute restricts sending employees' work notes
+    to an outside AI provider or storing them outside Canada (B10); the
+    constructive dismissal cases (*Potter*, *Shah*) behind the Tier 2 flag
+    on tying pay, hours or title to review results; the honesty and good
+    faith cases (*Bhasin*, *Callow*, *Honda*, *Matthews*); and the rules
+    for leaders under 18.
+22. Applicants: that no rule specifically governs sending applicant
+    answers to an outside AI provider is a negative finding (A18), and
+    whether PIPEDA applies to the AI provider in its own right was not
+    determined.
+23. CASL: the CRTC's view that recruitment messages are not commercial
+    was seen only as a search extract (A19).
+24. The *Consumer Reporting Act* and *Police Record Checks Reform Act*
+    details behind the "not built" note on background checks.
 
 ### Store facts still needed
 
@@ -462,7 +488,7 @@ waive rights. Decision-critical figures need a "verify current" check.
 | Whether any leader is under 18 | The Tier 3 flag for minors; retention. |
 | The AI provider's data terms (training on store data, retention, storage location, deletion) | Both go-live checklists; the "may process outside Canada" sentences. |
 | Whether reviews will affect pay | Tier 2: merit-pay and pay-equity rules. |
-| Whether leaders are paid for reflection and review time as the pages tell them | B7. |
+| Whether leaders are in fact paid for the time they spend on a reflection, on reading their review and in the review conversation. **The leader's pages tell them it counts as paid time**, and the tool does not record the time: the Operator has to confirm payroll does this before the first cycle | B7; a statement the tool makes that only practice can keep true. |
 | Whether the store's standards have been read for behaviour-only wording | B4. |
 | Whether leaders have enforceable termination clauses | Any exit that follows a review (playbook 2). |
 | Whether the AODA compliance report due 31 December 2026 has been filed | A separate duty noted in the brief. |

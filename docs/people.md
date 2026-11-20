@@ -39,8 +39,10 @@ sign-in").
 
 In the ☰ menu, the Operator and ticked leaders get a **People** row, with a
 count when something is waiting (a review on hold, new applications, a
-decision notice due). A leader gets a **My review** row while there is
-something of their own to open.
+decision notice due). A leader gets a **My review** row from the day a
+cycle asks them for a reflection or a review is shared with them. It shows
+"waiting" while something needs them, and it stays after they have
+confirmed a review, so they can always read it again.
 
 ## The lock (why it asks for your PIN again)
 
@@ -313,6 +315,12 @@ The same person applying to the same posting again within 30 days is
 thanked and not stored twice. Only a scrambled form of the private link is
 kept, so a lost link cannot be sent again: the applicant contacts the
 hiring contact instead.
+
+One limit to know: like any web address that is opened, a private link's
+address can show up in the hosting service's own request log. The page
+behind it never shows the applicant's name or contact details, a score or
+a note, and once the questions are answered it only shows the status lines
+above.
 
 ### The pipeline
 
