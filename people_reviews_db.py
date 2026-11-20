@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS rv_reviews (
   gate_json TEXT, gate_at TEXT, gate_by TEXT, hold_note TEXT NOT NULL DEFAULT '', released_at TEXT, released_by TEXT,
   reflection_at TEXT, finalised_at TEXT, finalised_by TEXT, shared_at TEXT, shared_by TEXT,
   discussed_on TEXT, ack_at TEXT, ack_comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  concern_followed_at TEXT, concern_followed_by TEXT,   -- the Operator followed up the leader's comments outside this tool
   UNIQUE (cycle_id, subject_id));
 
 -- The level a person gave for one standard, with their comment. ai_level is
@@ -144,8 +145,16 @@ CREATE INDEX IF NOT EXISTS idx_rv_actions_review ON rv_actions (review_id);
 """
 
 
+# Columns added after a store may already have been created.
+_ADDED_COLUMNS = (("rv_reviews", "concern_followed_at", "TEXT"),
+                  ("rv_reviews", "concern_followed_by", "TEXT"))
+
+
 def init_schema(conn) -> None:
     conn.executescript(SCHEMA)
+    for table, column, declared in _ADDED_COLUMNS:               # our own names, never input
+        if column not in {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declared}")
 
 
 # ---------------------------------------------------------------------------
@@ -943,6 +952,30 @@ def acknowledge(review_id: int, discussed_on: str, comment: str, by: str) -> str
             (day, shift_db.now_stamp(), _text(comment, CAPS["ack_comment"]), review_id))
         _log(conn, by, "review acknowledged", "review", review_id)
     return None
+
+
+def commented_reviews() -> list[dict]:
+    """Every acknowledged review whose leader added comments that the
+    Operator has not yet marked as followed up, in any cycle, open or
+    closed, oldest first. (Which of them may raise a concern is decided by
+    the caller's word list.)"""
+    with closing(people_db.connect()) as conn:
+        return [_shape(r) for r in conn.execute(
+            _REVIEW + "WHERE r.status='acknowledged' AND r.ack_comment != '' "
+            "AND r.concern_followed_at IS NULL ORDER BY r.ack_at, r.id")]
+
+
+def mark_concern_followed(review_id: int, by: str) -> bool:
+    """The Operator records that the leader's comments were followed up
+    outside this tool. Only that, and when: never what was found."""
+    with closing(people_db.connect()) as conn, conn:
+        done = conn.execute(
+            "UPDATE rv_reviews SET concern_followed_at=?, concern_followed_by=? "
+            "WHERE id=? AND status='acknowledged' AND concern_followed_at IS NULL",
+            (shift_db.now_stamp(), _line(by, CAPS["name"]), review_id)).rowcount > 0
+        if done:
+            _log(conn, by, "comments followed up outside this tool", "review", review_id)
+    return done
 
 
 def calibrate(review_id: int, dimension_key: str, level, not_enough: bool, reason: str,

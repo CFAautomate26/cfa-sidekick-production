@@ -12,12 +12,15 @@ Abuse controls, all in this file: a hidden box that only a robot fills
 address and overall, a limit on wrong private links per address, a 64 KB
 cap on what can be sent, and a check that a form came from our own page.
 The limits live in memory only, and the address is never stored: only a
-salted hash of it is held, and only while the limit needs it.
+salted hash of it is held, and only while the limit needs it. The address
+is the one the hosting platform's proxy reports, never one the visitor
+can type (client_address).
 
 Nothing here prints a name, a contact detail, an answer or a link.
 """
 
 import hashlib
+import os
 import re
 import secrets
 import threading
@@ -62,12 +65,35 @@ def _now() -> float:
     return shift_db.now_local().timestamp()
 
 
+PROXY_HOPS_ENV = "PEOPLE_PROXY_HOPS"
+
+
+def proxy_hops() -> int:
+    """How many proxies of the hosting platform stand between a visitor and
+    this app (PEOPLE_PROXY_HOPS, 0 to 5; 1 unless set). Each proxy adds the
+    address it saw to the right-hand end of X-Forwarded-For."""
+    raw = os.getenv(PROXY_HOPS_ENV, "").strip()
+    return int(raw) if raw in ("0", "1", "2", "3", "4", "5") else 1
+
+
+def client_address(forwarded: str | None, remote_addr: str | None, hops: int | None = None) -> str:
+    """The address a limit is counted against: the one the platform's own
+    proxy wrote, `hops` places from the right-hand end of X-Forwarded-For.
+    Never the left-hand end: a proxy adds to that header, it does not
+    replace it, so everything to the left is whatever the sender typed.
+    With no proxy (hops 0), or a header shorter than expected, the
+    socket's own address."""
+    hops = proxy_hops() if hops is None else hops
+    chain = [part.strip() for part in (forwarded or "").split(",") if part.strip()]
+    if hops < 1 or len(chain) < hops:
+        return (remote_addr or "")[:64]
+    return chain[-hops][:64]
+
+
 def _address_key() -> str:
-    """A salted hash of where the request came from: the first hop of
-    X-Forwarded-For (the app sits behind a proxy), else the socket's
-    address. The address itself is never kept anywhere."""
-    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    address = (forwarded or request.remote_addr or "")[:64]
+    """A salted hash of where the request came from (see client_address).
+    The address itself is never kept anywhere."""
+    address = client_address(request.headers.get("X-Forwarded-For"), request.remote_addr)
     return hashlib.sha256(_salt + address.encode("utf-8", "replace")).hexdigest()[:24]
 
 
@@ -230,7 +256,7 @@ def apply(slug):
     if (form.get("website") or "").strip():
         # Only a robot fills the hidden box. It gets the ordinary thanks
         # page, and nothing is kept.
-        return render_template("careers/thanks.html", duplicate=False, **thanks)
+        return render_template("careers/thanks.html", **thanks)
     fields, problems = hdb.clean_application(form)
     if problems:
         return _form(view, fields, problems, 400)
@@ -240,9 +266,9 @@ def apply(slug):
                         f"hour, or contact {view['contact']}.")
     result = hdb.apply(posting_row["id"], form, ai_shown=form.get("ai") == "1")
     if result["status"] == "created":
+        # The same answer whether or not this email or phone has applied
+        # before: this page must never tell a stranger who has applied.
         return redirect(url_for("careers.private", token=result["token"]))
-    if result["status"] == "duplicate":
-        return render_template("careers/thanks.html", duplicate=True, **thanks)
     if result["status"] == "invalid":
         return _form(view, result["fields"], result["problems"], 400)
     abort(404)                                   # it closed while the form was open

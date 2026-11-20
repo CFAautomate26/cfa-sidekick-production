@@ -18,7 +18,8 @@ import people_hiring
 import people_hiring_db as hdb
 import shift_db
 from tests import people_testkit as kit
-from tests.test_people_hiring_db import DESCRIPTION, ai_in_use, applied, clock, criterion, draft, live, table
+from tests.test_people_hiring_db import (DESCRIPTION, ai_in_use, applied, clock, criterion, draft, live,
+                                         live_with_ai, table)
 
 EMAIL, PHONE = "jordan1@example.com", "519-555-0142"
 
@@ -211,10 +212,13 @@ def test_only_the_operator_publishes_closes_switches_ai_purges_and_adds_to_the_r
     assert "Retention" not in page(hari, "/shift/hiring/")
     # the Operator can do each of them
     operator = kit.open_as(world, "operator")
+    post(operator, f"/shift/hiring/postings/{posting_id}/ai", on="1")       # while it is still a draft
+    assert hdb.get_posting(posting_id)["ai_assist"] == 1
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     post(operator, f"/shift/hiring/postings/{posting_id}/publish")
     assert hdb.get_posting(posting_id)["status"] == "open"
-    post(operator, f"/shift/hiring/postings/{other}/ai", on="1")
-    assert hdb.get_posting(other)["ai_assist"] == 1
+    post(operator, f"/shift/hiring/postings/{other}/ai", on="1")            # never on a posting already live
+    assert hdb.AI_DRAFT_ONLY in flashed(operator) and hdb.get_posting(other)["ai_assist"] == 0
     post(operator, f"/shift/hiring/candidates/{old}/hold", on="0")
     post(operator, "/shift/hiring/retention/purge", confirm="1")
     assert hdb.candidate(old)["purged"] is True
@@ -302,31 +306,45 @@ def test_writing_a_posting_and_working_through_the_publish_check(world):
 
 
 def test_ai_on_a_posting_needs_the_setting_and_is_said_on_the_posting(world, monkeypatch):
-    posting_id = live()
+    posting_id = draft()
+    criterion(posting_id, "Reliable")
+    criterion(posting_id, "Guest care")
+    at = f"/shift/hiring/postings/{posting_id}"
     operator = kit.open_as(world, "operator")
-    detail = page(operator, f"/shift/hiring/postings/{posting_id}")
+    detail = page(operator, at)
     assert "Off for this posting" in detail and "switch on AI assist for hiring in" in detail
-    post(operator, f"/shift/hiring/postings/{posting_id}/ai", on="1")
+    post(operator, f"{at}/ai", on="1")
     assert "Switch on AI assist for hiring in People settings first." in flashed(operator)
     assert hdb.get_posting(posting_id)["ai_assist"] == 0
     people_db.set_setting("ai_hiring", "1", "Operator")
-    post(operator, f"/shift/hiring/postings/{posting_id}/ai", on="1")
+    post(operator, f"{at}/ai", on="1")
     assert hdb.get_posting(posting_id)["ai_assist"] == 1
     assert any("once an AI key is set up on the server" in m for m in flashed(operator))
-    # no key on the server yet: it is switched on but not in use, and the posting says nothing about AI
-    detail = page(operator, f"/shift/hiring/postings/{posting_id}")
+    # no key on the server yet: it is switched on but not in use, and it can't go live like that
+    detail = page(operator, at)
     assert "Switched on, but not in use" in detail and "no AI key is set up on the server" in detail
     assert "We use artificial intelligence" not in detail
-    assert [(c["reason"], c["ai_statement"]) for c in hdb.snapshots(posting_id)] == [("published", 0), ("changed", 0)]
     assert "No AI" not in shown(detail) and "no AI is used" not in shown(detail)
+    post(operator, f"{at}/publish")
+    assert hdb.AI_NOT_READY in flashed(operator)
+    assert hdb.get_posting(posting_id)["status"] == "draft" and hdb.snapshots(posting_id) == []
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    detail = page(operator, f"/shift/hiring/postings/{posting_id}")
+    detail = page(operator, at)
     assert "On for this posting" in detail and "We use artificial intelligence (AI) to help assess" in detail
+    post(operator, f"{at}/publish")
     assert "artificial intelligence" in cfa_app.app.test_client().get("/careers/team-member").data.decode()
-    assert hdb.snapshots(posting_id)[-1]["ai_statement"] == 1          # what the public saw is on record
-    post(operator, f"/shift/hiring/postings/{posting_id}/ai", on="0")
-    post(operator, f"/shift/hiring/postings/{posting_id}/ai", on="1")
-    assert "AI assist is on for this posting, and the posting now says so." in flashed(operator)
+    # what the public saw is on record: it has said so since the day it went live
+    assert [(c["reason"], c["ai_statement"]) for c in hdb.snapshots(posting_id)] == [("published", 1)]
+    # on a live posting it can be switched off, and then never back on
+    post(operator, f"{at}/ai", on="0")
+    post(operator, f"{at}/ai", on="1")
+    assert hdb.AI_DRAFT_ONLY in flashed(operator) and hdb.get_posting(posting_id)["ai_assist"] == 0
+    assert [(c["reason"], c["ai_statement"]) for c in hdb.snapshots(posting_id)][-1] == ("changed", 0)
+    detail = page(operator, at)
+    assert "Off for this posting" in detail
+    assert shown(detail).count("This posting has been live without the AI statement") == 1
+    assert "Switch AI assist on for this posting" not in detail
+    assert "artificial intelligence" not in cfa_app.app.test_client().get("/careers/team-member").data.decode()
 
 
 # --- the pipeline -------------------------------------------------------------------------
@@ -699,11 +717,9 @@ def test_only_the_name_reaches_the_team_hub_roster(world):
 # --- AI assist ---------------------------------------------------------------------------------
 
 def ai_world(world, monkeypatch, posting_id=None, **changes):
-    """A live posting with AI assist on and in use, and an applicant who
-    was shown the AI statement."""
-    ai_in_use(monkeypatch)
-    posting_id = posting_id or live()
-    hdb.set_ai(posting_id, True, "Operator")
+    """A live posting with AI assist on and in use since the day it went
+    live, and an applicant who was shown the AI statement."""
+    posting_id = posting_id or live_with_ai(monkeypatch)
     result = hdb.apply(posting_id, {
         "first_name": "Jordan", "last_name": "Sample", "email": "jordan@example.com", "phone": PHONE,
         "work_entitled": "yes", "adult": "no", "heard_from": "friend", "referrer": "Sam Patel",
@@ -730,7 +746,7 @@ def good_reply(first, second):
 
 def test_ai_assist_runs_only_where_it_was_disclosed(world, monkeypatch):
     posting_id = live()
-    quiet = candidate(posting_id)                                        # applied before AI was mentioned
+    quiet = candidate(posting_id)                                        # this posting never mentioned AI
     calls = kit.fake_ai(monkeypatch, lambda system, user: good_reply(1, 2))
     hari = kit.open_as(world, "hari")
     post(hari, f"/shift/hiring/candidates/{quiet}/ai")
@@ -738,17 +754,19 @@ def test_ai_assist_runs_only_where_it_was_disclosed(world, monkeypatch):
     people_db.set_setting("ai_hiring", "1", "Operator")
     post(hari, f"/shift/hiring/candidates/{quiet}/ai")
     assert "AI assist is not switched on for this posting." in flashed(hari)
-    hdb.set_ai(posting_id, True, "Operator")
-    post(hari, f"/shift/hiring/candidates/{quiet}/ai")
-    assert any("applied while the posting did not say AI is used" in m for m in flashed(hari))
-    assert "applied while the posting did not say AI is used" in page(hari, f"/shift/hiring/candidates/{quiet}")
-    stale_form = hdb.apply(posting_id, {"first_name": "Robin", "last_name": "Sample", "email": "robin@example.com",
-                                        "work_entitled": "yes", "adult": "yes", "consent": "1"}, ai_shown=False)["id"]
-    hdb.save_answers(stale_form, {hdb.get_posting(posting_id)["criteria"][0]["id"]: "An answer."})
+    assert not hdb.set_ai(posting_id, True, "Operator")                  # and it can't be, now it is live
+    assert "AI assist is not switched on for this posting." in page(hari, f"/shift/hiring/candidates/{quiet}")
+    # a posting that has said so from the start: still only for people who were shown the statement
+    with_ai = live_with_ai(monkeypatch, title="Kitchen team")
+    stale_form = hdb.apply(with_ai, {"first_name": "Robin", "last_name": "Sample", "email": "robin@example.com",
+                                     "work_entitled": "yes", "adult": "yes", "consent": "1"}, ai_shown=False)["id"]
+    hdb.save_answers(stale_form, {hdb.get_posting(with_ai)["criteria"][0]["id"]: "An answer."})
     post(hari, f"/shift/hiring/candidates/{stale_form}/ai")
+    assert any("applied while the posting did not say AI is used" in m for m in flashed(hari))
+    assert "applied while the posting did not say AI is used" in page(hari, f"/shift/hiring/candidates/{stale_form}")
     assert calls == [] and table("ai_jobs") == []                        # nothing was ever sent
     # with no key on the server it is off, whatever the switches say, even for someone who was told
-    _, shown_to, _, _ = ai_world(world, monkeypatch, posting_id, phone="519-555-0177")
+    _, shown_to, _, _ = ai_world(world, monkeypatch, with_ai, phone="519-555-0177")
     assert table("hr_applications")[-1]["ai_disclosed"] == 1
     monkeypatch.delenv("OPENAI_API_KEY")
     post(hari, f"/shift/hiring/candidates/{shown_to}/ai")
@@ -852,9 +870,7 @@ def test_a_suggestion_shows_only_after_the_leader_has_saved_their_own_level(worl
 
 
 def test_an_answer_that_may_mention_health_is_never_sent(world, monkeypatch):
-    ai_in_use(monkeypatch)
-    posting_id = live()
-    hdb.set_ai(posting_id, True, "Operator")
+    posting_id = live_with_ai(monkeypatch)
     app_id = hdb.apply(posting_id, {"first_name": "Jordan", "last_name": "Sample", "email": "jordan@example.com",
                                     "work_entitled": "yes", "adult": "yes", "consent": "1"}, ai_shown=True)["id"]
     first, second = (c["id"] for c in hdb.get_posting(posting_id)["criteria"])

@@ -18,7 +18,7 @@
 </div>
 
 {% if posting.status == 'open' and public_url %}
-<p class="callout" style="margin-top:16px;">{{ icon('share') }}<span><strong>Applicants apply here:</strong> <span class="hr-def">{{ public_url }}</span><br>Anywhere else this job is advertised (a job site, a social post, a poster) has to carry the same pay, vacancy{% if view.ai %}, AI{% endif %} and accommodation statements, or link straight to this page.</span></p>
+<p class="callout" style="margin-top:16px;">{{ icon('share') }}<span><strong>Applicants apply here:</strong> <span class="hr-def">{{ public_url }}</span><br>Anywhere else this job is advertised (a job site, a social post that names the job, a poster) has to carry the same pay, vacancy{% if view.ai %}, AI{% endif %} and accommodation statements itself. A general “we're hiring” sign that names no position can simply point here.</span></p>
 {% endif %}
 
 {# ---------- the publish check ---------- #}
@@ -56,12 +56,16 @@
 <section class="sec" id="ai">
   <div class="sec-head"><h2>AI assist</h2></div>
   <div class="card">
-    <p class="card-meta" style="margin-top:0;">{% if view.ai %}<span class="badge b-green">{{ icon('check', 'xs') }}On for this posting</span>{% elif posting.ai_assist %}<span class="badge b-tan">Switched on, but not in use</span>{% else %}<span class="badge">Off for this posting</span>{% endif %}</p>
-    {% if posting.ai_assist and not view.ai %}
-    <p class="callout tan">{{ icon('info') }}<span>AI assist is switched on for this posting, but it can't run right now: {{ 'the switch in People settings is off' if not ai_setting else 'no AI key is set up on the server' }}. While that is so, the posting does not tell applicants that AI is used, nothing is sent to an AI service, and anyone who applies now can never have AI used on their application.</span></p>
+    <p class="card-meta" style="margin-top:0;">{% if view.ai %}<span class="badge b-green">{{ icon('check', 'xs') }}On for this posting</span>{% elif posting.ai_assist and not posting.ai_locked %}<span class="badge b-tan">Switched on, but not in use</span>{% else %}<span class="badge">Off for this posting</span>{% endif %}</p>
+    {% if posting.ai_locked and posting.status == 'open' %}
+    <p class="callout tan">{{ icon('info') }}<span>{{ limits.AI_LOCKED }}</span></p>
+    {% elif posting.ai_assist and not view.ai and posting.status == 'draft' %}
+    <p class="callout tan">{{ icon('info') }}<span>AI assist is switched on for this posting, but it can't run right now: {{ 'the switch in People settings is off' if not ai_setting else 'no AI key is set up on the server' }}. The posting can't be published like this, because it would go live without the AI statement. Finish setting AI up, or switch AI assist off for this posting.</span></p>
+    {% elif posting.ai_assist and not view.ai and posting.status == 'open' %}
+    <p class="callout tan">{{ icon('info') }}<span>AI assist is switched on for this posting, but it can't run right now: {{ 'the switch in People settings is off' if not ai_setting else 'no AI key is set up on the server' }}. While that is so, the posting does not tell applicants that AI is used and nothing is sent to an AI service. The first time anyone opens the posting like this, AI assist goes off for this posting for good.</span></p>
     {% endif %}
-    <p class="card-meta">When it is on, the posting tells applicants that AI helps assess applications, and a leader can ask for a suggested level on a written answer after saving their own. It works only for people who applied while the posting said so. A person makes every decision.</p>
-    {% if viewer.is_operator and posting.status != 'closed' %}
+    <p class="card-meta">When it is on, the posting tells applicants that AI helps assess applications, and a leader can ask for a suggested level on a written answer after saving their own. It has to be on from the day the posting goes live, so it is switched on while the posting is a draft, and it works only for people who applied while the posting said so. A person makes every decision.</p>
+    {% if viewer.is_operator and posting.status == 'draft' %}
       {% if not ai_setting and not posting.ai_assist %}
       <p class="fine-line">To use it, first switch on AI assist for hiring in <a class="textlink" href="{{ url_for('people.settings') }}#ai-hiring">People settings</a>.</p>
       {% else %}
@@ -70,6 +74,14 @@
         <button class="btn btn-secondary sm" type="submit">{{ 'Switch AI assist off for this posting' if posting.ai_assist else 'Switch AI assist on for this posting' }}</button>
       </form>
       {% endif %}
+    {% elif viewer.is_operator and posting.status == 'open' and posting.ai_assist %}
+      <form method="post" action="{{ url_for('people.hiring_posting_ai', posting_id=posting.id) }}" class="btnrow">
+        <input type="hidden" name="on" value="0">
+        <button class="btn btn-secondary sm" type="submit">Switch AI assist off for this posting</button>
+      </form>
+      <p class="fine-line">Once it is off on a live posting it can't be switched back on: the posting will have been live without the AI statement.</p>
+    {% elif viewer.is_operator and posting.status == 'open' %}
+    <p class="fine-line">AI assist can't be switched on for a live posting. To use AI for this job, close this posting and copy it to a new draft.</p>
     {% elif posting.status != 'closed' %}
     <p class="fine-line">Only the Operator can switch this.</p>
     {% endif %}

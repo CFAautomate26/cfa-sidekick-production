@@ -357,6 +357,9 @@ def _feature_counts(kind: str, leader_id: int | None, name: str, caps: frozenset
             continue
         try:
             got = dict(module.nav_counts(kind, leader_id, name) or {})
+            more = getattr(module, "extra_counts", None)     # optional: what needs attention
+            if more:
+                got.update(more(kind, leader_id, name) or {})
             if feature == "reviews" and "reviewer" not in caps:
                 got = {"mine": got.get("mine", 0)}       # their own review only
             counts.update({key: max(int(value or 0), 0) for key, value in got.items()})
@@ -374,7 +377,9 @@ def _feature_counts(kind: str, leader_id: int | None, name: str, caps: frozenset
 
 
 _BADGES = (                     # first one with a count wins; red = someone is waiting
+    ("concerns", "{n} to follow up", "b-red"),
     ("notices_overdue", "{n} notice{s} overdue", "b-red"),
+    ("attention", "{n} posting{s} to fix", "b-red"),
     ("on_hold", "{n} on hold", "b-red"),
     ("new", "{n} new", "b-red"),
     ("notices_due", "{n} notice{s} due", "b-tan"),
@@ -559,13 +564,78 @@ SETTING_GROUPS = (
 AI_SWITCHES = ("ai_reviews", "ai_hiring")
 
 
+_CONTACT_KEYS = ("hiring_contact_name", "hiring_contact_email", "hiring_contact_phone")
+CONTACT_NEEDED = ("A posting is live, and its accommodation notice names the hiring contact. Keep a "
+                  "name and an email or phone number here, or close the posting first.")
+
+
+def _hiring_store():
+    """The hiring store when that feature loaded, else None: Settings must
+    keep working without it."""
+    if "hiring" not in FEATURES:
+        return None
+    try:
+        import people_hiring_db
+        return people_hiring_db
+    except Exception:
+        return None
+
+
+def _contact_left_empty(form) -> bool:
+    """Would this save leave a live posting without a named hiring contact
+    (a name, and an email or a phone number)?"""
+    store = _hiring_store()
+    if not store or not any(key in form for key in _CONTACT_KEYS):
+        return False
+    try:
+        if not store.open_postings():
+            return False
+        after = {key: " ".join((form.get(key) if key in form else people_db.get_setting(key)).split())
+                 for key in _CONTACT_KEYS}
+    except Exception:
+        return False
+    return not after["hiring_contact_name"] or not (after["hiring_contact_email"]
+                                                    or after["hiring_contact_phone"])
+
+
+def _postings_to_fix() -> list[dict]:
+    """Live postings that no longer pass the publish check (a wage floor
+    went up, the contact changed): [{"id", "title", "problems"}]."""
+    store = _hiring_store()
+    try:
+        return store.needs_attention() if store else []
+    except Exception:
+        return []
+
+
+def _address_check() -> dict | None:
+    """How the public careers pages would count the address of the request
+    being answered right now (the Operator's own), so whoever set up the
+    server can check the limit is counted against the right one. None when
+    the careers pages did not load."""
+    try:
+        if "careers" not in current_app.blueprints:
+            return None
+        import careers
+        forwarded = request.headers.get("X-Forwarded-For")
+        return {"hops": careers.proxy_hops(), "variable": careers.PROXY_HOPS_ENV,
+                "chain": [part.strip()[:64] for part in (forwarded or "").split(",") if part.strip()],
+                "counted": careers.client_address(forwarded, request.remote_addr)}
+    except Exception:
+        return None
+
+
 @people_bp.route("/people/settings", methods=["GET", "POST"])
 @requires("operator")
 def settings():
     if request.method == "POST":
         saved, refused = 0, []
+        keep_contact = _contact_left_empty(request.form)
+        if keep_contact:
+            refused.append(CONTACT_NEEDED)
+        failing_before = {p["id"] for p in _postings_to_fix()}
         for key in people_db.SETTINGS:
-            if key not in request.form:
+            if key not in request.form or (keep_contact and key in _CONTACT_KEYS):
                 continue
             if people_db.set_setting(key, request.form.get(key, ""), actor()):
                 saved += 1
@@ -579,10 +649,18 @@ def settings():
             flash("Settings saved." if saved else "Nothing was changed.")
         elif saved:
             flash("Everything else was saved.")
+        # A live posting is checked against these settings. Say so the
+        # moment a change leaves one failing, not only on the Hiring page.
+        failing = [p for p in _postings_to_fix() if p["id"] not in failing_before]
+        if failing:
+            names = ", ".join(f"“{p['title']}”" for p in failing[:5])
+            flash(f"{len(failing)} live posting{' no longer passes' if len(failing) == 1 else 's no longer pass'} "
+                  f"the publish check after this change: {names}. Open Hiring to fix "
+                  f"{'it' if len(failing) == 1 else 'them'}, or close {'it' if len(failing) == 1 else 'them'}.")
         return redirect(url_for("people.settings"))
     return render_template("people/settings.html", settings=people_db.settings_all(),
                            groups=SETTING_GROUPS, fields=SETTING_FIELDS,
-                           ai_ready=people_ai.available())
+                           ai_ready=people_ai.available(), address_check=_address_check())
 
 
 # ---------------------------------------------------------------------------

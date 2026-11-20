@@ -47,6 +47,33 @@
   </div>
 </section>
 
+{# ---------- the quick questions, with more time or another way ---------- #}
+{% set asked = c.criteria|selectattr('question')|list %}
+{% if asked and not c.answered_at and c.stage in active_stages %}
+<section class="sec" id="questions">
+  <div class="sec-head"><h2>Quick questions</h2></div>
+  <div class="card">
+    <p class="card-meta" style="margin-top:0;">{% if c.link_expired %}Not answered, and their link has closed.{% else %}Not answered yet. Their link is open until {{ c.answers_until|pp_when }}.{% endif %} Accommodation is offered at every stage, including this one. If the applicant needs more time, or needs to answer another way (by phone, on paper, with someone's help), do it here. Don't ask why, and don't write why.</p>
+    <form method="post" action="{{ url_for('people.hiring_more_time', application_id=c.id) }}" class="btnrow"><button class="btn btn-secondary sm" type="submit">Give more time on their link</button></form>
+    <details class="hr-fold" id="another-way">
+      <summary>{{ icon('chev', 'sm') }}Enter answers they gave another way</summary>
+      <p class="fine-line">Write what they said, in their words. These answers are scored like any others, against the same criteria.</p>
+      <form method="post" action="{{ url_for('people.hiring_enter_answers', application_id=c.id) }}" autocomplete="off">
+        {% for q in asked %}
+        <label class="field" for="q-{{ q.id }}">{{ q.question }}</label>
+        <textarea id="q-{{ q.id }}" name="q_{{ q.id }}" rows="4" maxlength="{{ limits.ANSWER_MAX }}"></textarea>
+        {% endfor %}
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save their answers</button></div>
+      </form>
+    </details>
+  </div>
+</section>
+{% endif %}
+
+{% if same_contact %}
+<p class="callout tan" id="same-contact">{{ icon('info') }}<span><strong>The same email or phone number is on another application for this posting.</strong> It may be the same person applying twice, or two people who share a phone or an email. Compare the two: {% for other in same_contact %}<a class="textlink" href="{{ url_for('people.hiring_contact', application_id=other) }}">application {{ other }}</a>{{ ', ' if not loop.last }}{% endfor %}. If it is one person, move the spare one to withdrew.</span></p>
+{% endif %}
+
 {# ---------- messages ---------- #}
 <section class="sec" id="messages">
   <div class="sec-head"><h2>Messages</h2></div>

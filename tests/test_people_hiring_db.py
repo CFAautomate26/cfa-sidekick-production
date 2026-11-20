@@ -63,6 +63,19 @@ def live(**changes) -> int:
     return posting_id
 
 
+def live_with_ai(monkeypatch, **changes) -> int:
+    """A live posting that has said "AI is used" since the day it went
+    live: AI assist was switched on while it was a draft, which is the
+    only time it can be."""
+    ai_in_use(monkeypatch)
+    posting_id = draft(**changes)
+    criterion(posting_id, "Reliable")
+    criterion(posting_id, "Guest care")
+    assert hdb.set_ai(posting_id, True, "Operator")
+    assert hdb.publish(posting_id, "Operator") == []
+    return posting_id
+
+
 def person(n: int = 1, **changes) -> dict:
     form = {"first_name": f"Jordan{n}", "last_name": "Sample", "email": f"jordan{n}@example.com",
             "phone": "", "work_entitled": "yes", "adult": "yes", "heard_from": "school",
@@ -263,7 +276,9 @@ def test_a_posting_shows_every_required_statement_in_order(world):
 
 
 def test_the_ai_statement_is_shown_only_while_ai_assist_is_on(world, monkeypatch):
-    posting_id = live()
+    posting_id = draft()                         # AI assist is switched on while a posting is a draft
+    criterion(posting_id, "Reliable")
+    criterion(posting_id, "Guest care")
     assert hdb.public_view(hdb.get_posting(posting_id))["ai_statement"] == ""
     assert hdb.set_ai(posting_id, True, "Operator") and not hdb.set_ai(posting_id, True, "Operator")
     # on for the posting is not enough: the statement is only made while AI can really run
@@ -286,10 +301,9 @@ def test_the_ai_statement_is_shown_only_while_ai_assist_is_on(world, monkeypatch
 
 
 def test_an_exact_copy_is_kept_on_publish_on_every_change_and_on_close(world, monkeypatch):
-    ai_in_use(monkeypatch)
-    posting_id = live()
+    posting_id = live_with_ai(monkeypatch)
     copies = hdb.snapshots(posting_id)
-    assert [(c["reason"], c["ai_statement"]) for c in copies] == [("published", 0)]
+    assert [(c["reason"], c["ai_statement"]) for c in copies] == [("published", 1)]
     first = hdb.get_snapshot(copies[0]["id"])["body"]
     assert DESCRIPTION in first and "APPLICATION FORM (blank)" in first
     # a change to the live posting
@@ -300,16 +314,17 @@ def test_an_exact_copy_is_kept_on_publish_on_every_change_and_on_close(world, mo
     criterion(posting_id, "Teamwork")
     crit = hdb.get_posting(posting_id)["criteria"][0]
     assert hdb.save_criterion(crit["id"], posting_id, {**crit, "definition": "Shows up ready."}, "Hari") == []
-    # switching AI on carries the AI statement into the new copy
-    assert hdb.set_ai(posting_id, True, "Operator")
+    # switching AI off takes the AI statement out of the new copy, and it can't be switched back on
+    assert hdb.set_ai(posting_id, False, "Operator") and not hdb.set_ai(posting_id, True, "Operator")
     assert hdb.close_posting(posting_id, "Operator") and not hdb.close_posting(posting_id, "Operator")
     copies = hdb.snapshots(posting_id)
     assert [(c["reason"], c["ai_statement"]) for c in copies] == [
-        ("published", 0), ("changed", 0), ("changed", 0), ("changed", 0), ("changed", 1), ("closed", 1)]
+        ("published", 1), ("changed", 1), ("changed", 1), ("changed", 1), ("changed", 0), ("closed", 0)]
     assert hdb.get_snapshot(copies[0]["id"])["body"] == first      # earlier copies never change
     assert "Free meal on shift." in hdb.get_snapshot(copies[1]["id"])["body"]
     assert "$18.00 to $19.50 an hour" in hdb.get_snapshot(copies[1]["id"])["body"]
-    assert hdb.AI_STATEMENT in hdb.get_snapshot(copies[4]["id"])["body"]
+    assert hdb.AI_STATEMENT in hdb.get_snapshot(copies[3]["id"])["body"]
+    assert hdb.AI_STATEMENT not in hdb.get_snapshot(copies[4]["id"])["body"]
     posting = hdb.get_posting(posting_id)
     assert posting["status"] == "closed" and posting["closed_at"] and posting["closed_by"] == "Operator"
     # a draft keeps no copies: nothing was shown to anyone
@@ -416,17 +431,27 @@ def test_step_one_caps_and_cleans_every_field(world):
     assert row["heard_from"] == "" and row["referrer"] == ""         # a referrer only with "a friend"
 
 
-def test_the_same_person_applying_again_within_thirty_days_is_not_kept_twice(world, monkeypatch):
+def test_the_same_details_again_within_thirty_days_are_kept_and_flagged_for_a_leader(world, monkeypatch):
     clock(monkeypatch, "2026-11-01 09:00")
     posting_id, other = live(), live(title="Kitchen team")
-    applied(posting_id, phone="519-555-0142")
-    assert hdb.apply(posting_id, person(email="JORDAN1@example.com"))["status"] == "duplicate"
-    assert hdb.apply(posting_id, person(2, phone="+1 (519) 555 0142"))["status"] == "duplicate"
-    assert len(table("hr_applications")) == 1
-    assert hdb.apply(other, person())["status"] == "created"          # another posting is fine
-    assert hdb.apply(posting_id, person(3))["status"] == "created"    # so is another person
+    first = applied(posting_id, phone="519-555-0142")
+    # never refused and never told apart: a different answer here would tell a stranger who has applied
+    by_email = hdb.apply(posting_id, person(email="JORDAN1@example.com"))
+    by_phone = hdb.apply(posting_id, person(2, phone="+1 (519) 555 0142"))
+    assert by_email["status"] == by_phone["status"] == "created" and by_email["token"] != by_phone["token"]
+    elsewhere = hdb.apply(other, person())                            # another posting
+    someone_else = hdb.apply(posting_id, person(3))                   # another person
     clock(monkeypatch, "2026-12-02 09:01")                            # thirty-one days on
-    assert hdb.apply(posting_id, person())["status"] == "created"
+    much_later = hdb.apply(posting_id, person())
+    flags = {r["id"]: r["duplicate_of"] for r in table("hr_applications")}
+    assert flags == {first: None, by_email["id"]: first, by_phone["id"]: first, elsewhere["id"]: None,
+                     someone_else["id"]: None, much_later["id"]: None}
+    assert [e["detail"] for e in table("hr_events") if e["kind"] == "applied"] == [
+        "", "possible duplicate", "possible duplicate", "", "", ""]
+    # each side of the pair points at the others, by id only
+    assert hdb.candidate(first)["same_contact"] == [by_email["id"], by_phone["id"]]
+    assert hdb.candidate(by_phone["id"])["same_contact"] == [first, by_email["id"]]
+    assert hdb.candidate(someone_else["id"])["same_contact"] == []
 
 
 def test_nobody_can_apply_to_a_posting_that_is_not_open(world):
@@ -442,16 +467,18 @@ def test_ai_disclosed_is_recorded_only_when_the_applicant_was_shown_the_statemen
     ai_in_use(monkeypatch)
     posting_id = live()
     without = hdb.apply(posting_id, person(1), ai_shown=True)["id"]   # the posting has no AI
-    hdb.set_ai(posting_id, True, "Operator")
-    stale_form = hdb.apply(posting_id, person(2), ai_shown=False)["id"]   # form opened before the switch
-    shown = hdb.apply(posting_id, person(3), ai_shown=True)["id"]
+    assert not hdb.set_ai(posting_id, True, "Operator")               # and can't start once it is live
+    still_without = hdb.apply(posting_id, person(2), ai_shown=True)["id"]
+    with_ai = live_with_ai(monkeypatch, title="Kitchen team")
+    stale_form = hdb.apply(with_ai, person(3), ai_shown=False)["id"]  # a form that did not show the statement
+    shown = hdb.apply(with_ai, person(4), ai_shown=True)["id"]
     people_db.set_setting("ai_hiring", "0", "Operator")              # the Operator turns AI off again
-    switched_off = hdb.apply(posting_id, person(4), ai_shown=True)["id"]
+    switched_off = hdb.apply(with_ai, person(5), ai_shown=True)["id"]
     people_db.set_setting("ai_hiring", "1", "Operator")
     monkeypatch.delenv("OPENAI_API_KEY")                              # or the server loses its key
-    no_key = hdb.apply(posting_id, person(5), ai_shown=True)["id"]
+    no_key = hdb.apply(with_ai, person(6), ai_shown=True)["id"]
     flags = {r["id"]: r["ai_disclosed"] for r in table("hr_applications")}
-    assert flags == {without: 0, stale_form: 0, shown: 1, switched_off: 0, no_key: 0}
+    assert flags == {without: 0, still_without: 0, stale_form: 0, shown: 1, switched_off: 0, no_key: 0}
 
 
 # --- the private link -------------------------------------------------------------
@@ -1040,8 +1067,10 @@ def test_an_applicants_details_can_be_corrected_when_they_ask(world, monkeypatch
     last = table("hr_events")[-1]
     assert (last["kind"], last["by"], last["detail"]) == ("corrected", "Hari", "name or contact details")
     # the duplicate check follows the corrected details, and nothing else about the application changed
-    assert hdb.apply(posting_id, person(2, email="", phone="(519) 555-0199"))["status"] == "duplicate"
-    assert hdb.apply(posting_id, person(1))["status"] == "created"
+    same_phone = hdb.apply(posting_id, person(2, email="", phone="(519) 555-0199"))
+    assert same_phone["status"] == "created" and hdb.candidate(same_phone["id"])["duplicate_of"] == app_id
+    old_email = hdb.apply(posting_id, person(1))
+    assert old_email["status"] == "created" and hdb.candidate(old_email["id"])["duplicate_of"] is None
     row = table("hr_applications")[0]
     assert (row["work_entitled"], row["adult"], row["stage"], row["heard_from"]) == ("yes", "yes", "new", "school")
     assert hdb.correct_details(999, fixed, "Hari") == ["That application isn't there any more."]

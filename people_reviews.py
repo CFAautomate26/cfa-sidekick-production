@@ -113,6 +113,13 @@ def _today() -> str:
     return shift_db.now_local().date().isoformat()
 
 
+def _concerns() -> list[dict]:
+    """Acknowledged reviews, in any cycle, whose leader's comments may
+    raise harassment, safety or how they were treated, until the Operator
+    marks them followed up. A closed cycle never hides one."""
+    return [r for r in rdb.commented_reviews() if people_ai.concern_terms(r["ack_comment"])]
+
+
 # ---------------------------------------------------------------------------
 # Home
 # ---------------------------------------------------------------------------
@@ -128,8 +135,7 @@ def home():
         return render_template(
             "people/reviews/home.html", today=today, cycles=rdb.cycles(),
             held=[r for r in open_reviews if r["status"] == "on_hold"],
-            concerns=[r for r in open_reviews if r["status"] == "acknowledged"
-                      and people_ai.concern_terms(r["ack_comment"])],
+            concerns=_concerns(),
             to_write=[r for r in open_reviews if r["reviewer_leader_id"] is None
                       and r["status"] in ("draft", "final")],
             past_due=sum(1 for r in open_reviews if r["editable"] and r["due_date"] < today),
@@ -630,6 +636,19 @@ def reopen(review_id: int):
     return _back(review_id)
 
 
+def concern_followed(review_id: int):
+    found = rdb.get_review(review_id)
+    if not found:
+        return people.deny()
+    if request.form.get("confirm") != "1":
+        flash("Tick the box to say it was followed up outside this tool.")
+    elif rdb.mark_concern_followed(review_id, people.actor()):
+        flash("Recorded as followed up. Nothing about what was found is kept here.")
+    else:
+        flash("That was already recorded, or there is nothing to follow up on this review.")
+    return _back(review_id, "leader-comments")
+
+
 def share(review_id: int):
     found, _ = _review_to_write(review_id)
     if not found:
@@ -1106,6 +1125,16 @@ def nav_counts(kind, leader_id, name) -> dict:
     return rdb.nav_counts(kind, leader_id, name)
 
 
+def extra_counts(kind, leader_id, name) -> dict:
+    """More for the Operator's badge and People home page: concerns (a
+    leader's comments on a review, in any cycle, that may need follow-up
+    and have not been marked as followed up)."""
+    if kind != "operator":
+        return {}
+    people_db.ensure()
+    return {"concerns": len(_concerns())}
+
+
 def own_count(kind, leader_id, name) -> int:
     """How many of their own reviews this leader can open at all (people.py
     keeps the "My review" link while there is one). Never the Operator."""
@@ -1145,6 +1174,8 @@ def register(bp) -> None:
         ("/reviews/review/<int:review_id>/release", "reviews_release", operator(release), post),
         ("/reviews/review/<int:review_id>/reopen", "reviews_reopen", operator(reopen), post),
         ("/reviews/review/<int:review_id>/share", "reviews_share", share, post),
+        ("/reviews/review/<int:review_id>/concern-followed", "reviews_concern_followed",
+         operator(concern_followed), post),
         ("/reviews/review/<int:review_id>/print", "reviews_print", review_print, get),
         ("/reviews/calibration/<int:cycle_id>", "reviews_calibration", operator(calibration), get),
         ("/reviews/calibration/<int:cycle_id>/change", "reviews_calibration_change",

@@ -76,6 +76,15 @@
     {% if concern %}
     <p class="callout warm" role="status">{{ icon('alert') }}<span><strong>{{ concern }}.</strong> Read them, and talk with the leader. If they raise harassment, safety or how they were treated, it goes into the store's complaint process, not this review. If they are about you or another senior leader, or the leader is under 18, stop and call a lawyer first: the store's escalation matrix says so.</span></p>
     {{ escalation('review') }}
+      {% if review.concern_followed_at %}
+    <p class="rv-quiet">Recorded as followed up outside this tool by {{ stamp(review.concern_followed_by, review.concern_followed_at) }}.</p>
+      {% else %}
+    <form method="post" action="{{ url_for('people.reviews_concern_followed', review_id=review.id) }}" class="no-print">
+      <label class="checkline"><input type="checkbox" name="confirm" value="1" required><span>Followed up outside this tool.</span></label>
+      <p class="fine-line">This stays on your reviews page and your People badge until you tick it, even after the cycle is closed. Only the tick and the date are kept, never what you found.</p>
+      <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Record the follow-up</button></div>
+    </form>
+      {% endif %}
     {% endif %}
     {% if review.ack_comment %}<p class="rv-said">{{ review.ack_comment }}</p>{% else %}<p class="rv-quiet">No comments were added.</p>{% endif %}
   </div>

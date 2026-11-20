@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS hr_snapshots (
 -- blanks all of it; the row and its events stay. token_hash is a keyed
 -- hash of the applicant's private link, never the link itself.
 -- keep_months is the number of months the applicant was told it is kept.
+-- duplicate_of is the id of an earlier application to the same posting
+-- that gave the same email or phone number (a flag for a leader, no more).
 CREATE TABLE IF NOT EXISTS hr_applications (
   id INTEGER PRIMARY KEY, posting_id INTEGER NOT NULL REFERENCES hr_postings(id) ON DELETE CASCADE,
   first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '',
@@ -83,7 +85,7 @@ CREATE TABLE IF NOT EXISTS hr_applications (
   token_hash TEXT NOT NULL, answers_until TEXT NOT NULL, answered_at TEXT,
   stage TEXT NOT NULL DEFAULT 'new', stage_at TEXT NOT NULL, hold INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL, purged_at TEXT, purged_by TEXT,
-  keep_months INTEGER NOT NULL DEFAULT 24);
+  keep_months INTEGER NOT NULL DEFAULT 24, duplicate_of INTEGER);
 
 -- An applicant's written answers to the quick questions. Personal content:
 -- whatever they wrote. Deleted by the purge.
@@ -141,8 +143,15 @@ CREATE INDEX IF NOT EXISTS idx_hr_notes_application ON hr_notes (application_id,
 """
 
 
+# Columns added after a store may already have been created.
+_ADDED_COLUMNS = (("hr_applications", "duplicate_of", "INTEGER"),)
+
+
 def init_schema(conn) -> None:
     conn.executescript(SCHEMA)
+    for table, column, declared in _ADDED_COLUMNS:               # our own names, never input
+        if column not in {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declared}")
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +212,8 @@ CONTACT_METHODS = ("phone", "email", "text", "in person")
 OFFER_REPLIES = ("accepted", "declined")
 EVENT_KINDS = ("applied", "answered", "stage", "contacted", "interview", "outcome", "notice",
                "offer", "offer_reply", "purged", "note", "score", "scorecard", "hold", "roster", "ai",
-               "corrected")
+               "corrected", "more_time")
+ENTERED_FOR_APPLICANT = "entered for the applicant"
 
 NOTICE_DAYS = 45                 # days after the last interview to tell the applicant
 NOTICE_SOON_DAYS = 7
@@ -437,8 +447,30 @@ def says_ai(posting: dict, conf: dict) -> bool:
     is true: AI assist is on for the posting, the Operator's switch in
     Settings is on, and the server has a key for the AI service. Take any
     of the three away and the posting stops saying it, and nothing is
-    sent."""
-    return bool(posting.get("ai_assist")) and conf.get("ai_hiring") == "1" and people_ai.available()
+    sent. And never again once the posting has been public without the
+    statement ("ai_locked", see _went_out_without_ai): AI may be used for
+    a position only if its posting said so from the day it went live."""
+    return (bool(posting.get("ai_assist")) and not posting.get("ai_locked")
+            and conf.get("ai_hiring") == "1" and people_ai.available())
+
+
+AI_LOCKED = ("This posting has been live without the AI statement, so AI assist can't be used "
+             "for it. To use AI for this job, close this posting and copy it to a new draft.")
+AI_DRAFT_ONLY = ("AI assist can only be switched on while a posting is a draft, because the posting "
+                 "has to say AI is used from the day it goes live. To use AI for this job, close "
+                 "this posting and copy it to a new draft.")
+AI_NOT_READY = ("AI assist is switched on for this posting, but AI can't run yet (the switch in "
+                "People settings is off, or no AI key is set up on the server), so the posting "
+                "would go live without the AI statement. Finish setting AI up, or switch AI assist "
+                "off for this posting, then publish.")
+
+
+def _went_out_without_ai(conn, posting_id: int) -> bool:
+    """Has any copy of this posting been public without the AI statement?
+    The kept copies are the record of every version the public was shown;
+    the copy taken when a posting closes is of a page nobody can open."""
+    return conn.execute("SELECT 1 FROM hr_snapshots WHERE posting_id=? AND ai_statement=0 "
+                        "AND reason != 'closed' LIMIT 1", (posting_id,)).fetchone() is not None
 
 
 def public_view(posting: dict, conf: dict | None = None) -> dict:
@@ -563,11 +595,13 @@ def _posting(conn, posting_id: int) -> dict | None:
         return None
     posting = dict(row)
     posting["criteria"] = _criteria(conn, posting_id)
+    posting["ai_locked"] = _went_out_without_ai(conn, posting_id)
     return posting
 
 
 def get_posting(posting_id: int) -> dict | None:
-    """One posting with its active criteria (each with `anchors` as a list)."""
+    """One posting with its active criteria (each with `anchors` as a list)
+    and "ai_locked" (it has been public without the AI statement)."""
     with closing(people_db.connect()) as conn:
         return _posting(conn, posting_id)
 
@@ -639,6 +673,18 @@ def _problems(posting: dict, criteria: list[dict], conf: dict) -> list[str]:
     if len(questions) > MAX_QUESTIONS:
         problems.append(f"Applicants can be asked {MAX_QUESTIONS} questions at most. "
                         "Take a question off a criterion (it can stay as an interview criterion).")
+    for c in criteria:
+        if not c.get("active", 1):
+            continue
+        for which, text in (("question for applicants", c.get("question")),
+                            ("interview question", c.get("interview_question"))):
+            asked = never_asked(text)
+            if asked:
+                term, about = asked[0]
+                problems.append(
+                    f"The {which} under “{c.get('name') or 'a criterion'}” asks about {about} "
+                    f"(“{term}”). An application or an interview may not ask that. Ask about "
+                    "the work instead.")
     return problems
 
 
@@ -647,6 +693,70 @@ def compliance_problems(posting: dict) -> list[str]:
     stay live through a change, while this returns anything. `posting` is
     get_posting()'s shape (with its criteria)."""
     return _problems(posting, posting.get("criteria", []), settings())
+
+
+# What an application or an interview may not ask (the Human Rights Code
+# makes asking itself the breach). A question for applicants, or an
+# interview question, that uses one of these phrases fails the publish
+# check. Phrases on purpose, so a question about the work ("How would you
+# look after a family with young kids?") passes. A word list cannot read a
+# question for meaning: the Operator still reads every question before
+# publishing.
+NEVER_ASK = (
+    ("age", ("how old", "your age", "date of birth", "birth date", "birthdate", "birthday",
+             "year of birth", "when were you born", "what year did you graduate",
+             "when did you graduate", "year you graduated", "year did you finish")),
+    ("pregnancy or family", ("pregnant", "pregnancy", "marital", "married", "have children",
+                             "have kids", "have any children", "have any kids", "your children",
+                             "your kids", "your child", "childcare", "child care", "your husband",
+                             "your wife", "your spouse", "your boyfriend", "your girlfriend",
+                             "maiden name", "plan to have")),
+    ("religion", ("religion", "religious", "church", "mosque", "temple", "synagogue", "your faith",
+                  "what faith", "do you pray")),
+    ("citizenship or where someone is from", (
+        "citizen", "citizenship", "nationality", "born", "birthplace", "place of birth",
+        "country of origin", "where are you from", "where you are from", "ethnicity", "your race",
+        "mother tongue", "native language", "first language", "immigration status")),
+    ("health or disability", ("disability", "disabled", "medical", "medication", "diagnosis",
+                              "diagnosed", "illness", "health condition", "mental health", "wsib",
+                              "workers comp")),
+    ("a record of offences", ("criminal", "arrested", "convicted", "conviction", "charged with",
+                              "record of offences", "police record", "police check",
+                              "background check")),
+    ("gender or orientation", ("gender", "sexual orientation", "your sex")),
+    ("a SIN, a photo or a licence", ("social insurance", "sin number", "your sin", "photo",
+                                     "photograph", "driver's licence", "drivers licence",
+                                     "driver's license", "drivers license", "your height",
+                                     "your weight")),
+)
+NEVER_ASK_ADVICE = ("An application may not ask about this, and a posting may not screen on it. "
+                    "Take it out, or say what the work needs instead.")
+GROUND_ADVICE = ("This can point at a protected ground ({category}). A posting may not screen on "
+                 "it and an application may not ask about it. Keep the wording about the work.")
+# The word-list categories that are protected grounds (personality labels
+# and consequence words are about reviews, not postings).
+_GROUNDS = ("health", "family", "religion", "age", "origin", "gender", "leave")
+
+
+def _phrase(term: str):
+    return re.compile(r"(?<![\w])" + r"[\s-]+".join(
+        re.escape(part) for part in re.split(r"[\s-]+", term)) + r"(?![\w])", re.I)
+
+
+_NEVER_ASK_PATTERNS = [(about, [(term, _phrase(term)) for term in terms]) for about, terms in NEVER_ASK]
+
+
+def never_asked(text) -> list[tuple[str, str]]:
+    """[(the phrase found, what it asks about)] for anything in `text` an
+    application or an interview may not ask, in the order found."""
+    text = str(text or "").replace("’", "'")
+    found = []
+    for about, patterns in _NEVER_ASK_PATTERNS:
+        for term, pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                found.append((match.start(), -len(term), term, about))
+    return [(term, about) for _, _, term, about in sorted(found)]
 
 
 # Words that should make a leader stop and read the posting again. They
@@ -671,17 +781,16 @@ WORDING_RULES = (
     ("pay", ("tips", "tip", "bonus", "bonuses"),
      "Posted pay means wages. Tips and bonuses can't be used to state it."),
 )
-_WORDING_PATTERNS = [
-    (key, advice, [(term, re.compile(r"(?<![\w])" + r"[\s-]+".join(
-        re.escape(part) for part in re.split(r"[\s-]+", term)) + r"(?![\w])", re.I))
-        for term in terms])
-    for key, terms, advice in WORDING_RULES]
+_WORDING_PATTERNS = [(key, advice, [(term, _phrase(term)) for term in terms])
+                     for key, terms, advice in WORDING_RULES]
 
 
 def wording_flags(posting: dict) -> list[dict]:
     """[{"term", "key", "advice"}] for words in the posting's title,
     description and criteria that may point at a protected group, ask for
-    Canadian experience or pad the pay. Plain word lists, no AI."""
+    Canadian experience or pad the pay, or that touch on anything an
+    application may not ask about (the same word lists the review notes
+    are checked with, plus NEVER_ASK). Plain word lists, no AI."""
     parts = [posting.get("title") or "", posting.get("description") or ""]
     for c in posting.get("criteria", []):
         if c.get("active", 1):
@@ -701,6 +810,16 @@ def wording_flags(posting: dict) -> list[dict]:
             continue
         taken.append((start, start - neg_length))
         flags.append({"term": term, "key": key, "advice": advice})
+    seen = {flag["term"].casefold() for flag in flags}
+    for term, _ in never_asked(text):
+        if term.casefold() not in seen:
+            seen.add(term.casefold())
+            flags.append({"term": term, "key": "never-ask", "advice": NEVER_ASK_ADVICE})
+    for finding in people_ai.language_check(text):
+        if finding["key"] in _GROUNDS and finding["term"].casefold() not in seen:
+            seen.add(finding["term"].casefold())
+            flags.append({"term": finding["term"], "key": finding["key"],
+                          "advice": GROUND_ADVICE.format(category=finding["category"].lower())})
     return flags
 
 
@@ -906,6 +1025,8 @@ def publish(posting_id: int, by: str, reviewed: bool = False) -> list[str]:
         if wording_flags(posting) and not reviewed:
             raise _Refused(["Read the flagged words, then tick the box to say the wording is "
                             "about the job."])
+        if posting["ai_assist"] and not says_ai(posting, conf):
+            raise _Refused([AI_NOT_READY])
         now = _stamp()
         conn.execute(
             "UPDATE hr_postings SET status='open', published_at=?, published_by=?, wording_reviewed=? "
@@ -931,13 +1052,15 @@ def close_posting(posting_id: int, by: str) -> bool:
 
 
 def set_ai(posting_id: int, on: bool, by: str) -> bool:
-    """Switch AI assist on or off for one posting (never a closed one).
-    On a live posting the AI statement appears or disappears with it (see
-    says_ai), and a new exact copy is kept. True when something changed."""
+    """Switch AI assist on or off for one posting. On only while it is a
+    draft: a posting has to say AI is used from the day it goes live. Off
+    on a draft or a live posting; on a live one the AI statement comes off
+    with it, a new exact copy is kept, and AI assist then stays off for
+    that posting. True when something changed."""
     with closing(people_db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
-        cur = conn.execute("UPDATE hr_postings SET ai_assist=? WHERE id=? AND ai_assist=? "
-                           "AND status IN ('draft','open')",
+        cur = conn.execute("UPDATE hr_postings SET ai_assist=? WHERE id=? AND ai_assist=? AND "
+                           + ("status='draft'" if on else "status IN ('draft','open')"),
                            (1 if on else 0, posting_id, 0 if on else 1))
         if not cur.rowcount:
             return False
@@ -1097,10 +1220,11 @@ def clean_application(raw: dict) -> tuple[dict, list[str]]:
 def apply(posting_id: int, raw: dict, ai_shown: bool = False) -> dict:
     """Take step one of an application. Returns {"status": ...}:
     "invalid" (with "problems" and the tidied "fields"), "closed" (the
-    posting is no longer open), "duplicate" (same posting, same email or
-    phone, in the last 30 days: nothing new is kept) or "created" (with the
-    "token" for the applicant's private link, which is not stored, and
-    "id")."""
+    posting is no longer open) or "created" (with the "token" for the
+    applicant's private link, which is not stored, and "id"). An
+    application that gives the same email or phone as an earlier one to
+    this posting in the last 30 days is created like any other, with
+    duplicate_of set for a leader to look at."""
     fields, problems = clean_application(raw)
     if problems:
         return {"status": "invalid", "problems": problems, "fields": fields}
@@ -1111,33 +1235,35 @@ def apply(posting_id: int, raw: dict, ai_shown: bool = False) -> dict:
     stamp = now.strftime(_STAMP)
     with closing(people_db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
-        posting = conn.execute("SELECT id, ai_assist FROM hr_postings WHERE id=? AND status='open'",
-                               (posting_id,)).fetchone()
-        if not posting:
+        posting = _posting(conn, posting_id)
+        if not posting or posting["status"] != "open":
             return {"status": "closed"}
         conf = _settings(conn)
         # AI may only ever read an application whose applicant was shown the
         # AI statement, on a posting that was really saying it.
-        told_ai = bool(ai_shown) and says_ai(dict(posting), conf)
+        told_ai = bool(ai_shown) and says_ai(posting, conf)
+        # The same email or phone on this posting in the last 30 days is
+        # kept like any other application and flagged for a leader. The
+        # person sending the form is never told: a different answer would
+        # tell anyone who typed someone else's email whether they applied.
         since = (now - timedelta(days=DUPLICATE_DAYS)).strftime(_STAMP)
-        for key in keys:
-            if conn.execute(
-                    "SELECT 1 FROM hr_applications WHERE posting_id=? AND created_at>=? "
-                    "AND purged_at IS NULL AND instr(contact_key, ?) > 0",
-                    (posting_id, since, key)).fetchone():
-                return {"status": "duplicate"}
+        earlier = [row["id"] for key in keys for row in conn.execute(
+            "SELECT id FROM hr_applications WHERE posting_id=? AND created_at>=? "
+            "AND purged_at IS NULL AND instr(contact_key, ?) > 0", (posting_id, since, key))]
         until = (now + timedelta(days=int(conf["quick_link_days"]))).strftime(_STAMP)
         application_id = conn.execute(
             "INSERT INTO hr_applications (posting_id, first_name, last_name, email, phone, contact_key, "
             "work_entitled, adult, availability, heard_from, referrer, experience, ai_disclosed, "
-            "consent_at, token_hash, answers_until, stage, stage_at, created_at, keep_months) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?)",
+            "consent_at, token_hash, answers_until, stage, stage_at, created_at, keep_months, "
+            "duplicate_of) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?,?)",
             (posting_id, fields["first_name"], fields["last_name"], fields["email"], fields["phone"],
              " ".join(keys), fields["work_entitled"], fields["adult"],
              json.dumps(fields["availability"]), fields["heard_from"], fields["referrer"],
              fields["experience"], 1 if told_ai else 0, stamp, hashed,
-             until, stamp, stamp, int(conf["retention_months"]))).lastrowid
-        _event(conn, application_id, posting_id, "applicant", "applied", to_stage="new", at=stamp)
+             until, stamp, stamp, int(conf["retention_months"]),
+             min(earlier) if earlier else None)).lastrowid
+        _event(conn, application_id, posting_id, "applicant", "applied",
+               "possible duplicate" if earlier else "", to_stage="new", at=stamp)
     return {"status": "created", "token": token, "id": application_id}
 
 
@@ -1174,15 +1300,19 @@ def application_by_token(token: str) -> dict | None:
     return out
 
 
-def save_answers(application_id: int, answers: dict) -> str:
+def save_answers(application_id: int, answers: dict, entered_by: str | None = None) -> str:
     """Step two, once: "saved", "empty" (nothing was written), or "closed"
     (already answered, or the window has ended). answers: {criterion id:
-    text}; only this posting's own questions are kept."""
+    text}; only this posting's own questions are kept. `entered_by` is the
+    leader recording answers the applicant gave another way (by phone, on
+    paper, with someone's help): that works after the link has closed too,
+    and the history says who entered them, never why."""
     now = _stamp()
     with closing(people_db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT posting_id, stage FROM hr_applications WHERE id=? AND answered_at IS NULL "
-                           "AND purged_at IS NULL AND answers_until>=?", (application_id, now)).fetchone()
+                           "AND purged_at IS NULL AND (answers_until>=? OR ?)",
+                           (application_id, now, 1 if entered_by else 0)).fetchone()
         if not row or row["stage"] not in ACTIVE_STAGES:
             return "closed"
         asked = {c["id"] for c in _criteria(conn, row["posting_id"]) if c["question"]}
@@ -1198,8 +1328,29 @@ def save_answers(application_id: int, answers: dict) -> str:
                          "VALUES (?,?,?)", (application_id, criterion_id, text))
         conn.execute("UPDATE hr_applications SET answered_at=? WHERE id=? AND answered_at IS NULL",
                      (now, application_id))
-        _event(conn, application_id, row["posting_id"], "applicant", "answered", at=now)
+        _event(conn, application_id, row["posting_id"], entered_by or "applicant", "answered",
+               ENTERED_FOR_APPLICANT if entered_by else "", at=now)
     return "saved"
+
+
+def give_more_time(application_id: int, by: str) -> str | None:
+    """Open the applicant's own link for the quick questions again, for
+    the usual number of days from now. For someone who needs more time
+    (accommodation is offered at every stage, and nobody has to say why:
+    no reason is asked for or kept). Returns the new closing time, or None
+    when there is nothing to reopen (already answered, decided or removed)."""
+    now = shift_db.now_local()
+    with closing(people_db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _open_application(conn, application_id)
+        if not row or row["answered_at"] or row["stage"] not in ACTIVE_STAGES \
+                or not any(c["question"] for c in _criteria(conn, row["posting_id"])):
+            return None
+        until = (now + timedelta(days=int(_settings(conn)["quick_link_days"]))).strftime(_STAMP)
+        conn.execute("UPDATE hr_applications SET answers_until=? WHERE id=? AND answered_at IS NULL",
+                     (until, application_id))
+        _event(conn, application_id, row["posting_id"], by, "more_time")
+    return until
 
 
 # ---------------------------------------------------------------------------
@@ -1226,7 +1377,7 @@ def pipeline() -> list[dict]:
                               "WHERE status != 'draft' ORDER BY status='closed', id DESC").fetchall():
             rows = conn.execute(
                 "SELECT id, first_name, last_name, stage, stage_at, answered_at, answers_until, "
-                "work_entitled, hold, purged_at FROM hr_applications WHERE posting_id=? "
+                "work_entitled, hold, purged_at, duplicate_of FROM hr_applications WHERE posting_id=? "
                 "ORDER BY stage_at, id", (p["id"],)).fetchall()
             counts = {stage: 0 for stage in STAGES}
             stages = {stage: [] for stage in ACTIVE_STAGES}
@@ -1237,7 +1388,8 @@ def pipeline() -> list[dict]:
                         "id": r["id"], "name": _name(r), "days": _days_since(r["stage_at"], today),
                         "unanswered": not r["answered_at"],
                         "link_expired": not r["answered_at"] and r["answers_until"] < now,
-                        "check_work": r["work_entitled"] == "no", "hold": bool(r["hold"])})
+                        "check_work": r["work_entitled"] == "no", "hold": bool(r["hold"]),
+                        "duplicate": bool(r["duplicate_of"])})
             active = sum(len(v) for v in stages.values())
             if p["status"] == "open" or active:
                 out.append({**dict(p), "counts": counts, "stages": stages, "total": len(rows),
@@ -1247,7 +1399,7 @@ def pipeline() -> list[dict]:
 
 _SCORING_COLUMNS = ("id", "posting_id", "first_name", "last_name", "availability", "experience",
                     "ai_disclosed", "answers_until", "answered_at", "stage", "stage_at", "hold",
-                    "created_at", "purged_at", "purged_by", "keep_months")
+                    "created_at", "purged_at", "purged_by", "keep_months", "duplicate_of")
 
 
 def candidate(application_id: int) -> dict | None:
@@ -1264,6 +1416,13 @@ def candidate(application_id: int) -> dict | None:
         if not row:
             return None
         out = dict(row)
+        out["posting_ai_locked"] = _went_out_without_ai(conn, row["posting_id"])
+        # Other applications to this posting that gave the same email or
+        # phone, either way round (ids only: a scoring screen shows no contact).
+        out["same_contact"] = [] if row["purged_at"] else [r["id"] for r in conn.execute(
+            "SELECT id FROM hr_applications WHERE purged_at IS NULL AND id != ? AND "
+            "(id = ? OR duplicate_of = ? OR (duplicate_of IS NOT NULL AND duplicate_of = ?)) ORDER BY id",
+            (application_id, row["duplicate_of"] or 0, application_id, row["duplicate_of"] or 0))]
         out["criteria"] = _criteria(conn, row["posting_id"])
         answers = {r["criterion_id"]: r["body"] for r in conn.execute(
             "SELECT criterion_id, body FROM hr_answers WHERE application_id=?", (application_id,))}
@@ -2019,7 +2178,7 @@ def purge(by: str) -> int:
             cur = conn.execute(
                 "UPDATE hr_applications SET first_name='Removed', last_name='', email='', phone='', "
                 "contact_key='', work_entitled='', adult='', availability='{}', referrer='', "
-                "experience='', token_hash='', purged_at=?, purged_by=? "
+                "experience='', token_hash='', duplicate_of=NULL, purged_at=?, purged_by=? "
                 "WHERE id=? AND purged_at IS NULL AND hold=0 AND stage IN ('not-selected','withdrawn')",
                 (now, _line(by, 80), application_id))
             if not cur.rowcount:

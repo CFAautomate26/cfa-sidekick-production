@@ -14,7 +14,8 @@ import careers
 import people_db
 import people_hiring_db as hdb
 from tests import people_testkit as kit
-from tests.test_people_hiring_db import DESCRIPTION, ai_in_use, clock, draft, live, person, table
+from tests.test_people_hiring_db import (DESCRIPTION, ai_in_use, clock, draft, live, live_with_ai,
+                                         person, table)
 
 
 @pytest.fixture()
@@ -91,27 +92,31 @@ def test_a_posting_shows_every_required_statement_and_the_apply_button(world, pu
 def test_the_ai_statement_appears_only_when_ai_assist_is_on_for_the_posting(world, public, monkeypatch):
     posting_id = live()
     assert "artificial intelligence" not in text(public.get("/careers/team-member/apply"))
-    hdb.set_ai(posting_id, True, "Operator")
-    assert "artificial intelligence" not in text(public.get("/careers/team-member"))   # AI can't run yet
     ai_in_use(monkeypatch)
+    assert not hdb.set_ai(posting_id, True, "Operator")           # never on a posting that is already live
+    assert "artificial intelligence" not in text(public.get("/careers/team-member"))
+    posting_id = live_with_ai(monkeypatch, title="Kitchen team")  # switched on while it was a draft
     statement = ("We use artificial intelligence (AI) to help assess applications for this position. "
                  "The AI tool compares your written answers with the job-related criteria in this posting "
                  "and suggests a score. A member of our leadership team reads every application and makes "
                  "every decision.")
-    posting = text(public.get("/careers/team-member"))
+    posting = text(public.get("/careers/kitchen-team"))
     assert statement in posting
     assert posting.index("This posting is for an existing vacancy.") < posting.index(statement) \
         < posting.index("welcomes applications from people with disabilities")
-    form = text(public.get("/careers/team-member/apply"))
+    form = text(public.get("/careers/kitchen-team/apply"))
     assert statement in form and 'name="ai" value="1"' in form
     assert "may be sent to an AI service run by an outside company" in form
     assert "Your name and contact details are not sent with them." in form
     # the Operator switches AI off: the posting stops saying it, and that version is kept too
     copies = len(hdb.snapshots(posting_id))
     people_db.set_setting("ai_hiring", "0", "Operator")
-    quiet = text(public.get("/careers/team-member/apply"))
+    quiet = text(public.get("/careers/kitchen-team/apply"))
     assert "artificial intelligence" not in quiet and 'name="ai"' not in quiet and "AI service" not in quiet
     assert len(hdb.snapshots(posting_id)) == copies + 1 and hdb.snapshots(posting_id)[-1]["ai_statement"] == 0
+    # it has now been public without the statement, so it never says it again
+    people_db.set_setting("ai_hiring", "1", "Operator")
+    assert "artificial intelligence" not in text(public.get("/careers/kitchen-team"))
 
 
 def test_the_student_rate_is_explained_and_never_says_students_only(world, public):
@@ -228,29 +233,32 @@ def test_the_hidden_box_catches_robots_and_keeps_nothing(world, public):
     assert "/careers/a/" not in page and table("hr_applications") == [] and table("hr_events") == []
 
 
-def test_the_same_person_twice_gets_thanks_and_no_second_application(world, public):
+def test_the_same_details_twice_get_the_same_answer_as_anyone_else(world, public):
     live()
-    token_of(send(public))
-    resp = send(public, email="JORDAN1@EXAMPLE.COM")
-    page = text(resp)
-    assert resp.status_code == 200 and "/careers/a/" not in page
-    assert "We already have your application for this role. To change it, contact Morgan Example" in page
-    assert len(table("hr_applications")) == 1
+    first = token_of(send(public))
+    # a private link of its own, exactly as for a new applicant: nothing says "we already have you"
+    second = token_of(send(public, email="JORDAN1@EXAMPLE.COM"))
+    assert first != second
+    page = shown(text(public.get(f"/careers/a/{second}")))
+    assert "already" not in page.lower() and "We have your application for" in page
+    rows = table("hr_applications")
+    assert len(rows) == 2 and rows[1]["duplicate_of"] == rows[0]["id"]      # flagged for a leader instead
 
 
 def test_five_applications_an_hour_from_one_address(world, public, monkeypatch):
     clock(monkeypatch, "2026-11-20 10:00")
     live()
-    there = {"X-Forwarded-For": "203.0.113.9, 10.0.0.1"}
+    there = {"X-Forwarded-For": "203.0.113.9"}                # what the platform's proxy adds
     for n in range(1, 6):
         token_of(send(public, n=n, headers=there))
     resp = send(public, n=6, headers=there)
     assert resp.status_code == 429 and "Please try again later" in text(resp)
     assert "contact Morgan Example at hiring@example.com" in text(resp)
     assert len(table("hr_applications")) == 5
-    # the first hop is what counts: another address is not held back by this one
-    token_of(send(public, n=7, headers={"X-Forwarded-For": "203.0.113.10, 10.0.0.1"}))
-    assert send(public, n=8, headers={"X-Forwarded-For": "203.0.113.9, 10.9.9.9"}).status_code == 429
+    # the hop the platform added is what counts: another address is not held back by this one,
+    # and whatever the sender typed in front of it changes nothing
+    token_of(send(public, n=7, headers={"X-Forwarded-For": "203.0.113.10"}))
+    assert send(public, n=8, headers={"X-Forwarded-For": "10.9.9.9, 203.0.113.9"}).status_code == 429
     # a form that fails its checks does not use up a turn, and an hour later the address is free
     clock(monkeypatch, "2026-11-20 11:01")
     for _ in range(8):
@@ -421,9 +429,7 @@ def test_wrong_links_get_the_ordinary_missing_page_and_are_limited(world, public
 def test_public_pages_set_no_cookie_and_carry_the_strict_headers(world, public, monkeypatch):
     clock(monkeypatch, "2026-11-01 09:00")
     hub_csp = cfa_app.app.test_client().get("/hub/login").headers["Content-Security-Policy"]
-    ai_in_use(monkeypatch)
-    posting_id = live()
-    hdb.set_ai(posting_id, True, "Operator")
+    live_with_ai(monkeypatch)
     assert "artificial intelligence" in text(public.get("/careers/team-member"))
     seen = [("list", public.get("/careers/")), ("posting", public.get("/careers/team-member")),
             ("form", public.get("/careers/team-member/apply")),

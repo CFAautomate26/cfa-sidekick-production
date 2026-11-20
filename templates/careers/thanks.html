@@ -5,15 +5,11 @@
 <section class="hero compact">
   <p class="eyebrow">{{ employer }}</p>
   <h1 class="headline">Thank you</h1>
-  <p class="triage">{% if duplicate %}We already have your application for this role.{% else %}We have your application for {{ title }}.{% endif %}</p>
+  <p class="triage">We have your application for {{ title }}.</p>
 </section>
 <div class="card" style="margin-top:22px;">
-  {% if duplicate %}
-  <p class="cr-status">We already have your application for this role. To change it, contact {{ contact }}.</p>
-  {% else %}
   <p class="cr-status">We have your application for {{ title }}.</p>
   <p class="cr-statement">Questions? Contact {{ contact }}.</p>
-  {% endif %}
 </div>
 <div class="btnrow"><a class="btn btn-secondary block" href="{{ url_for('careers.index') }}">See all open positions</a></div>
 {% endblock %}

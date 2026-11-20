@@ -33,7 +33,8 @@
   <div class="card list">
     {% for a in p.stages[stage] %}
     <a class="row" id="a{{ a.id }}" href="{{ url_for('people.hiring_candidate', application_id=a.id) }}"><span class="row-main"><span class="row-title">{{ a.name }}</span><span class="row-meta">{{ a.days }} day{{ '' if a.days == 1 else 's' }} in this stage</span>
-      {%- if a.check_work or a.link_expired or a.hold or (a.unanswered and not a.link_expired) %}<span class="row-meta tags">
+      {%- if a.check_work or a.link_expired or a.hold or a.duplicate or (a.unanswered and not a.link_expired) %}<span class="row-meta tags">
+        {%- if a.duplicate %}<span class="badge b-tan">Possible duplicate</span>{% endif %}
         {%- if a.check_work %}<span class="badge b-red">Check before any offer</span>{% endif %}
         {%- if a.link_expired %}<span class="badge b-tan">Questions not answered</span>{% elif a.unanswered %}<span class="badge">Questions still open</span>{% endif %}
         {%- if a.hold %}<span class="badge b-navy">On hold</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>

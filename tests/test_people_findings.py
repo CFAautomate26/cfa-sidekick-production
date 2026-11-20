@@ -12,6 +12,7 @@ import pytest
 
 import app as cfa_app
 import careers
+import people
 import people_ai
 import people_db
 import people_hiring
@@ -21,7 +22,8 @@ import people_reviews_db as rdb
 import shift_db
 from tests import people_testkit as kit
 from tests import test_people_reviews_kit as rk
-from tests.test_people_hiring_db import ai_in_use, clock, criterion, draft, person, table
+from tests.test_people_hiring_db import (ai_in_use, applied, clock, criterion, draft, live, live_with_ai,
+                                         person, table)
 
 page, post = rk.page, rk.post
 LABEL, draft_reply = rk.AI_LABEL, rk.draft_reply
@@ -61,17 +63,6 @@ def ai_jobs() -> list[dict]:
 
 def reviews_ai_on() -> None:
     assert people_db.set_setting("ai_reviews", "1", "Operator")
-
-
-def live_with_ai(monkeypatch) -> int:
-    """A posting that has said "AI is used" since the day it went live."""
-    ai_in_use(monkeypatch)
-    posting_id = draft()
-    criterion(posting_id, "Reliable")
-    criterion(posting_id, "Guest care")
-    assert hdb.set_ai(posting_id, True, "Operator")
-    assert hdb.publish(posting_id, "Operator") == []
-    return posting_id
 
 
 def told_applicant(posting_id: int, n: int = 1, answers=None) -> tuple[int, int, int]:
@@ -360,3 +351,388 @@ def test_f8_what_is_sent_about_a_leader_called_jo_does_not_name_them(world, monk
     post(kit.open_as(world, "rae"), review_url(made, "/ai"))
     assert not re.search(r"\bJo\b", calls[0][1])
     assert "The leader opened on time. The leader's station was set." in calls[0][1]
+
+
+# --- F4: the limits count the address the platform reports, not one the sender typed -----------
+
+def send(client, slug="team-member", n=1, headers=None, **changes):
+    return client.post(f"/careers/{slug}/apply", data=person(n, **changes), headers=headers or {})
+
+
+def test_f4_a_typed_address_in_front_does_not_get_round_the_limits(world, public, monkeypatch):
+    clock(monkeypatch, "2026-11-20 10:00")
+    live()
+    accepted = [send(public, n=n, headers={"X-Forwarded-For": f"10.9.0.{n}, 203.0.113.7"}).status_code
+                for n in range(1, 13)]
+    assert accepted == [302] * careers.PER_ADDRESS_AN_HOUR + [429] * 7
+    assert len(table("hr_applications")) == careers.PER_ADDRESS_AN_HOUR
+    # the caps for everyone are not used up by it, so someone else still gets in
+    assert send(public, n=20, headers={"X-Forwarded-For": "198.51.100.4"}).status_code == 302
+    # the same for guesses at private links
+    for n in range(careers.WRONG_LINKS_AN_HOUR):
+        assert public.get(f"/careers/a/{n:032x}",
+                          headers={"X-Forwarded-For": f"10.8.0.{n}, 203.0.113.8"}).status_code == 404
+    assert public.get("/careers/a/" + "f" * 32,
+                      headers={"X-Forwarded-For": "10.8.1.1, 203.0.113.8"}).status_code == 429
+
+
+def test_f4_which_address_counts(monkeypatch):
+    chain = "10.9.0.1, 198.51.100.4, 203.0.113.7"
+    assert careers.client_address(chain, "192.0.2.1", 1) == "203.0.113.7"
+    assert careers.client_address(chain, "192.0.2.1", 2) == "198.51.100.4"
+    assert careers.client_address(chain, "192.0.2.1", 0) == "192.0.2.1"        # no proxy: the connection
+    assert careers.client_address("203.0.113.7", "192.0.2.1", 2) == "192.0.2.1"   # shorter than expected
+    assert careers.client_address(None, "192.0.2.1", 1) == "192.0.2.1"
+    assert careers.client_address(" , ", None, 1) == ""
+    for raw, hops in (("", 1), ("2", 2), ("0", 0), ("9", 1), ("-1", 1), ("two", 1)):
+        monkeypatch.setenv(careers.PROXY_HOPS_ENV, raw)
+        assert careers.proxy_hops() == hops, raw
+
+
+def test_f4_the_operator_can_check_which_address_is_counted(world, monkeypatch):
+    operator = kit.open_as(world, "operator")
+    html = operator.get("/shift/people/settings", headers={"X-Forwarded-For": "10.9.0.1, 203.0.113.7"}).data.decode()
+    block = html[html.index('id="addresses"'):]
+    assert "<li>10.9.0.1</li>" in block and "<li>203.0.113.7</li>" in block
+    assert "<strong>203.0.113.7</strong>" in block and "PEOPLE_PROXY_HOPS = 1" in block
+    monkeypatch.setenv("PEOPLE_PROXY_HOPS", "2")
+    html = operator.get("/shift/people/settings", headers={"X-Forwarded-For": "10.9.0.1, 203.0.113.7"}).data.decode()
+    assert "<strong>10.9.0.1</strong>" in html
+
+
+# --- F5: applying never tells a stranger whether someone else has applied ----------------------
+
+def test_f5_the_form_answers_the_same_whether_or_not_those_details_have_applied(world, public):
+    posting_id = live()
+    victim = send(public, n=1, first_name="Vic", last_name="Tim", email="victim@example.com", phone="519-555-0177")
+    assert victim.status_code == 302
+    other = {"X-Forwarded-For": "198.51.100.4"}                        # from somewhere else entirely
+    seen = {"used email": send(public, n=2, headers=other, first_name="X", last_name="Y", email="VICTIM@example.com"),
+            "used phone": send(public, n=3, headers=other, first_name="X", last_name="Y", email="",
+                               phone="(519) 555 0177"),
+            "never used": send(public, n=4, headers=other, first_name="X", last_name="Y", email="nobody@example.com")}
+    for what, resp in seen.items():
+        assert resp.status_code == 302 and re.fullmatch(r"/careers/a/[0-9a-f]{32}", resp.headers["Location"]), what
+        assert "already" not in re.sub(r"<style>.*?</style>", "", text(public.get(resp.headers["Location"])),
+                                       flags=re.S).lower(), what
+    assert "already" not in open("templates/careers/thanks.html", encoding="utf-8").read().lower()
+    # nobody can block someone by sending their details first, and two people who share a phone both get in
+    assert len(table("hr_applications")) == 4
+    shared = [send(public, n=n, headers={"X-Forwarded-For": "198.51.100.9"}, first_name=first, email="",
+                   phone="519-555-0123") for n, first in ((5, "Ana"), (6, "Ben"))]
+    assert [r.status_code for r in shared] == [302, 302] and len(table("hr_applications")) == 6
+    rows = table("hr_applications")
+    assert [r["duplicate_of"] for r in rows] == [None, rows[0]["id"], rows[0]["id"], None, None, rows[4]["id"]]
+    assert posting_id
+
+
+def test_f5_a_leader_sees_the_flag_and_which_application_it_matches(world, public):
+    posting_id = live()
+    send(public, n=1, phone="519-555-0177")
+    send(public, n=2, email="", phone="519 555 0177")
+    first, second = (r["id"] for r in table("hr_applications"))
+    hari = kit.open_as(world, "hari")
+    pipeline = page(hari, "/shift/hiring/")
+    row = pipeline[pipeline.index(f'id="a{second}"'):pipeline.index("</a>", pipeline.index(f'id="a{second}"'))]
+    assert "Possible duplicate" in row
+    assert "Possible duplicate" not in pipeline[pipeline.index(f'id="a{first}"'):pipeline.index(f'id="a{second}"')]
+    for app_id, other in ((first, second), (second, first)):
+        scoring = page(hari, f"/shift/hiring/candidates/{app_id}")
+        assert "This may be a second application from the same person." in scoring
+        assert "519" not in scoring and "example.com" not in scoring          # still no contact details here
+        contact = page(hari, f"/shift/hiring/candidates/{app_id}/contact")
+        assert f'href="/shift/hiring/candidates/{other}/contact">application {other}</a>' in contact
+    # one person: the spare one is withdrawn by a person, never by the tool
+    assert hdb.candidate(second)["stage"] == "new" and posting_id
+
+
+# --- C1: a posting cannot ask what an application may not ask ----------------------------------
+
+BAD_QUESTIONS = (
+    "How old are you, what year did you finish high school, and do you have children or plan to? Are you pregnant?",
+    "What church do you attend, where were you born, and do you have any disability, medical condition or "
+    "criminal record?")
+
+
+def test_c1_a_question_on_a_prohibited_ground_fails_the_publish_check(world):
+    posting_id = draft()
+    criterion(posting_id, "Reliable", question=BAD_QUESTIONS[0])
+    criterion(posting_id, "Guest care", question="Tell us about a time you helped a guest.",
+              interview_question=BAD_QUESTIONS[1])
+    problems = hdb.compliance_problems(hdb.get_posting(posting_id))
+    assert len(problems) == 2
+    assert "The question for applicants under “Reliable” asks about age (“how old”)." in problems[0]
+    assert "An application or an interview may not ask that." in problems[0]
+    assert "The interview question under “Guest care” asks about religion (“church”)." in problems[1]
+    # the tick is for words to read again: it never gets a prohibited question through
+    assert hdb.publish(posting_id, "Operator", reviewed=True) == problems
+    assert hdb.get_posting(posting_id)["status"] == "draft"
+    operator = kit.open_as(world, "operator")
+    html = page(operator, f"/shift/hiring/postings/{posting_id}")
+    assert "asks about age" in html and 'type="submit" disabled>Publish this posting</button>' in html
+    # every kind of thing an application may not ask is covered
+    for question, about in (("What is your date of birth?", "age"), ("Are you married?", "pregnancy or family"),
+                            ("What is your religion?", "religion"), ("Are you a Canadian citizen?", "citizenship"),
+                            ("Do you take any medication?", "health or disability"),
+                            ("Have you ever been arrested?", "a record of offences"),
+                            ("What is your gender?", "gender or orientation"),
+                            ("Attach a photo and your SIN number.", "a SIN, a photo or a licence")):
+        assert about in hdb.never_asked(question)[0][1], question
+    # questions about the work pass, even when they use everyday words from those lists
+    for fine in ("Tell us about a time you helped a family with young kids find a table.",
+                 "What would you do if a teammate called in sick on a busy Saturday?",
+                 "How would you help a guest who has trouble reading the menu?"):
+        assert hdb.never_asked(fine) == [], fine
+
+
+def test_c1_a_live_posting_cannot_gain_such_a_question_and_a_posting_cannot_screen_on_a_ground(world):
+    posting_id = live()
+    crit = hdb.get_posting(posting_id)["criteria"][0]
+    refused = hdb.save_criterion(crit["id"], posting_id, {**crit, "question": "Are you pregnant?"}, "Hari",
+                                 reviewed=True)
+    assert refused[0].startswith("This posting is live") and "may not ask that" in refused[1]
+    assert hdb.get_posting(posting_id)["criteria"][0]["question"] == crit["question"]
+    # a description that points at protected grounds is flagged, and needs the tick to go live
+    wordy = draft(title="Kitchen team", description=(
+        "We are a Christian family business looking for a single man under 25 with no disability, born in "
+        "Canada. " + "Serve guests at the counter and keep your station clean and stocked through the rush. " * 3))
+    criterion(wordy, "Reliable")
+    criterion(wordy, "Guest care")
+    flags = {f["term"]: f for f in hdb.wording_flags(hdb.get_posting(wordy))}
+    assert {"christian", "family", "man", "disability", "born"} <= set(flags)
+    assert "may not ask about this" in flags["born"]["advice"]
+    assert "protected ground (religion)" in flags["christian"]["advice"]
+    assert hdb.publish(wordy, "Operator") == [
+        "Read the flagged words, then tick the box to say the wording is about the job."]
+    operator = kit.open_as(world, "operator")
+    operator.post(f"/shift/hiring/postings/{wordy}/publish")
+    assert hdb.get_posting(wordy)["status"] == "draft"                 # no tick, no posting
+    html = page(operator, f"/shift/hiring/postings/{wordy}")
+    assert "<strong>“born”</strong>" in html and 'name="wording_reviewed"' in html
+
+
+# --- C2: every place a job is advertised carries the statements itself --------------------------
+
+def test_c2_no_page_or_guide_says_a_link_is_enough(world):
+    posting_id = live()
+    html = page(kit.open_as(world, "operator"), f"/shift/hiring/postings/{posting_id}")
+    assert "has to carry the same pay, vacancy and accommodation statements itself." in html
+    assert "that names no position can simply point here" in html
+    for path in ("templates/people/hiring/posting.html", "docs/people.md",
+                 "docs/legal-counsel/hiring-and-leader-reviews.md"):
+        words = " ".join(open(path, encoding="utf-8").read().split())
+        assert "or link straight" not in words, path
+    reference = " ".join(open("docs/legal-counsel/hiring-and-leader-reviews.md", encoding="utf-8").read().split())
+    assert "Whether a link alone" in reference
+
+
+# --- C6: a concern in a leader's comments stays in front of the Operator ------------------------
+
+CONCERN = "Rae has been harassing me about my schedule and I felt unsafe."
+
+
+def test_c6_a_concern_is_listed_until_the_operator_follows_it_up_even_after_the_cycle_closes(world):
+    made = rk.shared_review(world)
+    plain = rk.shared_review(world, "ada", None)
+    lena, operator = kit.open_as(world, "lena"), kit.open_as(world, "operator")
+    post(lena, f"/shift/reviews/mine/{made['review']}/acknowledge",
+         {"confirm": "1", "discussed_on": rk.day(0), "comment": CONCERN})
+    assert rdb.acknowledge(plain["review"], rk.day(0), "Thanks, this was fair.", "Ada") is None
+    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 1}
+    assert people_reviews.extra_counts("leader", world["ids"]["rae"], "Rae") == {}
+    for cycle in (made["cycle"], plain["cycle"]):
+        assert rdb.close_cycle(cycle, "Operator")
+    home = page(operator, "/shift/reviews")
+    listed = home[home.index('id="follow-up"'):home.index('id="cycles"')]
+    assert f'href="/shift/reviews/review/{made["review"]}#leader-comments"' in listed
+    assert f'/review/{plain["review"]}#' not in listed                  # ordinary comments are not flagged
+    assert "1 leader&#39;s comments may raise a concern" in page(operator, "/shift/people")
+    assert "1 to follow up" in page(operator, "/shift/more")            # the badge on the People menu row
+    # only the Operator records the follow-up, with a tick, and nothing about what was found is kept
+    rae = kit.open_as(world, "rae")
+    assert rk.NOT_YOURS in post(rae, f"/shift/reviews/review/{made['review']}/concern-followed", {"confirm": "1"})
+    assert "Tick the box" in post(operator, f"/shift/reviews/review/{made['review']}/concern-followed")
+    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 1}
+    html = post(operator, f"/shift/reviews/review/{made['review']}/concern-followed", {"confirm": "1"})
+    assert "Recorded as followed up outside this tool by" in html and CONCERN in html
+    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 0}
+    assert 'id="follow-up"' not in page(operator, "/shift/reviews")
+    assert "to follow up" not in page(operator, "/shift/more")
+    row = next(r for r in people_db.audit_feed() if r["action"] == "comments followed up outside this tool")
+    assert (row["who"], row["object_id"], row["detail"]) == ("Operator", made["review"], "")
+    # a store made before this column existed gains it at the next start
+    with people_db.connect() as conn:
+        conn.execute("ALTER TABLE rv_reviews DROP COLUMN concern_followed_at")
+        conn.commit()
+        rdb.init_schema(conn)
+        assert "concern_followed_at" in {r[1] for r in conn.execute("PRAGMA table_info(rv_reviews)")}
+
+
+# --- C7: a live posting that a settings change leaves failing is said out loud ----------------
+
+def test_c7_a_wage_change_that_breaks_a_live_posting_is_said_at_once(world):
+    posting_id = live(pay_min="16.90", student_rate="1")
+    fine = live(title="Kitchen team", pay_min="19.00", pay_max="21.00")
+    operator, hari = kit.open_as(world, "operator"), kit.open_as(world, "hari")
+    assert people_hiring.extra_counts("operator", None, "Operator") == {"attention": 0}
+    operator.post("/shift/people/settings", data={"min_wage_general": "18.40", "min_wage_student": "17.35"})
+    said = " ".join(flashed(operator))
+    assert "1 live posting no longer passes the publish check after this change: “Team member”." in said
+    assert "Kitchen team" not in said
+    assert people_hiring.extra_counts("leader", world["ids"]["hari"], "Hari") == {"attention": 1}
+    assert people_hiring.extra_counts("leader", world["ids"]["lena"], "Lena") == {}
+    for client in (operator, hari):
+        home = page(client, "/shift/people")
+        assert "1 live posting no longer passes the publish check." in home and "1 posting to fix" in home
+        assert "1 posting to fix" in page(client, "/shift/more")
+    assert "posting to fix" not in page(kit.open_as(world, "lena"), "/shift/more")
+    # saying it again on a later, unrelated save would be noise
+    operator.post("/shift/people/settings", data={"lock_minutes": "20"})
+    assert "no longer pass" not in " ".join(flashed(operator))
+    assert posting_id and fine
+
+
+def test_c7_the_hiring_contact_cannot_be_emptied_while_a_posting_is_live(world, public):
+    posting_id = live()
+    operator = kit.open_as(world, "operator")
+    for form in ({"hiring_contact_name": ""}, {"hiring_contact_email": ""},
+                 {"hiring_contact_name": "", "hiring_contact_email": "", "hiring_contact_phone": ""}):
+        operator.post("/shift/people/settings", data=form)
+        assert people.CONTACT_NEEDED in flashed(operator), form
+    assert people_db.get_setting("hiring_contact_name") == "Morgan Example"
+    assert "contact Morgan Example at hiring@example.com" in text(public.get("/careers/team-member"))
+    assert "contact the restaurant" not in text(public.get("/careers/team-member"))
+    # changing who it is, or swapping the email for a phone number, is fine
+    operator.post("/shift/people/settings", data={"hiring_contact_name": "Alex Sample", "hiring_contact_email": "",
+                                                   "hiring_contact_phone": "519-555-0100"})
+    assert "Settings saved." in flashed(operator)
+    assert "contact Alex Sample at 519-555-0100" in text(public.get("/careers/team-member"))
+    # with nothing live there is nothing to protect
+    hdb.close_posting(posting_id, "Operator")
+    operator.post("/shift/people/settings", data={"hiring_contact_name": ""})
+    assert people_db.get_setting("hiring_contact_name") == ""
+
+
+# --- C8: AI is used for a posting only if it said so from the day it went live ------------------
+
+def test_c8_ai_cannot_be_switched_on_for_a_posting_that_is_already_live(world, monkeypatch):
+    ai_in_use(monkeypatch)
+    posting_id = live()
+    before = hdb.apply(posting_id, person(1))["id"]
+    operator = kit.open_as(world, "operator")
+    operator.post(f"/shift/hiring/postings/{posting_id}/ai", data={"on": "1"})
+    assert hdb.AI_DRAFT_ONLY in flashed(operator)
+    posting = hdb.get_posting(posting_id)
+    assert posting["ai_assist"] == 0 and posting["ai_locked"] is True
+    assert [(c["reason"], c["ai_statement"]) for c in hdb.snapshots(posting_id)] == [("published", 0)]
+    html = page(operator, f"/shift/hiring/postings/{posting_id}")
+    assert "AI assist can't be switched on for a live posting." in html
+    assert "Switch AI assist on for this posting" not in html
+    after = hdb.apply(posting_id, person(2), ai_shown=True)["id"]
+    assert {r["id"]: r["ai_disclosed"] for r in table("hr_applications")} == {before: 0, after: 0}
+    # the way to use AI for the job: a new draft, switched on before it goes live
+    copy_id = hdb.copy_posting(posting_id, "Operator")
+    assert hdb.get_posting(copy_id)["ai_locked"] is False and hdb.set_ai(copy_id, True, "Operator")
+    assert hdb.publish(copy_id, "Operator") == []
+    assert [(c["reason"], c["ai_statement"]) for c in hdb.snapshots(copy_id)] == [("published", 1)]
+
+
+def test_c8_a_posting_shown_without_its_ai_statement_never_uses_ai_again(world, public, monkeypatch):
+    posting_id = live_with_ai(monkeypatch)
+    app_id, first, second = told_applicant(posting_id)
+    calls = kit.fake_ai(monkeypatch, lambda system, user: {"criteria": []})
+    hari = kit.open_as(world, "hari")
+    # AI switched off and on again with nobody looking: nothing went out without the statement
+    people_db.set_setting("ai_hiring", "0", "Operator")
+    people_db.set_setting("ai_hiring", "1", "Operator")
+    assert hdb.get_posting(posting_id)["ai_locked"] is False
+    hari.post(f"/shift/hiring/candidates/{app_id}/ai")
+    assert len(calls) == 1
+    # switched off while the posting is public and someone opens it: that copy is on record
+    people_db.set_setting("ai_hiring", "0", "Operator")
+    assert "artificial intelligence" not in text(public.get("/careers/team-member"))
+    people_db.set_setting("ai_hiring", "1", "Operator")
+    assert hdb.get_posting(posting_id)["ai_locked"] is True
+    assert "artificial intelligence" not in text(public.get("/careers/team-member"))
+    hari.post(f"/shift/hiring/candidates/{app_id}/ai")
+    assert hdb.AI_LOCKED in flashed(hari) and len(calls) == 1          # even for someone who was told
+    later = hdb.apply(posting_id, person(2), ai_shown=True)["id"]
+    assert hdb.candidate(later)["ai_disclosed"] == 0
+    assert "This posting has been live without the AI statement" in page(hari, f"/shift/hiring/candidates/{app_id}")
+    assert first and second
+
+
+def test_c8_a_draft_with_ai_ticked_cannot_go_live_while_ai_cannot_run(world, monkeypatch):
+    people_db.set_setting("ai_hiring", "1", "Operator")               # the switch, but no key on the server
+    posting_id = draft()
+    criterion(posting_id, "Reliable")
+    criterion(posting_id, "Guest care")
+    assert hdb.set_ai(posting_id, True, "Operator")
+    assert hdb.publish(posting_id, "Operator") == [hdb.AI_NOT_READY]
+    assert hdb.get_posting(posting_id)["status"] == "draft" and hdb.snapshots(posting_id) == []
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    assert hdb.publish(posting_id, "Operator") == []
+
+
+# --- C9: more time, or another way to answer the quick questions --------------------------------
+
+def test_c9_a_leader_can_give_more_time_on_the_applicants_own_link(world, public, monkeypatch):
+    clock(monkeypatch, "2026-11-01 09:00")
+    posting_id = live()
+    token = re.search(r"[0-9a-f]{32}", send(public).headers["Location"]).group(0)
+    app_id = table("hr_applications")[0]["id"]
+    clock(monkeypatch, "2026-11-09 09:00")                            # eight days on: the link has closed
+    first, second = (c["id"] for c in hdb.get_posting(posting_id)["criteria"])
+    public.post(f"/careers/a/{token}", data={f"q_{first}": "Too late."})
+    assert table("hr_answers") == []
+    hari = kit.open_as(world, "hari")
+    scoring = page(hari, f"/shift/hiring/candidates/{app_id}")
+    assert "More time, or answers given another way, can be recorded on their contact page." in scoring
+    assert "a fact for you to weigh" not in scoring
+    contact = page(hari, f"/shift/hiring/candidates/{app_id}/contact")
+    assert "Give more time on their link" in contact and "Don't ask why, and don't write why." in contact
+    hari.post(f"/shift/hiring/candidates/{app_id}/more-time")
+    assert "Their link is open again. Let them know they can use it." in flashed(hari)
+    assert hdb.candidate(app_id)["answers_until"] == "2026-11-16 09:00"
+    last = table("hr_events")[-1]
+    assert (last["kind"], last["by"], last["detail"]) == ("more_time", "Hari", "")     # who and when, never why
+    assert "more time given" in [r["action"] for r in people_db.audit_feed()]
+    assert f'name="q_{first}"' in text(public.get(f"/careers/a/{token}"))
+    public.post(f"/careers/a/{token}", data={f"q_{first}": "I opened the stand every Saturday."})
+    assert [a["body"] for a in table("hr_answers")] == ["I opened the stand every Saturday."]
+    # nothing left to reopen once they have answered
+    hari.post(f"/shift/hiring/candidates/{app_id}/more-time")
+    assert any("There is nothing to reopen" in m for m in flashed(hari))
+    assert "Give more time on their link" not in page(hari, f"/shift/hiring/candidates/{app_id}/contact")
+    assert second
+
+
+def test_c9_answers_given_another_way_are_entered_and_scored_like_any_others(world, public, monkeypatch):
+    clock(monkeypatch, "2026-11-01 09:00")
+    posting_id = live()
+    token = re.search(r"[0-9a-f]{32}", send(public).headers["Location"]).group(0)
+    app_id = table("hr_applications")[0]["id"]
+    first, second = (c["id"] for c in hdb.get_posting(posting_id)["criteria"])
+    clock(monkeypatch, "2026-11-20 09:00")                            # long after the link closed
+    hari, lena = kit.open_as(world, "hari"), kit.open_as(world, "lena")
+    lena.post(f"/shift/hiring/candidates/{app_id}/answers", data={f"q_{first}": "Not hers to enter."})
+    assert table("hr_answers") == []
+    hari.post(f"/shift/hiring/candidates/{app_id}/answers", data={f"q_{first}": " ", f"q_{second}": ""})
+    assert "Write the answer to at least one question." in flashed(hari)
+    resp = hari.post(f"/shift/hiring/candidates/{app_id}/answers",
+                     data={f"q_{first}": "I opened the stand every Saturday.", f"q_{second}": "I walked a guest to a table.",
+                           "q_999": "Not a question on this posting."})
+    assert resp.headers["Location"].endswith(f"/shift/hiring/candidates/{app_id}#answers")
+    assert {a["criterion_id"]: a["body"] for a in table("hr_answers")} == {
+        first: "I opened the stand every Saturday.", second: "I walked a guest to a table."}
+    last = table("hr_events")[-1]
+    assert (last["kind"], last["by"], last["detail"]) == ("answered", "Hari", "entered for the applicant")
+    scoring = page(hari, f"/shift/hiring/candidates/{app_id}")
+    assert "I opened the stand every Saturday." in scoring and f'name="level_{first}"' in scoring
+    assert "were not answered" not in scoring
+    pipeline = page(hari, "/shift/hiring/")
+    assert "Questions not answered" not in pipeline
+    # once, like the applicant's own: a second go changes nothing, and their page shows status only
+    hari.post(f"/shift/hiring/candidates/{app_id}/answers", data={f"q_{first}": "Changed."})
+    assert len(table("hr_answers")) == 2 and "Changed." not in [a["body"] for a in table("hr_answers")]
+    assert f'name="q_{first}"' not in text(public.get(f"/careers/a/{token}"))

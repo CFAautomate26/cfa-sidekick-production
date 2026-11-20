@@ -21,8 +21,12 @@
 {% else %}
   {% if c.hold %}<p class="callout" style="margin-top:22px;">{{ icon('lock') }}<span><strong>On hold: do not delete.</strong> This application is kept until the Operator takes the hold off.</span></p>{% endif %}
   {% if not c.answered_at %}
-  <p class="callout tan" style="margin-top:{{ '12' if c.hold else '22' }}px;">{{ icon('clock') }}<span>{% if c.link_expired %}<strong>The quick questions were not answered</strong> and the applicant's link has closed. That is a fact for you to weigh, not a decision.{% else %}The quick questions are not answered yet. The applicant's link is open until {{ c.answers_until|pp_when }}.{% endif %}</span></p>
+  <p class="callout tan" style="margin-top:{{ '12' if c.hold else '22' }}px;">{{ icon('clock') }}<span>{% if c.link_expired %}<strong>The quick questions were not answered</strong> and the applicant's link has closed. More time, or answers given another way, can be recorded on their contact page. An unanswered question is never a decision by itself.{% else %}The quick questions are not answered yet. The applicant's link is open until {{ c.answers_until|pp_when }}.{% endif %}</span></p>
   {% endif %}
+{% endif %}
+
+{% if c.same_contact %}
+<p class="callout tan" style="margin-top:12px;">{{ icon('info') }}<span><strong>This may be a second application from the same person.</strong> Another application for this posting gave the same email or phone number. Their <a class="textlink" href="{{ url_for('people.hiring_contact', application_id=c.id) }}#same-contact">contact page</a> shows which.</span></p>
 {% endif %}
 
 <div class="card list" style="margin-top:16px;">

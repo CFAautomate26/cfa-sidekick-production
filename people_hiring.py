@@ -51,6 +51,15 @@ def nav_counts(kind, leader_id, name) -> dict:
     return hdb.counts()
 
 
+def extra_counts(kind, leader_id, name) -> dict:
+    """More for the badge and the People home page, for the same people:
+    attention (live postings that no longer pass the publish check, for
+    example after a wage floor went up in Settings)."""
+    if kind != "operator" and "hiring" not in people_db.capabilities(leader_id, name):
+        return {}
+    return {"attention": len(hdb.needs_attention())}
+
+
 # ---------------------------------------------------------------------------
 # AI assist: a suggested level for a written answer, for the leader to check
 # ---------------------------------------------------------------------------
@@ -173,12 +182,14 @@ people_ai.register_kind(AI_KIND, _ai_build, _ai_validate)
 def ai_blocked(record: dict) -> str | None:
     """Why AI assist cannot run on this application, or None when it may.
     It needs: the switch in Settings (and a key on the server), AI assist
-    on for the posting, and an applicant who applied while the posting was
-    showing its AI statement."""
+    on for the posting, a posting that has never been public without its
+    AI statement, and an applicant who applied while it was showing."""
     if not people_ai.enabled("hiring"):
         return "AI assist for hiring is switched off in People settings."
     if not record["posting_ai"]:
         return "AI assist is not switched on for this posting."
+    if record.get("posting_ai_locked"):
+        return hdb.AI_LOCKED
     if not record["ai_disclosed"]:
         return ("This applicant applied while the posting did not say AI is used, so AI assist "
                 "can't be used on their application.")
@@ -543,15 +554,18 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
     @operator
     def hiring_posting_ai(posting_id):
         on = request.form.get("on") == "1"
+        posting = hdb.get_posting(posting_id)
         if on and not people_db.setting_on("ai_hiring"):
             flash("Switch on AI assist for hiring in People settings first.")
+        elif on and posting and posting["status"] == "open":
+            flash(hdb.AI_DRAFT_ONLY)
         elif hdb.set_ai(posting_id, on, people.actor()):
             _log("posting AI switched " + ("on" if on else "off"), "posting", posting_id)
             flash("AI assist is off for this posting." if not on
-                  else "AI assist is on for this posting, and the posting now says so."
+                  else "AI assist is on for this posting. It will say so from the day it goes live."
                   if people_ai.enabled("hiring")
-                  else "Switched on for this posting. It will say so, and work, once an AI key is "
-                       "set up on the server.")
+                  else "Switched on for this posting. It can be published once an AI key is set up "
+                       "on the server.")
         else:
             flash("Nothing changed.")
         return to_posting(posting_id, "#ai")
@@ -789,9 +803,38 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             notice_kinds=hdb.NOTICE_KINDS, methods=hdb.NOTICE_METHODS,
             contact_methods=hdb.CONTACT_METHODS, offer=hdb.offer_state(application_id),
             reminders=OFFER_REMINDERS, stage_labels=hdb.STAGE_LABELS,
+            active_stages=hdb.ACTIVE_STAGES, same_contact=record["same_contact"],
             on_roster=any(m["name"].casefold() == record["name"].casefold()
                           for m in shift_db.roster(include_inactive=True)),
             today=shift_db.now_local().date().isoformat(), limits=hdb)
+
+    @bp.route("/hiring/candidates/<int:application_id>/more-time", methods=["POST"])
+    @hiring
+    def hiring_more_time(application_id):
+        until = hdb.give_more_time(application_id, people.actor())
+        if until:
+            _log("more time given", "application", application_id)
+            flash("Their link is open again. Let them know they can use it.")
+        else:
+            flash("There is nothing to reopen: the questions are answered, or the application is "
+                  "no longer open.")
+        return to_contact(application_id, "#questions")
+
+    @bp.route("/hiring/candidates/<int:application_id>/answers", methods=["POST"])
+    @hiring
+    def hiring_enter_answers(application_id):
+        record = acting_on(application_id)
+        if not record:
+            return missing()
+        typed = {c["id"]: request.form.get(f"q_{c['id']}", "") for c in record["criteria"] if c["question"]}
+        result = hdb.save_answers(application_id, typed, entered_by=people.actor())
+        if result == "saved":
+            _log("answers entered for the applicant", "application", application_id)
+            flash("Answers saved. They are scored like any others.")
+            return to_candidate(application_id, "#answers")
+        flash("Write the answer to at least one question." if result == "empty"
+              else "The questions are already answered, or the application is no longer open.")
+        return to_contact(application_id, "#questions")
 
     @bp.route("/hiring/candidates/<int:application_id>/correct", methods=["POST"])
     @hiring

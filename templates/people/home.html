@@ -20,19 +20,28 @@
 <p class="callout warm" style="margin-top:12px;">{{ icon('clock') }}<span><strong>{{ retention_due }} application{{ ' is' if retention_due == 1 else 's are' }} past the time we told the applicant we would keep {{ 'it' if retention_due == 1 else 'them' }}.</strong> Nothing is removed automatically. <a class="textlink" href="{{ retention_url }}">Open Retention</a></span></p>
 {% endif %}
 
+{% if hiring_url and counts.attention %}
+<p class="callout warm" style="margin-top:12px;">{{ icon('alert') }}<span><strong>{{ counts.attention }} live posting{{ ' no longer passes' if counts.attention == 1 else 's no longer pass' }} the publish check.</strong> {{ 'It is' if counts.attention == 1 else 'They are' }} still public and still taking applications. <a class="textlink" href="{{ hiring_url }}">Open Hiring to fix or close {{ 'it' if counts.attention == 1 else 'them' }}</a></span></p>
+{% endif %}
+{% if reviews_url and counts.concerns %}
+<p class="callout warm" style="margin-top:12px;">{{ icon('alert') }}<span><strong>{{ counts.concerns }} leader{{ "'s comments" if counts.concerns == 1 else "s' comments" }} may raise a concern that needs follow-up.</strong> <a class="textlink" href="{{ reviews_url }}#follow-up">See which</a></span></p>
+{% endif %}
+
 {% set open_rows = reviews_url or hiring_url or mine_url %}
 {% if open_rows %}
 <div class="card list" style="margin-top:22px;">
   {% if reviews_url %}
   <a class="row" href="{{ reviews_url }}"><span class="lead-ico navy">{{ icon('clip') }}</span><span class="row-main"><span class="row-title">Leader reviews</span><span class="row-meta">{% if viewer.is_operator %}Observations, review cycles and calibration for every leader.{% else %}The leaders you review.{% endif %}</span>
-    {%- if counts.on_hold or counts.past_due or counts.drafts %}<span class="row-meta tags">
+    {%- if counts.on_hold or counts.past_due or counts.drafts or counts.concerns %}<span class="row-meta tags">
+      {%- if counts.concerns %}<span class="badge b-red">{{ counts.concerns }} to follow up</span>{% endif %}
       {%- if counts.on_hold %}<span class="badge b-red">{{ counts.on_hold }} on hold</span>{% endif %}
       {%- if counts.past_due %}<span class="badge b-tan">{{ counts.past_due }} past due</span>{% endif %}
       {%- if counts.drafts %}<span class="badge b-tan">{{ counts.drafts }} to finish</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
   {% endif %}
   {% if hiring_url %}
   <a class="row" href="{{ hiring_url }}"><span class="lead-ico navy">{{ icon('users') }}</span><span class="row-main"><span class="row-title">Hiring</span><span class="row-meta">Job postings, applicants, interviews and decision notices.</span>
-    {%- if counts.new or counts.notices_due or counts.notices_overdue %}<span class="row-meta tags">
+    {%- if counts.new or counts.notices_due or counts.notices_overdue or counts.attention %}<span class="row-meta tags">
+      {%- if counts.attention %}<span class="badge b-red">{{ counts.attention }} posting{{ '' if counts.attention == 1 else 's' }} to fix</span>{% endif %}
       {%- if counts.notices_overdue %}<span class="badge b-red">{{ counts.notices_overdue }} notice{{ '' if counts.notices_overdue == 1 else 's' }} overdue</span>{% endif %}
       {%- if counts.new %}<span class="badge b-red">{{ counts.new }} new</span>{% endif %}
       {%- if counts.notices_due %}<span class="badge b-tan">{{ counts.notices_due }} notice{{ '' if counts.notices_due == 1 else 's' }} due</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>

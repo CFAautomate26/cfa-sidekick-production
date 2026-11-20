@@ -38,8 +38,9 @@ you give them again (the access page lists them as "No longer matching a
 sign-in").
 
 In the ☰ menu, the Operator and ticked leaders get a **People** row, with a
-count when something is waiting (a review on hold, new applications, a
-decision notice due). A leader gets a **My review** row from the day a
+count when something is waiting (a leader's comments to follow up, a
+decision notice due, a live posting that no longer passes its check, a
+review on hold, new applications). A leader gets a **My review** row from the day a
 cycle asks them for a reflection or a review is shared with them. It shows
 "waiting" while something needs them, and it stays after they have
 confirmed a review, so they can always read it again.
@@ -166,8 +167,11 @@ Then:
 ### The AI draft (only if you have switched it on)
 
 **Ask the AI for a draft** sends the notes for the period to the AI service
-with names taken out (see *AI* below). What comes back is a second read of
-the same notes:
+with names taken out (see *AI* below). **A note whose wording touches on
+health, family, age, religion, origin, gender, time away or a complaint is
+not sent at all**, and neither is a box of the leader's reflection worded
+that way: the page says how many were held back, and they are yours to read.
+What comes back is a second read of the notes that were sent:
 
 - The draft for a standard appears **only after you have saved your own
   rating** for that standard. Suggested wording for the summary and
@@ -178,6 +182,14 @@ the same notes:
   dropped; a sentence that uses a word about health, family, age or the
   like is taken out of the draft and shown as a line for you to check, and
   the suggested level for that standard is withheld.
+- The "Human check needed" lines at the top of the draft are **fixed
+  sentences written by our own code**. The AI can ask for one of four of
+  them; anything else it writes there in its own words is never shown,
+  because those lines are on the page before you have rated anything.
+- **A draft does not outlive its notes.** If the notes that count change
+  after a draft was made (you mark time away, leave a note out, remove one,
+  add one, or the leader changes their reflection), the draft is no longer
+  shown and the page says to ask for a new one.
 - Nothing is copied into the review for you. You write it.
 
 ### Before you finish
@@ -237,8 +249,14 @@ sign-in: the date it was discussed, optional comments, and this wording:
 > with this review.
 
 If their comments use words about harassment or safety, you (only you) see
-a quiet note on the review that it may need follow-up. The leader is never
-stopped or questioned by the tool.
+a note on the review that it may need follow-up. It is also listed on the
+Leader reviews page, on the People home page and in the menu count, **and
+it stays there, even after the cycle is closed, until you tick "Followed up
+outside this tool"** on the review. Only the tick and the date are kept,
+never what you found. The leader is never stopped or questioned by the
+tool. Their reviewer can read the comments too (the leader's page says so),
+which is why a comment about the reviewer or another senior leader is a
+call to a lawyer first: the note on the review says so.
 
 **Print view** (finalised reviews onward) carries the same content with
 signature lines and "Leader declined to sign; copy provided on ____". Use
@@ -258,8 +276,8 @@ write a criterion by hand. A criterion with a question is asked of the
 applicant; one without is for the interview only. Two to six applicant
 questions.
 
-**The publish check** has to pass before a posting can go live, and has to
-keep passing while it is live:
+**The publish check** has to pass before a posting can go live, and a
+change to a live posting is refused if it would make it fail:
 
 - a title, and a description of at least 200 characters;
 - both pay figures, lowest not above highest, not below the minimum wage
@@ -267,17 +285,35 @@ keep passing while it is live:
   range no wider than $50,000 a year;
 - existing vacancy or not;
 - a hiring contact in Settings;
-- at least two criteria with questions.
+- at least two criteria with questions;
+- no question, for applicants or for the interview, that asks what an
+  application may not ask: age or date of birth, pregnancy, marriage or
+  children, religion, citizenship or where someone was born, health or
+  disability, a criminal record, gender, a SIN, a photo or a licence. The
+  check works from a list of phrases, so it catches the plain cases and
+  nothing subtler: **read every question yourself before you publish**;
+- if AI assist is ticked for the posting, AI that can really run (see *AI*
+  below), so the posting goes live with its AI statement.
 
 It also flags words to read again ("young", "recent grad", "strong",
-"Canadian experience", gendered job titles, tips or bonuses as pay). They
+"Canadian experience", gendered job titles, tips or bonuses as pay, and any
+word about health, family, religion, age, origin, gender or leave). They
 do not block, but you tick that you have read them and the wording is
 about the job.
 
+**A setting can leave a live posting failing** without anyone touching the
+posting: the minimum wage goes up on 1 October, or the hiring contact
+changes. Settings names the postings the moment you save, the People home
+page and the menu count show them, and the Hiring page says what is wrong.
+**The posting stays public and keeps taking applications until you fix it
+or close it**, so do that the same day. The hiring contact cannot be
+emptied while a posting is live.
+
 **Only the Operator publishes.** A live posting shows, in this order: the
 title, the employer, the type, the pay, the description, what we look for,
-the vacancy statement, the AI statement (only while AI is really in use
-for it), the accommodation notice with the hiring contact, the minimum-age
+the vacancy statement, the AI statement (only for a posting that has used
+AI since the day it went live, and only while AI is really in use), the
+accommodation notice with the hiring contact, the minimum-age
 line and the Apply button.
 
 **An exact copy is kept** every time: when it is published, each time it is
@@ -292,9 +328,10 @@ reopened; **Copy to a new draft** starts the next one.
 `https://<your Render address>/careers/` lists the live postings, and each
 posting has its own address, shown on the posting's page under *Applicants
 apply here*. Share that link, or turn it into a QR code for a poster.
-**Anywhere else the job is advertised** (a job site, a social post, a
-poster) has to carry the same pay, vacancy, AI and accommodation statements
-or link straight to that page.
+**Anywhere else the job is advertised** (a job site, a social post that
+names the job, a poster) has to carry the same pay, vacancy, AI and
+accommodation statements itself. A general "we're hiring" sign that names
+no position can simply point to the careers page.
 
 Applying takes two short steps on a phone:
 
@@ -302,19 +339,42 @@ Applying takes two short steps on a phone:
    entitled to work in Canada?", "Are you 18 or older?", when they could
    work (never why not), how they heard about us, and any experience they
    want to mention. They read how their information is looked after and
-   tick to agree. The form asks for nothing else: no date of birth, photo,
+   tick to agree. This step asks for nothing else: no date of birth, photo,
    address, gender, family, religion, SIN or health.
-2. **About five minutes.** The posting's quick questions, answered once, on
+2. **About five minutes.** The posting's quick questions (the ones you
+   wrote or picked, which the publish check screens), answered once, on
    a **private link** that is theirs alone. The link takes answers for 7
    days (Settings). After that, and any time later, the same link shows
    only that we have their application and, once you have logged a notice,
    whether a hiring decision has been made. It never shows a score, a note
    or a stage.
 
-The same person applying to the same posting again within 30 days is
-thanked and not stored twice. Only a scrambled form of the private link is
-kept, so a lost link cannot be sent again: the applicant contacts the
-hiring contact instead.
+**An application that gives the same email or phone number as an earlier
+one** to the same posting (within 30 days) is taken like any other, with
+its own private link, and marked **Possible duplicate** for you: the
+pipeline shows the badge and each applicant's Contact page links to the
+other. It may be one person applying twice, or two people who share a
+phone. If it is one person, move the spare one to withdrew. The form never
+tells the sender that those details were used before, because that would
+tell anyone who typed someone else's email whether that person had
+applied. Only a scrambled form of the private link is kept, so a lost link
+cannot be sent again: the applicant contacts the hiring contact instead.
+
+**More time, or another way to answer.** The posting promises
+accommodation at every stage, and the quick questions are a stage. On an
+applicant's Contact page, **Give more time on their link** opens their link
+again for the usual number of days, and **Enter answers they gave another
+way** records what they told you by phone, on paper or with someone's help.
+Either way the answers are scored like any others. Don't ask why, and don't
+write why: the history keeps who did it and when, nothing else.
+
+The careers pages limit how many applications one address can send in an
+hour (and how many wrong private links it can try). The address counted is
+the one the hosting platform's proxy reports, never one a visitor can type.
+**Check it once before the first posting goes live:** Settings → *For
+whoever set up the server* shows the address being counted for your own
+request. It should be your own (what a "what is my IP" site shows). If it
+is not, set `PEOPLE_PROXY_HOPS` (below).
 
 One limit to know: like any web address that is opened, a private link's
 address can show up in the hosting service's own request log. The page
@@ -422,12 +482,16 @@ under People → Settings, with a short go-live checklist above it.
 | | Leader reviews | Hiring |
 |---|---|---|
 | **Sent** | The wording of our standards; the observations that count toward the review; the leader's reflection if they sent one. | The posting's criteria and the applicant's written answers to the quick questions. |
-| **Taken out first** | The leader's name; the names of everyone on the Team Hub roster, the leader list and the review list; email addresses and phone numbers; he/she words. | The applicant's name; the names of everyone on the roster and the leader list; email addresses and phone numbers; he/she words. |
-| **Never sent** | The leader's name, title or area; the reviewer's own ratings and comments; time-away dates; the "before you finish" answers; anything from Team Hub activity (checklists, to-dos, training, read receipts, 1:1s). | Name and contact details; availability; how they heard about us; experience; the 18-or-over and work-entitlement answers; interview notes and scores; any answer that may mention health or an accommodation. |
+| **Taken out first** | The leader's name (a two-letter name such as Jo only where it is written with a capital); the names of everyone on the Team Hub roster, the leader list and the review list; email addresses and phone numbers; he/she words. | The applicant's name; the names of everyone on the roster and the leader list; email addresses and phone numbers; he/she words. |
+| **Never sent** | The leader's name, title or area; the reviewer's own ratings and comments; time-away dates; the "before you finish" answers; any note, or box of the reflection, whose wording touches on health, family, age, religion, origin, gender, time away or a complaint; anything from Team Hub activity (checklists, to-dos, training, read receipts, 1:1s). | Name and contact details; availability; how they heard about us; experience; the 18-or-over and work-entitlement answers; interview notes and scores; any answer that may mention health or an accommodation. |
 
 Taking names out is done by matching the names Team Hub knows. A name it
-does not know (a guest, a nickname) can slip through, which is one more
-reason notes describe what happened and not who.
+does not know (a guest, a nickname) can slip through, and so can a
+two-letter name typed without its capital or a single initial, which is one
+more reason notes describe what happened and not who. Holding back notes
+about health and the like is done by a word list too: it errs on the side
+of not sending (a note about a guest's "family" is held back as well), and
+it cannot catch what the list does not name.
 
 **To switch it on**
 
@@ -439,10 +503,15 @@ reason notes describe what happened and not who.
    without AI), then *Switch on AI for leader reviews*.
 3. **Hiring:** go through the checklist (a lawyer has looked at it; data
    terms read), then *Switch on AI for hiring*, **and** switch it on for
-   each posting that should use it. That posting then tells applicants AI
-   is used. AI only ever runs for applicants who applied **while the
-   posting was saying so**. Switch it off, or lose the key, and the posting
-   stops saying it and nothing more is sent.
+   each posting that should use it **while that posting is still a draft**.
+   The posting then tells applicants AI is used from the day it goes live.
+   It cannot be switched on for a posting that is already live: a posting
+   that has been public without its AI statement never uses AI. To use AI
+   for that job, close the posting and copy it to a new draft. AI only ever
+   runs for applicants who applied **while the posting was saying so**.
+   Switch it off, or lose the key, and the posting stops saying it and
+   nothing more is sent; if anyone opens the posting while it is not saying
+   it, AI assist is off for that posting for good.
 
 Every request is kept on record exactly as it was sent, with the reply,
 the model and the date: it is in the People backup. A request that has not
@@ -476,6 +545,7 @@ the disk. Download it after each review cycle and after each hiring round.
 | `PEOPLE_DB_PATH` | Where the People database lives. Leave it unset and it is `people.db` beside the Team Hub database (`SHIFT_DB_PATH`), on the persistent disk. |
 | `OPENAI_API_KEY` | The AI service key. Already set for the GroupMe bot. People uses it only while an AI switch is on. |
 | `PEOPLE_AI_MODEL` | Optional. Which of the AI provider's models to use; the default in `people_ai.py` if unset. |
+| `PEOPLE_PROXY_HOPS` | Optional, 0 to 5, default 1. How many of the hosting platform's proxies stand in front of the app: the careers pages count their limits against the address that many places from the end of `X-Forwarded-For` (0 = the connection itself). Never set it so that it points at an entry a visitor could have typed. Check it on Settings → *For whoever set up the server*. |
 
 ## Left out of version 1, on purpose
 
