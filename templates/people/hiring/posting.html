@@ -18,7 +18,7 @@
 </div>
 
 {% if posting.status == 'open' and public_url %}
-<p class="callout" style="margin-top:16px;">{{ icon('share') }}<span><strong>Applicants apply here:</strong> <span class="hr-def">{{ public_url }}</span><br>Anywhere else this job is advertised (a job site, a social post, a poster) has to carry the same pay, vacancy, accommodation{% if posting.ai_assist %}, AI{% endif %} statements, or link straight to this page.</span></p>
+<p class="callout" style="margin-top:16px;">{{ icon('share') }}<span><strong>Applicants apply here:</strong> <span class="hr-def">{{ public_url }}</span><br>Anywhere else this job is advertised (a job site, a social post, a poster) has to carry the same pay, vacancy{% if view.ai %}, AI{% endif %} and accommodation statements, or link straight to this page.</span></p>
 {% endif %}
 
 {# ---------- the publish check ---------- #}
