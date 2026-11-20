@@ -1,0 +1,62 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, bar, empty %}
+{% from "people/reviews/_parts.html" import rv_styles, status_badge %}
+{% block title %}{{ cycle.name }}{% endblock %}
+{% block head %}{{ rv_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), (cycle.name, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Leader reviews · {{ 'open cycle' if cycle.status == 'open' else 'closed cycle' }}</p>
+  <h1 class="headline">{{ cycle.name }}</h1>
+  <p class="triage">{{ cycle.period_start|pp_day }} to {{ cycle.period_end|pp_day }} · due <b>{{ cycle.due_date|pp_day }}</b> · {{ 'leaders are asked for a reflection first' if cycle.ask_reflection else 'no reflection asked' }}</p>
+</section>
+
+<div class="card">
+  <span class="card-title">Finished so far</span>
+  <p style="margin-top:10px;">{{ bar(reviews|length - unfinished, reviews|length) }}</p>
+  <div class="btnrow">
+    <a class="btn btn-secondary sm" href="{{ url_for('people.reviews_calibration', cycle_id=cycle.id) }}">Calibration</a>
+    <a class="btn btn-secondary sm" href="{{ url_for('people.reviews_health') }}?cycle={{ cycle.id }}">Process health</a>
+  </div>
+</div>
+
+<section class="sec">
+  <div class="sec-head"><h2>Reviews</h2></div>
+  {% if reviews %}
+  <div class="card list">
+    {% for r in reviews %}
+    <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}" id="r-{{ r.id }}"><span class="row-main"><span class="row-title">{{ r.display_name }}</span><span class="row-meta">Reviewer: {{ reviewer_label(r) }}</span><span class="row-meta tags">{{ status_badge(r.status) }}{% if r.editable and cycle.due_date < today %} <span class="badge b-tan">Past due</span>{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ empty('No reviews in this cycle.') }}
+  {% endif %}
+</section>
+
+{% if missing %}
+<section class="sec" id="missing">
+  <div class="sec-head"><h2>Not in this cycle yet</h2></div>
+  <p class="sec-note">These leaders were added after the cycle started. They join on the same standards as everyone else in it.</p>
+  <div class="card">
+    {% for s in missing %}
+    <div class="rv-line"><span class="what"><b>{{ s.display_name }}</b></span>
+      <form method="post" action="{{ url_for('people.reviews_cycle_add', cycle_id=cycle.id) }}"><input type="hidden" name="subject_id" value="{{ s.id }}">
+        <button class="btn btn-secondary sm" type="submit" aria-label="Add {{ s.display_name }} to this cycle">Add to this cycle</button></form></div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if cycle.status == 'open' %}
+<section class="sec" id="close">
+  <details class="card rv-more">
+    <summary>Close this cycle</summary>
+    <form method="post" action="{{ url_for('people.reviews_cycle_close', cycle_id=cycle.id) }}">
+      <p class="fine-line">Closing finishes the cycle and can't be undone here. {% if unfinished %}<strong>{{ unfinished }} review{{ ' is' if unfinished == 1 else 's are' }} not finished</strong> and can no longer be written once it is closed. {% endif %}Finalised reviews can still be shared and acknowledged, and leaders are no longer asked for a reflection.</p>
+      <label class="checkline"><input type="checkbox" name="confirm" value="1" required><span>Close {{ cycle.name }}.</span></label>
+      <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Close the cycle</button></div>
+    </form>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

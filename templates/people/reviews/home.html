@@ -1,0 +1,157 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, bar, empty %}
+{% from "people/reviews/_parts.html" import rv_styles, status_badge %}
+{% block title %}Leader reviews{% endblock %}
+{% block head %}{{ rv_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Leader reviews', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · leader reviews</p>
+  <h1 class="headline">Leader reviews</h1>
+  {% if viewer.is_operator %}
+  <p class="triage"><b>{{ held|length }}</b> on hold · <b>{{ past_due }}</b> past due · <b>{{ to_write|selectattr('status', 'equalto', 'draft')|list|length }}</b> for you to write</p>
+  {% else %}
+  <p class="triage"><b>{{ to_write|selectattr('status', 'equalto', 'draft')|list|length }}</b> to finish{% if past_due %} · <b>{{ past_due }}</b> past due{% endif %}</p>
+  {% endif %}
+</section>
+
+<p class="callout">{{ icon('info') }}<span>A review is a conversation starter, not a verdict. Write down what you saw through the period, rate each standard beside those notes, and talk it through. A person makes every decision here.</span></p>
+
+{% if viewer.is_operator and not has_model %}
+<p class="callout tan">{{ icon('info') }}<span><strong>Load Our standards first.</strong> A review rates each of the store's standards, so a cycle can't start without them. <a href="{{ url_for('people.standards') }}">Open Our standards</a></span></p>
+{% endif %}
+
+{% if held %}
+<section class="sec" id="held">
+  <div class="sec-head"><h2>On hold</h2></div>
+  <p class="sec-note">These stopped at the “before you finish” questions. Look at each one with its reviewer, outside this tool, then release it.</p>
+  <div class="card list">
+    {% for r in held %}
+    <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}"><span class="lead-ico red">{{ icon('shield') }}</span><span class="row-main"><span class="row-title">{{ r.display_name }}</span><span class="row-meta">{{ r.cycle_name }} · reviewer: {{ reviewer_label(r) }}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if concerns %}
+<section class="sec" id="follow-up">
+  <div class="sec-head"><h2>Comments to follow up</h2></div>
+  <div class="card list">
+    {% for r in concerns %}
+    <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}#leader-comments"><span class="lead-ico red">{{ icon('alert') }}</span><span class="row-main"><span class="row-title">{{ r.display_name }}</span><span class="row-meta">The leader's comments may raise a concern that needs follow-up.</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if viewer.is_operator %}
+<section class="sec" id="cycles">
+  <div class="sec-head"><h2>Review cycles</h2></div>
+  {% for c in cycles if c.status == 'open' %}
+  <div class="card" id="c-{{ c.id }}">
+    <span class="card-title">{{ c.name }}</span>
+    <span class="card-meta">{{ c.period_start|pp_day }} to {{ c.period_end|pp_day }} · due {{ c.due_date|pp_day }}{% if c.due_date < today %} <span class="badge b-tan">Past due</span>{% endif %}</span>
+    <p class="subhead">Finished so far</p>
+    {{ bar(c.counts.final + c.counts.shared + c.counts.acknowledged, c.total) }}
+    <div class="rv-tags">
+      <span class="badge b-tan">{{ c.counts.draft }} draft</span>
+      {% if c.counts.on_hold %}<span class="badge b-red">{{ c.counts.on_hold }} on hold</span>{% endif %}
+      <span class="badge b-navy">{{ c.counts.final }} finalised</span>
+      <span class="badge b-navy">{{ c.counts.shared }} shared</span>
+      <span class="badge b-green">{{ c.counts.acknowledged }} acknowledged</span>
+    </div>
+    <div class="btnrow">
+      <a class="btn btn-primary sm" href="{{ url_for('people.reviews_cycle', cycle_id=c.id) }}">Open the cycle</a>
+      <a class="btn btn-secondary sm" href="{{ url_for('people.reviews_calibration', cycle_id=c.id) }}">Calibration</a>
+      <a class="btn btn-secondary sm" href="{{ url_for('people.reviews_health') }}?cycle={{ c.id }}">Process health</a>
+    </div>
+  </div>
+  {% else %}
+  {{ empty('No review cycle is open.') }}
+  {% endfor %}
+
+  {% if has_model and n_people %}
+  <details class="card rv-more" id="start">
+    <summary>{{ icon('plus', 'sm') }}Start a review cycle</summary>
+    <form method="post" action="{{ url_for('people.reviews_cycle_new') }}">
+      <p class="fine-line">Starting a cycle makes a draft review for each of the {{ n_people }} leader{{ '' if n_people == 1 else 's' }} under review, on the standards as they are worded today.</p>
+      <label class="field" for="c-name">Name</label>
+      <input id="c-name" name="name" type="text" maxlength="80" placeholder="For example: Autumn check-in" required>
+      <div class="rv-pair">
+        <div><label class="field" for="c-start">Period starts</label><input id="c-start" name="period_start" type="date" required></div>
+        <div><label class="field" for="c-end">Period ends</label><input id="c-end" name="period_end" type="date" value="{{ today }}" required></div>
+      </div>
+      <label class="field" for="c-due">Reviews due</label>
+      <input id="c-due" name="due_date" type="date" required>
+      <label class="checkline"><input type="checkbox" name="ask_reflection" value="1" checked><span>Ask leaders for a reflection first. Each leader writes about their own work against each standard, and their reviewer reads it before rating.</span></label>
+      <div class="btnrow"><button class="btn btn-primary sm" type="submit">Start the cycle</button></div>
+    </form>
+  </details>
+  {% elif has_model %}
+  <p class="callout tan">{{ icon('info') }}<span>Choose the leaders you review before you start a cycle. <a href="{{ url_for('people.reviews_leaders') }}">Set up leaders</a></span></p>
+  {% endif %}
+
+  {% for c in cycles if c.status != 'open' %}
+  {% if loop.first %}<p class="subhead">Closed cycles</p><div class="card list">{% endif %}
+    <a class="row" href="{{ url_for('people.reviews_cycle', cycle_id=c.id) }}"><span class="row-main"><span class="row-title">{{ c.name }}</span><span class="row-meta">{{ c.period_start|pp_day }} to {{ c.period_end|pp_day }} · {{ c.total }} review{{ '' if c.total == 1 else 's' }}</span></span>{{ icon('chev', 'chev') }}</a>
+  {% if loop.last %}</div>{% endif %}
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if to_write or not viewer.is_operator %}
+<section class="sec" id="mine-to-write">
+  <div class="sec-head"><h2>{{ 'Reviews you write' if viewer.is_operator else 'Your reviews' }}</h2></div>
+  {% if to_write %}
+  <div class="card list">
+    {% for r in to_write %}
+    <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}"><span class="row-main"><span class="row-title">{{ r.display_name }}</span><span class="row-meta">{{ r.cycle_name }} · due {{ r.due_date|pp_day }}</span><span class="row-meta tags">{{ status_badge(r.status) }}{% if r.editable and r.due_date < today %} <span class="badge b-tan">Past due</span>{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ empty('No review is waiting for you. Keep writing down what you see: your notes are what the next review is built on.') }}
+  {% endif %}
+</section>
+{% endif %}
+
+{% if assigned %}
+<section class="sec" id="leaders">
+  <div class="sec-head"><h2>Leaders you review</h2></div>
+  <p class="sec-note">Write a short note whenever you see something worth remembering, good or not yet there. A few lines on the day beat a long write-up from memory.</p>
+  <div class="card list">
+    {% for s in assigned %}
+    <a class="row" href="{{ url_for('people.reviews_leader', subject_id=s.id) }}"><span class="lead-ico navy">{{ icon('note') }}</span><span class="row-main"><span class="row-title">{{ s.display_name }}</span><span class="row-meta">{{ s.title or 'Observation log' }}{% if s.title and s.area %} · {{ s.area }}{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if earlier %}
+<section class="sec">
+  <div class="sec-head"><h2>Earlier cycles</h2></div>
+  <div class="card list">
+    {% for r in earlier %}
+    <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}"><span class="row-main"><span class="row-title">{{ r.display_name }}</span><span class="row-meta">{{ r.cycle_name }}</span><span class="row-meta tags">{{ status_badge(r.status) }}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if not viewer.is_operator %}
+<section class="sec">
+  <div class="card list">
+    <a class="row" href="{{ url_for('people.reviews_mine') }}"><span class="lead-ico">{{ icon('file') }}</span><span class="row-main"><span class="row-title">My own review</span><span class="row-meta">Reviews written about you, once they are shared with you.</span></span>{{ icon('chev', 'chev') }}</a>
+  </div>
+</section>
+{% endif %}
+
+{% if viewer.is_operator %}
+<section class="sec">
+  <div class="sec-head"><h2>Set up and look after</h2></div>
+  <div class="card list">
+    <a class="row" href="{{ url_for('people.reviews_leaders') }}"><span class="lead-ico">{{ icon('users') }}</span><span class="row-main"><span class="row-title">Leaders</span><span class="row-meta">Who is reviewed, by whom, and their observation logs. {{ n_people }} under review.</span></span>{{ icon('chev', 'chev') }}</a>
+    <a class="row" href="{{ url_for('people.reviews_health') }}"><span class="lead-ico">{{ icon('target') }}</span><span class="row-main"><span class="row-title">Process health</span><span class="row-meta">Is the review process itself being run well?</span></span>{{ icon('chev', 'chev') }}</a>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

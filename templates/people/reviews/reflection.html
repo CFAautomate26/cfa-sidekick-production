@@ -1,0 +1,69 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs %}
+{% from "people/reviews/_parts.html" import rv_styles %}
+{% block title %}My reflection{% endblock %}
+{% block head %}{{ rv_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('My review', url_for('people.reviews_mine')), (cycle, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">My review · {{ cycle }}</p>
+  <h1 class="headline">Your reflection</h1>
+  <p class="triage">{{ period_start|pp_day }} to {{ period_end|pp_day }}. How do you see your own work against each standard?</p>
+</section>
+
+<div class="card">
+  <span class="card-title">How this works</span>
+  <p class="card-meta">For each standard, write what you did in this period and what you would like to get better at. A real example with a date is worth more than a long answer. Leave a box empty if you have nothing to add.</p>
+  <p class="card-meta">Write about your work. You don't need to share anything personal here, such as health, family or time away. If something like that is affecting your work and you would like support, tell the Operator directly.</p>
+  <p class="card-meta"><strong>Who reads this:</strong> your reviewer and the Operator.{% if ai_on %} An AI tool is also given it, with names taken out, to help prepare a first draft for your reviewer. The AI does not decide anything. A person does.{% else %} If the store switches on its AI drafting tool for reviews, what you write here can be given to it too, with names taken out.{% endif %}</p>
+  <p class="card-meta">Your reflection counts as paid time. Write it on shift, or tell the Operator how long it took you.</p>
+</div>
+
+{% if sent_at %}
+<p class="callout">{{ icon('check') }}<span>Sent to your reviewer {{ sent_at|pp_day }}.{% if can_write %} You can still update it until your review is written.{% endif %}</span></p>
+{% endif %}
+
+{% if can_write %}
+<form method="post" action="{{ url_for('people.reviews_mine_reflection', review_id=review_id) }}">
+  {% for group in model.groups %}
+  <section class="sec">
+    <div class="sec-head"><h2>{{ group.name }}</h2></div>
+    {% for dim in group.dimensions %}
+    <div class="card rv-dim" id="d-{{ dim.key }}">
+      <span class="card-title">{{ dim.name }}</span>
+      <p class="rv-def">{{ dim.definition }}</p>
+      <details class="rv-more">
+        <summary>What each level looks like</summary>
+        <ol class="pp-anchors">
+          {% for anchor in dim.anchors %}<li><b>{{ model.levels[loop.index0] }}</b>{{ anchor }}</li>{% endfor %}
+        </ol>
+      </details>
+      <label class="field" for="r-{{ dim.key }}">Your reflection on {{ dim.name }}</label>
+      <textarea id="r-{{ dim.key }}" name="r_{{ dim.key }}" maxlength="{{ caps.reflection }}">{{ words.get(dim.key, '') }}</textarea>
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+  <p class="fine-line">Tap the microphone on your keyboard to talk instead of type. These pages lock after a while without a tap, so save as you go.</p>
+  <div class="btnrow">
+    {% if sent_at %}
+    <button class="btn btn-primary sm" type="submit" name="send" value="1">Update my reflection</button>
+    {% else %}
+    <button class="btn btn-primary sm" type="submit" name="send" value="1">Send to my reviewer</button>
+    <button class="btn btn-secondary sm" type="submit" name="send" value="0">Save and keep writing</button>
+    {% endif %}
+  </div>
+</form>
+{% else %}
+<section class="sec">
+  <div class="sec-head"><h2>What you wrote</h2></div>
+  {% for dim in model.dimensions %}{% if words.get(dim.key) %}
+  <div class="card">
+    <span class="card-title">{{ dim.name }}</span>
+    <p class="rv-said" style="margin-top:8px;">{{ words[dim.key] }}</p>
+  </div>
+  {% endif %}{% endfor %}
+  <p class="rv-quiet">Your reflection can't be changed any more. When your review is shared with you, it appears under My review.</p>
+</section>
+{% endif %}
+{% endblock %}

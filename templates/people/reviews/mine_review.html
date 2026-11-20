@@ -1,0 +1,94 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs %}
+{% from "people/reviews/_parts.html" import rv_styles, leader_standard, leader_notes %}
+{% block title %}My review · {{ r.cycle }}{% endblock %}
+{% block head %}{{ rv_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('My review', url_for('people.reviews_mine')), (r.cycle, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">My review · private to you</p>
+  <h1 class="headline">{{ r.cycle }}</h1>
+  <p class="triage">{{ r.period_start|pp_day }} to {{ r.period_end|pp_day }} · written by {{ r.reviewer }} · shared with you {{ r.shared_at|pp_day }}</p>
+</section>
+
+<div class="card">
+  <span class="card-title">How to read this</span>
+  <p class="card-meta">A review is a starting point for a conversation, not a final word. Each standard shows the level your reviewer chose, what that level looks like, and the notes it is based on. Read it, talk it through with {{ 'the Operator' if r.reviewer == 'The Operator' else r.reviewer }}, and add your own comments at the bottom.</p>
+  <p class="card-meta">Reading your review and talking it through counts as paid time. Need it in another format, such as large print? Ask the Operator.</p>
+  <div class="btnrow no-print"><a class="btn btn-secondary sm" href="{{ url_for('people.reviews_print', review_id=r.id) }}">{{ icon('file') }}Print view</a></div>
+</div>
+
+{% for group in r.groups %}
+<section class="sec">
+  <div class="sec-head"><h2>{{ group.name }}</h2></div>
+  {% for d in group.dimensions %}{{ leader_standard(d) }}{% endfor %}
+</section>
+{% endfor %}
+
+{% if r.loose %}
+<section class="sec">
+  <div class="sec-head"><h2>Other notes from this period</h2></div>
+  <div class="card">{{ leader_notes(r.loose) }}</div>
+</section>
+{% endif %}
+
+<section class="sec" id="summary">
+  <div class="sec-head"><h2>Strengths and growth focus</h2></div>
+  <div class="card">
+    <p class="subhead" style="margin-top:0;">Strengths</p>
+    <p class="rv-said">{{ r.strengths or 'Nothing written here.' }}</p>
+    <p class="subhead">Growth focus</p>
+    <p class="rv-said">{{ r.growth or 'Nothing written here.' }}</p>
+  </div>
+</section>
+
+<section class="sec" id="next">
+  <div class="sec-head"><h2>Next steps</h2></div>
+  <div class="card">
+    {% for a in r.actions %}
+    <div class="rv-line"><span class="what"><b>{{ a.action }}</b><br>Measure: {{ a.measure }}<br>Target: {{ a.target }}<br>Checked on {{ a.check_date|pp_day }}</span>
+      {% if a.done_at %}<span class="badge b-green">{{ icon('check', 'xs') }}Done {{ a.done_at|pp_day }}</span>
+      {% else %}<form method="post" action="{{ url_for('people.reviews_mine_action_done', review_id=r.id, action_id=a.id) }}"><button class="btn btn-secondary sm" type="submit" aria-label="Mark done: {{ a.action }}">Mark done</button></form>{% endif %}</div>
+    {% else %}
+    <p class="rv-quiet" style="margin-top:0;">No next steps were written down.</p>
+    {% endfor %}
+  </div>
+</section>
+
+{% if own_words %}
+<section class="sec" id="reflection">
+  <details class="card rv-more">
+    <summary>Your own reflection for this period</summary>
+    {% for group in r.groups %}{% for d in group.dimensions %}{% if own_words.get(d.key) %}
+    <p class="subhead">{{ d.name }}</p>
+    <p class="rv-said">{{ own_words[d.key] }}</p>
+    {% endif %}{% endfor %}{% endfor %}
+  </details>
+</section>
+{% endif %}
+
+<section class="sec" id="confirm">
+  <div class="sec-head"><h2>Confirm you received it</h2></div>
+  <p class="callout">{{ icon('heart') }}<span>{{ support_text }}</span></p>
+  {% if r.status == 'acknowledged' %}
+  <div class="card">
+    <p>{{ ack_text.format(date=r.discussed_on|pp_day) }}</p>
+    <p class="pp-stamp" style="margin-top:8px;">{{ icon('check', 'xs') }} You confirmed this {{ r.ack_at|pp_when }}.</p>
+    <p class="subhead">Your comments</p>
+    {% if r.ack_comment %}<p class="rv-said">{{ r.ack_comment }}</p>{% else %}<p class="rv-quiet">You did not add comments.</p>{% endif %}
+  </div>
+  {% else %}
+  <form method="post" action="{{ url_for('people.reviews_mine_acknowledge', review_id=r.id) }}" class="card">
+    <p>{{ ack_text.format(date='the date I enter below') }}</p>
+    <label class="field" for="k-date">Date it was discussed with you</label>
+    <input id="k-date" name="discussed_on" type="date" max="{{ today }}" required>
+    <p class="fine-line">Not talked it through yet? Ask your reviewer for a time first, and confirm after.</p>
+    <label class="field" for="k-comment">Your comments <span class="muted">(optional)</span></label>
+    <textarea id="k-comment" name="comment" maxlength="{{ caps.ack_comment }}"></textarea>
+    <p class="fine-line">Say what you see differently, what you would add, or what would help you. Your reviewer and the Operator can read your comments. To raise something privately, or to ask for a second look at this review, speak to the Operator.</p>
+    <label class="checkline"><input type="checkbox" name="confirm" value="1" required><span>I confirm I received this review and it was discussed with me on that date.</span></label>
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">Confirm and save</button></div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, guidance, empty, stamp %}
+{% from "people/reviews/_parts.html" import rv_styles, status_badge %}
+{% block title %}{{ subject.display_name }} · observations{% endblock %}
+{% block head %}{{ rv_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), (subject.display_name, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Leader reviews · observation log</p>
+  <h1 class="headline">{{ subject.display_name }}</h1>
+  <p class="triage">{% if subject.title %}{{ subject.title }}{% if subject.area %} · {{ subject.area }}{% endif %} · {% endif %}reviewer: {{ reviewer }}. Only the reviewer and the Operator can open this log.</p>
+</section>
+
+{% if subject.active %}
+<form method="post" action="{{ url_for('people.reviews_observe', subject_id=subject.id) }}" class="card" id="add">
+  <span class="card-title">Write down what you saw</span>
+  <div class="rv-pair">
+    <div><label class="field" for="o-date">Date you saw it</label><input id="o-date" name="obs_date" type="date" value="{{ draft.obs_date or today }}" max="{{ today }}" required></div>
+    <div><label class="field" for="o-kind">Kind of note</label>
+      <select id="o-kind" name="kind">{% for key, label in kinds.items() %}<option value="{{ key }}"{{ ' selected' if draft.kind == key or (not draft.kind and key == 'note') }}>{{ label }}</option>{% endfor %}</select></div>
+  </div>
+  <label class="field" for="o-standard">Which standard is it about?</label>
+  <select id="o-standard" name="dimension_key">
+    <option value="">Not tied to one standard</option>
+    {% if model %}{% for group in model.groups %}<optgroup label="{{ group.name }}">{% for dim in group.dimensions %}<option value="{{ dim.key }}"{{ ' selected' if draft.dimension_key == dim.key }}>{{ dim.name }}</option>{% endfor %}</optgroup>{% endfor %}{% endif %}
+  </select>
+  <label class="field" for="o-body">What did you see or hear?</label>
+  <textarea id="o-body" name="body" maxlength="{{ caps.observation }}" required>{{ draft.body or '' }}</textarea>
+  <p class="fine-line">Tap the microphone on your keyboard to talk instead of type. Say what happened and what it meant for guests, the team or the store.</p>
+  <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save note</button></div>
+</form>
+{% else %}
+<p class="callout tan">{{ icon('info') }}<span>{{ subject.display_name }} is not under review right now, so new notes can't be added.</span></p>
+{% endif %}
+
+{{ guidance('review', open=not months) }}
+
+{% if reviews %}
+<section class="sec" id="reviews">
+  <div class="sec-head"><h2>Reviews</h2></div>
+  <div class="card list">
+    {% for r in reviews %}
+    <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}"><span class="row-main"><span class="row-title">{{ r.cycle_name }}</span><span class="row-meta">{{ r.period_start|pp_day }} to {{ r.period_end|pp_day }} · due {{ r.due_date|pp_day }}</span><span class="row-meta tags">{{ status_badge(r.status) }}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% for month in months %}
+<section class="sec">
+  <div class="sec-head"><h2>{{ month.label }}</h2></div>
+  {% for o in month.notes %}
+  <article class="card rv-dim" id="o-{{ o.id }}">
+    {% if o.flags %}
+    <div class="callout tan" role="note">{{ icon('alert') }}<span><strong>Check the wording of this note.</strong> It is saved, and it is yours to fix: remove it and write it again if it says more than what happened at work.
+      <ul class="rv-flag">{% for f in o.flags %}<li>“{{ f.term }}” ({{ f.category }}): {{ f.advice }}</li>{% endfor %}</ul></span></div>
+    {% endif %}
+    <div class="rv-tags"{% if not o.flags %} style="margin-top:0;"{% endif %}>
+      <span class="badge {{ 'b-green' if o.kind == 'strength' else ('b-tan' if o.kind == 'growth' else '') }}">{{ kinds.get(o.kind, 'Note') }}</span>
+      <span class="badge b-navy">{{ o.standard or 'Not tied to one standard' }}</span>
+      {% if not o.in_review %}<span class="badge">Left out of the review</span>{% endif %}
+      {% if o.locked %}<span class="badge">{{ icon('lock', 'xs') }}Part of a finished review</span>{% endif %}
+    </div>
+    <p class="rv-said" style="margin-top:10px;">{{ o.body }}</p>
+    <p class="pp-stamp" style="margin-top:8px;">Seen {{ o.obs_date|pp_day }} · written by {{ stamp(o.author_name, o.created_at) }}</p>
+    {% if not o.locked %}
+    <div class="rv-acts no-print">
+      <form method="post" action="{{ url_for('people.reviews_observation_toggle', obs_id=o.id) }}"><button class="btn btn-secondary sm" type="submit">{{ 'Leave out of the review' if o.in_review else 'Count it in the review again' }}</button></form>
+      <details class="rv-more" style="margin-top:0;">
+        <summary>Remove</summary>
+        <form method="post" action="{{ url_for('people.reviews_observation_remove', obs_id=o.id) }}">
+          <p class="fine-line">The note comes off the log. The Operator can still see that it was removed, and by whom.</p>
+          <div class="btnrow"><button class="btn btn-secondary sm" type="submit" aria-label="Remove the note dated {{ o.obs_date|pp_day }}">Yes, remove this note</button></div>
+        </form>
+      </details>
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="sec">{{ empty('No notes yet. The first one takes a minute.') }}</section>
+{% endfor %}
+
+{% if removed %}
+<section class="sec" id="removed">
+  <details class="card rv-more">
+    <summary>Removed notes ({{ removed|length }})</summary>
+    <p class="fine-line">Only you see these. They no longer count toward any review.</p>
+    <ul class="rv-notes">
+      {% for o in removed %}
+      <li><span class="when">Seen {{ o.obs_date|pp_day }} · written by {{ o.author_name }} · removed by {{ stamp(o.removed_by, o.removed_at) }}</span><span class="rv-said">{{ o.body }}</span></li>
+      {% endfor %}
+    </ul>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

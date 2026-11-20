@@ -97,3 +97,57 @@ def queue_job(review_id: int, status: str = "queued", output: dict | None = None
             "VALUES ('review_draft', ?, ?, 'Rae', ?, ?, ?)",
             (review_id, status, shift_db.now_stamp(), json.dumps(output) if output else None, error))
         conn.commit()
+
+
+# --- pages ------------------------------------------------------------------------
+
+DENIED = "That isn&#39;t here, or it isn&#39;t yours to open."
+NOT_YOURS = "That page isn&#39;t available on your sign-in."
+
+
+def page(client, path, status=200) -> str:
+    resp = client.get(path)
+    assert resp.status_code == status, (path, resp.status_code, resp.headers.get("Location"))
+    return resp.data.decode()
+
+
+def post(client, path, data=None) -> str:
+    """Post a form and return the page it lands on."""
+    resp = client.post(path, data=data or {}, follow_redirects=True)
+    assert resp.status_code in (200, 400), (path, resp.status_code)
+    return resp.data.decode()
+
+
+def sent_away(client, path) -> bool:
+    """A page that is not there, or not this person's: back to People home."""
+    resp = client.get(path)
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/shift/people")
+
+
+def opened(action: str) -> list[tuple]:
+    """(who, object id) for every line of this kind in the activity log, newest first."""
+    return [(r["who"], r["object_id"]) for r in people_db.audit_feed() if r["action"] == action]
+
+
+# --- a stand-in for the AI service ---------------------------------------------------
+
+AI_LABEL = "Draft prepared with AI assistance. Not a decision."
+
+
+def draft_reply(system, user):
+    """A well-behaved reply built from the request: every standard cites
+    the notes filed under it."""
+    data = json.loads(user)["data"]
+    dimensions = {}
+    for standard in data["standards"]:
+        cited = [e["id"] for e in data["evidence"] if e["dimension_key"] == standard["key"]]
+        dimensions[standard["key"]] = {
+            "evidence_summary": f"Summary for {standard['key']} from the notes.",
+            "cited": cited, "suggested_level": 3 if cited else None,
+            "anchor_used": standard["anchors"][2], "note": "Two or more notes agree." if cited else ""}
+    first = data["evidence"][0]["id"]
+    return {"dimensions": dimensions,
+            "strengths": [{"text": "Keeps the line moving in a rush.", "cited": [first]}],
+            "growth_areas": [{"text": "Hand the closing list to someone else to finish.", "cited": [first]}],
+            "coaching_questions": ["What would make the close easier to hand over?"],
+            "human_checks": []}

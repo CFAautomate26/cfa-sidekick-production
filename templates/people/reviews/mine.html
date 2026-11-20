@@ -1,0 +1,39 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import empty %}
+{% from "people/reviews/_parts.html" import rv_styles %}
+{% block title %}My review{% endblock %}
+{% block head %}{{ rv_styles() }}{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">People · private to you</p>
+  <h1 class="headline">My review</h1>
+  <p class="triage">Your own reviews, once they are shared with you. Only you, your reviewer and the Operator can open them.</p>
+</section>
+
+{% if not shared and not asks %}
+{{ empty('Nothing here yet.') }}
+{% endif %}
+
+{% if asks %}
+<section class="sec" id="reflection">
+  <div class="sec-head"><h2>Your reflection</h2></div>
+  <p class="sec-note">Before your reviewer writes your review, you are asked how you see your own work against each standard.</p>
+  <div class="card list">
+    {% for r in asks %}
+    <a class="row" href="{{ url_for('people.reviews_mine_review', review_id=r.id) }}"><span class="lead-ico {{ 'navy' if r.reflection_at else 'red' }}">{{ icon('edit') }}</span><span class="row-main"><span class="row-title">{{ r.cycle_name }}</span><span class="row-meta">{{ r.period_start|pp_day }} to {{ r.period_end|pp_day }}</span><span class="row-meta tags">{% if r.reflection_at %}<span class="badge b-green">{{ icon('check', 'xs') }}Sent {{ r.reflection_at|pp_day }}</span>{% elif is_open(r) %}<span class="badge b-red">Waiting for you</span>{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if shared %}
+<section class="sec" id="reviews">
+  <div class="sec-head"><h2>Shared with you</h2></div>
+  <div class="card list">
+    {% for r in shared %}
+    <a class="row" href="{{ url_for('people.reviews_mine_review', review_id=r.id) }}"><span class="lead-ico {{ 'green' if r.status == 'acknowledged' else 'red' }}">{{ icon('file') }}</span><span class="row-main"><span class="row-title">{{ r.cycle_name }}</span><span class="row-meta">{{ r.period_start|pp_day }} to {{ r.period_end|pp_day }}</span><span class="row-meta tags">{% if r.status == 'acknowledged' %}<span class="badge b-green">{{ icon('check', 'xs') }}You confirmed it {{ r.ack_at|pp_day }}</span>{% else %}<span class="badge b-red">Read it and confirm</span>{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

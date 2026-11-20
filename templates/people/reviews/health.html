@@ -1,0 +1,93 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, bar, empty %}
+{% from "people/reviews/_parts.html" import rv_styles %}
+{% block title %}Process health{% endblock %}
+{% block head %}{{ rv_styles() }}
+<style>
+.rv-stat { padding: 12px 0; border-top: 1px solid var(--rule); }
+.rv-stat:first-of-type { border-top: 0; padding-top: 4px; }
+.rv-stat .name { display: block; font-weight: 700; color: var(--text-strong); }
+.rv-stat .fig { display: block; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.rv-stat .why { display: block; font-size: var(--fs-small); color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
+.rv-level { display: grid; grid-template-columns: minmax(96px, 30%) 1fr; gap: 6px 10px; align-items: center; margin-top: 8px; font-size: var(--fs-small); }
+</style>
+{% endblock %}
+{% block content %}
+{# "3 of 8 (38%)": the count always sits beside the percentage, because
+   with a handful of leaders one person moves the number a lot. #}
+{% macro share(n, d) %}{{ n }} of {{ d }}{% if d %} ({{ (100 * n / d)|round|int }}%){% endif %}{% endmacro %}
+{{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), ('Process health', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Leader reviews · the Operator only</p>
+  <h1 class="headline">Process health</h1>
+  <p class="triage">Is the review process itself being run well? These are counts about the process, never about one leader.</p>
+</section>
+
+{% if not stats %}
+{{ empty('No review cycle yet. These figures appear once a cycle has started.') }}
+{% else %}
+{% if cycles|length > 1 %}
+<nav class="chips" aria-label="Choose a cycle" style="margin-top:22px;">
+  {% for c in cycles %}<a class="chip{{ ' on' if c.id == stats.cycle.id }}" href="{{ url_for('people.reviews_health') }}?cycle={{ c.id }}"{% if c.id == stats.cycle.id %} aria-current="page"{% endif %}>{{ c.name }}</a>{% endfor %}
+</nav>
+{% endif %}
+
+<div class="card" style="margin-top:22px;">
+  <span class="card-title">{{ stats.cycle.name }}</span>
+  <span class="card-meta">{{ stats.cycle.period_start|pp_day }} to {{ stats.cycle.period_end|pp_day }} · due {{ stats.cycle.due_date|pp_day }}. With this few leaders, read the counts first and the percentages second. Ratings are counted on finished reviews.</span>
+
+  <div class="rv-stat"><span class="name">Reviews finished</span>
+    <span class="fig">{{ share(stats.finalised, stats.total) }}</span>
+    <span class="why">Low means the process is not being run. Check by reviewer.</span></div>
+  <div class="rv-stat"><span class="name">Finished on or before the due date</span>
+    <span class="fig">{{ share(stats.on_time, stats.finalised) }}</span>
+    <span class="why">Late reviews tend to be written in a rush, from memory.</span></div>
+</div>
+
+<div class="card">
+  <span class="card-title">How the levels were used</span>
+  <span class="card-meta">{{ stats.ratings }} rating{{ '' if stats.ratings == 1 else 's' }} on finished reviews.</span>
+  <div class="rv-level">
+    {% for name in levels %}<span>{{ name }}</span>{{ bar(stats.levels[loop.index0], stats.ratings) }}{% endfor %}
+    <span>Not enough to rate yet</span>{{ bar(stats.not_enough, stats.ratings) }}
+  </div>
+  <p class="rv-quiet">Nearly everything in the top levels can mean ratings are generous. A pile in the middle can mean people are playing safe. “Not enough to rate yet” is an honest answer, and a prompt to write more notes next time.</p>
+</div>
+
+<div class="card">
+  <span class="card-title">Evidence behind the ratings</span>
+  <div class="rv-stat"><span class="name">Notes per rated standard</span>
+    <span class="fig">{{ stats.evidence_items }} note{{ '' if stats.evidence_items == 1 else 's' }} across {{ stats.rated }} level{{ '' if stats.rated == 1 else 's' }} given{% if stats.rated %} (about {{ (stats.evidence_items / stats.rated)|round(1) }} each){% endif %}</span>
+    <span class="why">Few notes means ratings rest on impression.</span></div>
+  <div class="rv-stat"><span class="name">Levels given with no notes behind them</span>
+    <span class="fig">{{ share(stats.no_evidence, stats.rated) }}</span></div>
+</div>
+
+<div class="card">
+  <span class="card-title">The AI draft</span>
+  {% if stats.ai_shown %}
+  <div class="rv-stat"><span class="name">Reviewer's own level the same as the AI suggestion</span>
+    <span class="fig">{{ share(stats.ai_same, stats.ai_shown) }}</span>
+    <span class="why">Counted where a suggestion was shown, against the level the reviewer gave. The suggestion only appears after the reviewer has saved their own rating. A very high share, together with many ratings saved just before finishing, is a prompt to ask whether people are really rating first.</span></div>
+  <div class="rv-stat"><span class="name">AI said there was not enough evidence</span>
+    <span class="fig">{{ share(stats.ai_not_enough, stats.ai_shown) }}</span>
+    <span class="why">High means the notes are thin, or not filed under a standard.</span></div>
+  {% else %}
+  <p class="rv-quiet">No AI suggestion was shown on a finished review in this cycle.</p>
+  {% endif %}
+  <div class="rv-stat"><span class="name">Ratings last saved in the {{ quick_minutes }} minutes before the review was finished</span>
+    <span class="fig">{{ share(stats.quick, stats.ratings) }}</span>
+    <span class="why">A few is normal. Nearly all of them means the review was rated in one sitting at the end.</span></div>
+</div>
+
+<div class="card">
+  <span class="card-title">Calibration and follow-through</span>
+  <div class="rv-stat"><span class="name">Levels changed in calibration</span>
+    <span class="fig">{{ share(stats.cal_up + stats.cal_down + stats.cal_other, stats.ratings) }} · {{ stats.cal_up }} up, {{ stats.cal_down }} down{% if stats.cal_other %}, {{ stats.cal_other }} to or from “not enough”{% endif %}</span>
+    <span class="why">None at all can mean calibration is a rubber stamp. A lot, or all in one direction, means reviewers are not reading the standards the same way.</span></div>
+  <div class="rv-stat"><span class="name">Agreed actions done by their check date</span>
+    <span class="fig">{{ share(stats.actions_on_time, stats.actions_due) }}{% if stats.actions != stats.actions_due %} · {{ stats.actions - stats.actions_due }} not due yet{% endif %}</span>
+    <span class="why">Counted for actions whose check date has passed. Low means the review ended at the meeting.</span></div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,320 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, guidance, escalation, level_pills, stamp %}
+{% from "people/reviews/_parts.html" import rv_styles, status_badge, note_list %}
+{% set drafting = ai.status == 'running' %}
+{% block title %}{{ review.display_name }} · review{% endblock %}
+{% block head %}{{ rv_styles() }}
+{% if drafting %}<meta http-equiv="refresh" content="5; url={{ url_for('people.reviews_review', review_id=review.id) }}#ai">{% endif %}
+{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), (review.display_name, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Leader review · {{ review.cycle_name }}</p>
+  <h1 class="headline">{{ review.display_name }}</h1>
+  <p class="triage">{% if review.title %}{{ review.title }}{% if review.area %} · {{ review.area }}{% endif %} · {% endif %}{{ review.period_start|pp_day }} to {{ review.period_end|pp_day }} · due <b>{{ review.due_date|pp_day }}</b> · reviewer: {{ reviewer }} {{ status_badge(review.status) }}{% if review.editable and review.due_date < today %} <span class="badge b-tan">Past due</span>{% endif %}</p>
+</section>
+
+{% if review.status == 'on_hold' %}
+<p class="callout warm" role="status" id="hold">{{ icon('shield') }}<span>{{ hold_text }}</span></p>
+  {% if gate is not none %}
+{{ escalation('review') }}
+<div class="card" id="hold-answers">
+  <span class="card-title">Why it stopped</span>
+  <p class="card-meta">Put on hold by {{ stamp(review.gate_by, review.gate_at) }}. Only you see this.</p>
+  {% if gate.since_release == 'yes' %}
+  <p style="margin-top:10px;">The reviewer said something has changed since you last released this review.</p>
+  {% endif %}
+  <p class="subhead">Answered “Yes or not sure”</p>
+  <ul class="rv-flag">
+    {% for key, question in gate_questions %}{% if gate.answers.get(key) == 'yes' %}<li>{{ question }}</li>{% endif %}{% endfor %}
+  </ul>
+  <p class="fine-line">Look at this with the reviewer in person, outside this tool. Check that nothing connected to these answers is counted in a rating, a comment or a note: time away, an accommodation, a health condition, pregnancy, an injury, or a concern someone raised. After you release it, time away can be marked on the review by its dates, so notes from those days stop counting. This tool keeps no record of what you find, only that you looked.</p>
+  <form method="post" action="{{ url_for('people.reviews_release', review_id=review.id) }}">
+    <fieldset class="rv-set">
+      <legend class="subhead">Release the hold</legend>
+      {% for key, text in release_notes.items() %}
+      <label class="rv-choice"><input type="radio" name="note" value="{{ key }}" required><span>{{ text }}</span></label>
+      {% endfor %}
+    </fieldset>
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">Release the hold</button></div>
+  </form>
+</div>
+  {% endif %}
+{% elif review.hold_note and review.editable %}
+<p class="callout">{{ icon('info') }}<span>The Operator looked at this review and released it {{ review.released_at|pp_day }}. {{ review.hold_note }}</span></p>
+{% endif %}
+
+{% if review.status == 'final' %}
+<div class="card" id="next">
+  <span class="card-title">Finalised</span>
+  <p class="card-meta">Finished by {{ stamp(review.finalised_by, review.finalised_at) }}. Talk it through with {{ review.display_name }}, then share it so they can read it and confirm.</p>
+  {% if not linked %}<p class="fine-line">This leader has no Team Hub sign-in linked, so they can't read it here. Print it for them.</p>{% endif %}
+  <div class="btnrow no-print">
+    <form method="post" action="{{ url_for('people.reviews_share', review_id=review.id) }}"><button class="btn btn-primary sm" type="submit">Share with {{ review.display_name }}</button></form>
+    <a class="btn btn-secondary sm" href="{{ url_for('people.reviews_print', review_id=review.id) }}">{{ icon('file') }}Print view</a>
+  </div>
+  {% if viewer.is_operator and review.cycle_status == 'open' %}
+  <details class="rv-more no-print">
+    <summary>Reopen this review</summary>
+    <form method="post" action="{{ url_for('people.reviews_reopen', review_id=review.id) }}">
+      <p class="fine-line">It becomes a draft again for its reviewer, and has to be finished again before it can be shared.</p>
+      <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Yes, reopen it</button></div>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% elif review.status in ('shared', 'acknowledged') %}
+<div class="card" id="next">
+  <span class="card-title">{{ 'Acknowledged' if review.status == 'acknowledged' else 'Shared' }}</span>
+  <p class="card-meta">Shared by {{ stamp(review.shared_by, review.shared_at) }}.
+    {% if review.status == 'acknowledged' %}{{ review.display_name }} confirmed receipt {{ review.ack_at|pp_day }} and that it was discussed on {{ review.discussed_on|pp_day }}. That confirms receipt and discussion, not that they see it the same way.
+    {% else %}Waiting for {{ review.display_name }} to read it and confirm it was discussed.{% endif %}</p>
+  <div class="btnrow no-print"><a class="btn btn-secondary sm" href="{{ url_for('people.reviews_print', review_id=review.id) }}">{{ icon('file') }}Print view</a></div>
+  {% if review.status == 'acknowledged' %}
+  <div id="leader-comments">
+    <p class="subhead">The leader's comments</p>
+    {% if concern %}
+    <p class="callout warm" role="status">{{ icon('alert') }}<span><strong>{{ concern }}.</strong> Read them, and talk with the leader. If they raise harassment, safety or how they were treated, it goes into the store's complaint process, not this review.</span></p>
+    {{ escalation('review') }}
+    {% endif %}
+    {% if review.ack_comment %}<p class="rv-said">{{ review.ack_comment }}</p>{% else %}<p class="rv-quiet">No comments were added.</p>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% elif not review.editable and review.status == 'draft' %}
+<p class="callout tan">{{ icon('info') }}<span>This cycle is closed, so this review was left unfinished and can't be changed.</span></p>
+{% endif %}
+
+{{ guidance('review', open=(review.editable and not rated)) }}
+
+{% if reflection %}
+<details class="card rv-more" id="reflection" open>
+  <summary>{{ icon('chat', 'sm') }}{{ review.display_name }}'s own reflection</summary>
+  <p class="fine-line">Their own words, sent {{ review.reflection_at|pp_day }}. Read it as their account of the period, alongside what you saw.</p>
+  {% for dim in model.dimensions %}{% if reflection.get(dim.key) %}
+  <p class="subhead">{{ dim.name }}</p>
+  <p class="rv-said">{{ reflection[dim.key] }}</p>
+  {% endif %}{% endfor %}
+</details>
+{% endif %}
+
+{% if ai.on %}
+<div class="card" id="ai">
+  <span class="card-title">AI draft</span>
+  {% if ai.status == 'running' %}
+  <p class="callout" role="status" style="margin-top:10px;">{{ icon('clock') }}<span><strong>Drafting…</strong> This page refreshes itself every 5 seconds until the draft is ready. Saving is paused until then, so wait before you type.</span></p>
+  {% elif ai.status == 'failed' %}
+  <p class="callout tan" role="status" style="margin-top:10px;">{{ icon('alert') }}<span>The AI draft didn't finish{{ ' in time' if ai.job.error == 'timed out' }}. Your notes and ratings are untouched, and the review does not need a draft. You can try again.</span></p>
+  {% elif ai.status == 'done' %}
+  <p class="card-meta">Asked for by {{ stamp(ai.job.requested_by, ai.job.requested_at) }}. The draft for a standard appears under it once your own rating for that standard is saved. It is a second read of the same notes, with names taken out. It is not a decision.</p>
+  {% if ai.checks %}
+  <p class="subhead">Human check needed</p>
+  <ul class="rv-flag">{% for line in ai.checks %}<li>{{ line }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% else %}
+  <p class="card-meta">An AI tool can read the notes for this period, with names taken out, and prepare a draft for you to check. It never sees your ratings. Rate each standard yourself first: the draft for a standard appears only after your own rating is saved.</p>
+  {% endif %}
+  {% if review.editable and ai.status != 'running' %}
+  <form method="post" action="{{ url_for('people.reviews_ai', review_id=review.id) }}" class="btnrow no-print">
+    <button class="btn btn-secondary sm" type="submit">{{ icon('zap') }}{{ 'Try again' if ai.status == 'failed' else ('Ask for a new draft' if ai.status == 'done' else 'Ask the AI for a draft') }}</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{% for group in model.groups %}
+<section class="sec">
+  <div class="sec-head"><h2>{{ group.name }}</h2></div>
+  {% for dim in group.dimensions %}
+  {% set row = rated.get(dim.key) %}
+  {% set is_rated = row and (row.level or row.not_enough) %}
+  <div class="card rv-dim" id="d-{{ dim.key }}">
+    <span class="card-title">{{ dim.name }}</span>
+    <p class="rv-def">{{ dim.definition }}</p>
+    <details class="rv-more"{{ ' open' if review.editable and not is_rated }}>
+      <summary>What each level looks like</summary>
+      <ol class="pp-anchors">
+        {% for anchor in dim.anchors %}<li><b>{{ model.levels[loop.index0] }}</b>{{ anchor }}</li>{% endfor %}
+      </ol>
+    </details>
+    <p class="subhead">Evidence for this period</p>
+    {% if evidence[dim.key] %}
+    {{ note_list(evidence[dim.key], kinds) }}
+    {% else %}
+    <p class="rv-quiet">No notes for this standard in this period. “Not enough to rate yet” is a fair answer.</p>
+    {% endif %}
+
+    {% if review.editable %}
+    <form method="post" action="{{ url_for('people.reviews_rate', review_id=review.id) }}">
+      <input type="hidden" name="dimension_key" value="{{ dim.key }}">
+      <fieldset class="rv-set"{{ ' disabled' if drafting }}>
+        <legend class="subhead">Your rating</legend>
+        {% for name in model.levels %}
+        <label class="rv-choice"><input type="radio" name="level" value="{{ loop.index }}"{{ ' checked' if row and row.level == loop.index }} required><span><b>{{ name }}</b></span></label>
+        {% endfor %}
+        <label class="rv-choice"><input type="radio" name="level" value="not_enough"{{ ' checked' if row and row.not_enough }} required><span><b>Not enough to rate yet</b><small>For when you have not seen enough this period. It is never a mark against the leader.</small></span></label>
+        <label class="field" for="c-{{ dim.key }}">Comment <span class="muted">(what you saw that puts it at this level)</span></label>
+        <textarea id="c-{{ dim.key }}" name="comment" maxlength="{{ caps.comment }}">{{ row.comment if row else '' }}</textarea>
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save {{ dim.name }}</button>{% if is_rated %}<span class="pp-stamp">Saved by {{ stamp(row.rated_by, row.rated_at) }}</span>{% endif %}</div>
+      </fieldset>
+    </form>
+    {% else %}
+    <p class="subhead">Rating</p>
+    {% if row and row.level %}<p>{{ level_pills(model.levels, row.level) }}</p>
+    {% elif row and row.not_enough %}<p><span class="badge">Not enough to rate yet</span></p>
+    {% else %}<p class="rv-quiet">Not rated.</p>{% endif %}
+    {% if row and row.comment %}<p class="rv-said" style="margin-top:8px;">{{ row.comment }}</p>{% endif %}
+    {% if row and row.cal_at %}
+    <p class="rv-quiet">Changed in calibration by {{ stamp(row.cal_by, row.cal_at) }}. The reviewer gave: {{ model.levels[row.cal_from - 1] if row.cal_from else 'Not enough to rate yet' }}. Reason: {{ row.cal_reason }}</p>
+    {% endif %}
+    {% endif %}
+
+    {% if ai.on %}
+      {% set panel = ai.panels.get(dim.key) %}
+      {% if panel %}
+    <div class="rv-ai" id="ai-{{ dim.key }}">
+      <span class="rv-ai-label">Draft prepared with AI assistance. Not a decision.</span>
+      <p>{{ panel.evidence_summary }}</p>
+      {% if panel.cited %}<p>Notes it used: {% for id in panel.cited %}<a href="#e-{{ id }}">note {{ id }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+      <p><strong>Suggested level:</strong> {% if panel.suggested_level %}{{ model.levels[panel.suggested_level - 1] }}{% elif panel.withheld %}none (see the checks below){% else %}Not enough evidence{% endif %}</p>
+      {% if panel.anchor_used %}<p><strong>Level description it relied on:</strong> “{{ panel.anchor_used }}”</p>{% endif %}
+      {% if panel.note %}<p>{{ panel.note }}</p>{% endif %}
+      {% if panel.checks %}
+      <p><strong>Human check needed</strong></p>
+      <ul>{% for line in panel.checks %}<li>{{ line }}</li>{% endfor %}</ul>
+      {% endif %}
+      <p class="rv-quiet">Your own rating stands unless you choose to change it.</p>
+    </div>
+      {% elif not is_rated and review.editable %}
+    <p class="rv-quiet">Rate this yourself first. The AI suggestion appears after you save.</p>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endfor %}
+
+{% if loose %}
+<section class="sec" id="loose">
+  <div class="sec-head"><h2>Not tied to one standard</h2></div>
+  <div class="card">
+    <p class="card-meta">Notes from this period that were not filed under a standard.</p>
+    {{ note_list(loose, kinds) }}
+  </div>
+</section>
+{% endif %}
+
+<section class="sec" id="summary">
+  <div class="sec-head"><h2>Strengths and growth focus</h2></div>
+  {% if review.editable %}
+  <form method="post" action="{{ url_for('people.reviews_summary', review_id=review.id) }}" class="card">
+    <fieldset class="rv-set"{{ ' disabled' if drafting }}>
+      <legend class="sr">Strengths and growth focus</legend>
+      <label class="field" for="s-strengths">Strengths: what to keep doing</label>
+      <textarea id="s-strengths" name="strengths" maxlength="{{ caps.summary }}">{{ review.strengths }}</textarea>
+      <label class="field" for="s-growth">Growth focus: the one or two things that would make the biggest difference</label>
+      <textarea id="s-growth" name="growth" maxlength="{{ caps.summary }}">{{ review.growth }}</textarea>
+      <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save</button></div>
+    </fieldset>
+  </form>
+  {% else %}
+  <div class="card">
+    <p class="subhead" style="margin-top:0;">Strengths</p>
+    <p class="rv-said">{{ review.strengths or 'Nothing written.' }}</p>
+    <p class="subhead">Growth focus</p>
+    <p class="rv-said">{{ review.growth or 'Nothing written.' }}</p>
+  </div>
+  {% endif %}
+  {% if ai.status == 'done' %}
+    {% if ai.strengths or ai.growth %}
+  <div class="rv-ai" id="ai-summary">
+    <span class="rv-ai-label">Draft prepared with AI assistance. Not a decision.</span>
+    <p class="rv-quiet">Wording to copy from if it is true and useful. Nothing is filled in for you.</p>
+    {% if ai.strengths %}<p><strong>Strengths</strong></p><ul>{% for item in ai.strengths %}<li>{{ item.text }} ({% for id in item.cited %}<a href="#e-{{ id }}">note {{ id }}</a>{{ ', ' if not loop.last }}{% endfor %})</li>{% endfor %}</ul>{% endif %}
+    {% if ai.growth %}<p><strong>Growth focus</strong></p><ul>{% for item in ai.growth %}<li>{{ item.text }} ({% for id in item.cited %}<a href="#e-{{ id }}">note {{ id }}</a>{{ ', ' if not loop.last }}{% endfor %})</li>{% endfor %}</ul>{% endif %}
+  </div>
+    {% elif not ai.all_rated %}
+  <p class="rv-quiet">Rate every standard first. The AI's suggested wording appears after that.</p>
+    {% endif %}
+  {% endif %}
+</section>
+
+{% if ai.questions %}
+<section class="sec" id="questions">
+  <div class="sec-head"><h2>Questions for the conversation</h2></div>
+  <div class="rv-ai" style="margin-top:0;">
+    <span class="rv-ai-label">Draft prepared with AI assistance. Not a decision.</span>
+    <ul>{% for q in ai.questions %}<li>{{ q }}</li>{% endfor %}</ul>
+    <p class="rv-quiet">Open questions to ask, so the leader does the thinking. They are not saved on the review.</p>
+  </div>
+</section>
+{% endif %}
+
+<section class="sec" id="actions">
+  <div class="sec-head"><h2>Agreed actions</h2></div>
+  <div class="card">
+    {% for a in actions %}
+    <div class="rv-line"><span class="what"><b>{{ a.action }}</b><br>Measure: {{ a.measure }}<br>Target: {{ a.target }}<br>Checked on {{ a.check_date|pp_day }}{% if a.done_at %} <span class="badge b-green">{{ icon('check', 'xs') }}Done {{ a.done_at|pp_day }}</span>{% endif %}</span>
+      {% if review.editable %}<form method="post" action="{{ url_for('people.reviews_action_remove', review_id=review.id, action_id=a.id) }}"><button class="btn btn-secondary sm" type="submit" aria-label="Remove the action: {{ a.action }}"{{ ' disabled' if drafting }}>Remove</button></form>{% endif %}</div>
+    {% else %}
+    <p class="rv-quiet" style="margin-top:0;">No actions yet.{% if review.editable %} Agree them in the conversation, then write them here.{% endif %}</p>
+    {% endfor %}
+  </div>
+  {% if review.editable %}
+  <form method="post" action="{{ url_for('people.reviews_action_add', review_id=review.id) }}" class="card">
+    <fieldset class="rv-set"{{ ' disabled' if drafting }}>
+      <legend class="card-title">Add an action</legend>
+      <p class="fine-line">{{ action_rule }}</p>
+      <label class="field" for="a-action">Action</label>
+      <input id="a-action" name="action" type="text" maxlength="{{ caps.action }}" required>
+      <label class="field" for="a-measure">Measure: how will you both know?</label>
+      <input id="a-measure" name="measure" type="text" maxlength="{{ caps.action }}" required>
+      <div class="rv-pair">
+        <div><label class="field" for="a-target">Target</label><input id="a-target" name="target" type="text" maxlength="{{ caps.action }}" required></div>
+        <div><label class="field" for="a-check">Day it gets checked</label><input id="a-check" name="check_date" type="date" required></div>
+      </div>
+      <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add action</button></div>
+    </fieldset>
+  </form>
+  {% endif %}
+</section>
+
+{% if review.editable or away %}
+<section class="sec" id="away">
+  <div class="sec-head"><h2>Time away</h2></div>
+  <div class="card">
+    <p class="card-meta">Dates only. Don't write the reason. Notes dated inside these days do not count toward this review, and time away is never a mark against anyone.</p>
+    {% for start, end in away %}
+    <div class="rv-line"><span class="what">{{ start|pp_day }}{% if end != start %} to {{ end|pp_day }}{% endif %}</span>
+      {% if review.editable %}<form method="post" action="{{ url_for('people.reviews_time_away', review_id=review.id) }}"><input type="hidden" name="remove" value="{{ start }}|{{ end }}"><button class="btn btn-secondary sm" type="submit"{{ ' disabled' if drafting }}>Remove</button></form>{% endif %}</div>
+    {% endfor %}
+    {% if review.editable %}
+    <form method="post" action="{{ url_for('people.reviews_time_away', review_id=review.id) }}">
+      <fieldset class="rv-set"{{ ' disabled' if drafting }}>
+        <legend class="sr">Add days away</legend>
+        <div class="rv-pair">
+          <div><label class="field" for="t-start">First day away</label><input id="t-start" name="start" type="date" required></div>
+          <div><label class="field" for="t-end">Last day away</label><input id="t-end" name="end" type="date"></div>
+        </div>
+        <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Add these dates</button></div>
+      </fieldset>
+    </form>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if review.editable %}
+<section class="sec no-print" id="finish">
+  <div class="card">
+    <span class="card-title">Finish this review</span>
+    {% if unrated %}
+    <p class="card-meta">{{ unrated|length }} standard{{ ' still needs' if unrated|length == 1 else 's still need' }} a level or “Not enough to rate yet”: {% for dim in unrated %}<a href="#d-{{ dim.key }}">{{ dim.name }}</a>{{ ', ' if not loop.last }}{% endfor %}.</p>
+    {% else %}
+    <p class="card-meta">Every standard is rated. The next page checks your wording and asks a few questions before the review is finished.</p>
+    {% endif %}
+    <div class="btnrow"><a class="btn btn-primary sm" href="{{ url_for('people.reviews_finalise', review_id=review.id) }}">Check and finish</a></div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

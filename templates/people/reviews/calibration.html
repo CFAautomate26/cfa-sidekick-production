@@ -1,0 +1,105 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, bar, empty %}
+{% from "people/reviews/_parts.html" import rv_styles, status_badge %}
+{% block title %}Calibration · {{ cycle.name }}{% endblock %}
+{% block head %}{{ rv_styles() }}
+<style>
+.rv-cal th, .rv-cal td { white-space: nowrap; }
+.rv-cal td.lvl { font-variant-numeric: tabular-nums; color: var(--text-strong); }
+.rv-cal td.lvl small { display: block; color: var(--text-muted); font-size: 0.75rem; }
+.rv-cal td:first-child { color: var(--text-strong); font-weight: 700; }
+.rv-level { display: grid; grid-template-columns: minmax(96px, 30%) 1fr; gap: 6px 10px; align-items: center; margin-top: 8px; font-size: var(--fs-small); }
+</style>
+{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), (cycle.name, url_for('people.reviews_cycle', cycle_id=cycle.id)), ('Calibration', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Leader reviews · the Operator only</p>
+  <h1 class="headline">Calibration</h1>
+  <p class="triage">{{ cycle.name }}. Are the same words being read the same way by every reviewer? Leaders are in alphabetical order. There are no totals and no ranking: each level stands beside its own evidence.</p>
+</section>
+
+{% if not model %}
+{{ empty('This cycle has no reviews yet.') }}
+{% else %}
+<div class="card">
+  <span class="card-title">How to read the table</span>
+  <p class="card-meta">{% for name in model.levels %}<b>{{ name[:1] }}{{ loop.index }}</b> = {{ name }}{{ ' · ' if not loop.last }}{% endfor %} · <b>–</b> = not enough to rate yet · <b>*</b> = changed in calibration. Under each level is the number of notes behind it. Only finished reviews show levels.</p>
+</div>
+
+<div class="card table pp-scroll">
+  <table class="plain rv-cal">
+    <thead><tr><th scope="col">Leader</th><th scope="col">Reviewer</th>{% for dim in model.dimensions %}<th scope="col">{{ dim.name }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr id="r-{{ row.review.id }}">
+        <td><a href="{{ url_for('people.reviews_review', review_id=row.review.id) }}">{{ row.review.display_name }}</a></td>
+        <td>{{ row.reviewer }}</td>
+        {% if row.review.done %}
+          {% for dim in model.dimensions %}
+          {% set cell = row.cells.get(dim.key) %}
+          <td class="lvl">{% if not cell %}<span class="sr">Not rated</span>{% elif cell.not_enough %}–<span class="sr"> Not enough to rate yet</span>{% else %}{{ model.levels[cell.level - 1][:1] }}{{ cell.level }}<span class="sr"> {{ model.levels[cell.level - 1] }}</span>{% endif %}{% if cell and cell.changed %}*<span class="sr"> changed in calibration</span>{% endif %}{% if cell %}<small>{{ cell.evidence }} note{{ '' if cell.evidence == 1 else 's' }}</small>{% endif %}</td>
+          {% endfor %}
+        {% else %}
+          <td colspan="{{ model.dimensions|length }}">{{ status_badge(row.review.status) }} Not finished yet</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<section class="sec" id="reviewers">
+  <div class="sec-head"><h2>How each reviewer used the levels</h2></div>
+  <p class="sec-note">Conversation starters, not verdicts. A reviewer may simply have a strong group, or too few reviews to say anything. Ask what they saw.</p>
+  {% for r in reviewers %}
+  <div class="card">
+    <span class="card-title">{{ r.name }}</span>
+    <span class="card-meta">{{ r.reviews }} finished review{{ '' if r.reviews == 1 else 's' }} · {{ r.given }} level{{ '' if r.given == 1 else 's' }} given{% if r.not_enough %} · {{ r.not_enough }} not enough to rate yet{% endif %}</span>
+    <div class="rv-level">
+      {% for name in model.levels %}<span>{{ name }}</span>{{ bar(r.levels[loop.index0], r.given) }}{% endfor %}
+    </div>
+    <p class="rv-quiet">{{ r.top_two }} of {{ r.given }} levels are in the top two.{% if r.mostly_top %} <strong>Gives mostly the top two levels.</strong>{% endif %}</p>
+    <p class="rv-quiet">{% if r.flat_of %}In {{ r.flat_reviews }} of {{ r.flat_of }} review{{ '' if r.flat_of == 1 else 's' }}, nearly every standard got the same level.{% if r.mostly_flat %} <strong>Gives nearly the same level across every standard.</strong>{% endif %}{% else %}Too few standards rated to say whether levels vary across standards.{% endif %}</p>
+  </div>
+  {% else %}
+  {{ empty('No finished reviews in this cycle yet.') }}
+  {% endfor %}
+</section>
+
+<section class="sec" id="team">
+  <div class="sec-head"><h2>The team picture</h2></div>
+  <p class="sec-note">How many leaders are at each level of each standard. Where most leaders are still getting there is where development time will pay off.</p>
+  {% for t in team %}
+  <div class="card">
+    <span class="card-title">{{ t.dim.name }}</span>
+    <div class="rv-level">
+      {% for name in model.levels %}<span>{{ name }}</span>{{ bar(t.levels[loop.index0], t.total) }}{% endfor %}
+      {% if t.not_enough %}<span>Not enough to rate yet</span>{{ bar(t.not_enough, t.total) }}{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="sec" id="change">
+  <div class="sec-head"><h2>Change a level</h2></div>
+  {% if can_change %}
+  <form method="post" action="{{ url_for('people.reviews_calibration_change', cycle_id=cycle.id) }}" class="card">
+    <p class="card-meta" style="margin-top:0;">Only for a review that is finalised and not yet shared. The reviewer's own level and your reason are kept with the review, and the change is written in the activity log. Talk to the reviewer first: the point is a shared reading of the standard.</p>
+    <label class="field" for="k-review">Leader</label>
+    <select id="k-review" name="review_id" required>{% for row in can_change %}<option value="{{ row.review.id }}">{{ row.review.display_name }}</option>{% endfor %}</select>
+    <label class="field" for="k-dim">Standard</label>
+    <select id="k-dim" name="dimension_key" required>{% for dim in model.dimensions %}<option value="{{ dim.key }}">{{ dim.name }}</option>{% endfor %}</select>
+    <label class="field" for="k-level">New level</label>
+    <select id="k-level" name="level" required>{% for name in model.levels %}<option value="{{ loop.index }}">{{ name }}</option>{% endfor %}<option value="not_enough">Not enough to rate yet</option></select>
+    <label class="field" for="k-reason">Reason</label>
+    <textarea id="k-reason" name="reason" maxlength="500" required></textarea>
+    <p class="fine-line">Say what in the notes or the level description supports the change. Leave out anything personal.</p>
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">Change the level</button></div>
+  </form>
+  {% else %}
+  {{ empty('No review in this cycle is finalised and waiting to be shared, so there is nothing to change here.') }}
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

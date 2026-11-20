@@ -1,0 +1,66 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs %}
+{% from "people/reviews/_parts.html" import rv_styles %}
+{% set back = url_for('people.reviews_review', review_id=review.id) %}
+{% block title %}Finish · {{ review.display_name }}{% endblock %}
+{% block head %}{{ rv_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), (review.display_name, back), ('Finish', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Leader review · {{ review.cycle_name }}</p>
+  <h1 class="headline">Check and finish</h1>
+  <p class="triage">{{ review.display_name }}'s review. Nothing is shared with them on this page.</p>
+</section>
+
+{% if missing %}
+<div class="callout warm" role="alert">{{ icon('alert') }}<span><strong>{{ missing|length }} standard{{ ' still needs' if missing|length == 1 else 's still need' }} a rating.</strong> Give each one a level or “Not enough to rate yet”, then come back.
+  <ul class="rv-flag">{% for dim in missing %}<li><a href="{{ back }}#d-{{ dim.key }}">{{ dim.name }}</a></li>{% endfor %}</ul></span></div>
+<div class="btnrow"><a class="btn btn-secondary sm" href="{{ back }}">Back to the review</a></div>
+{% else %}
+
+{% if thin %}
+<div class="callout tan" role="note">{{ icon('info') }}<span><strong>Rated with no notes listed.</strong> A level with nothing written behind it is hard to explain to the leader. Add what you saw to your comment, or choose “Not enough to rate yet”.
+  <ul class="rv-flag">{% for dim in thin %}<li><a href="{{ back }}#d-{{ dim.key }}">{{ dim.name }}</a></li>{% endfor %}</ul></span></div>
+{% endif %}
+
+<form method="post" action="{{ url_for('people.reviews_finalise', review_id=review.id) }}">
+  {% if flags %}
+  <div class="card" id="wording">
+    <span class="card-title">Check your wording</span>
+    <p class="card-meta">These words are often fine. They are also where a review can slip from what someone did into who they are, or into something that must never count. Read each one. To change it, go back to the review.</p>
+    {% for item in flags %}
+    <p class="subhead">{{ item.where }}</p>
+    <ul class="rv-flag">{% for f in item.flags %}<li>“{{ f.term }}” ({{ f.category }}): {{ f.advice }}</li>{% endfor %}</ul>
+    {% endfor %}
+    <label class="checkline"><input type="checkbox" name="wording_read" value="1" required><span>I have read these and my wording is about behaviour at work</span></label>
+  </div>
+  {% endif %}
+
+  <div class="card" id="gate">
+    <span class="card-title">Before you finish</span>
+    {% if released %}
+    <p class="card-meta">The Operator looked at the questions for this review and released it {{ review.released_at|pp_day }}. {{ review.hold_note }}</p>
+    <fieldset class="rv-set">
+      <legend class="field">Has anything changed since then that could bear on those questions (time away, an accommodation, health, pregnancy, an injury, or a concern raised)?</legend>
+      <label class="rv-choice"><input type="radio" name="changed" value="no" required><span>No</span></label>
+      <label class="rv-choice"><input type="radio" name="changed" value="yes" required><span>Yes or not sure</span></label>
+    </fieldset>
+    {% else %}
+    <p class="card-meta">Some things must never count against a person. Answer for the review period.</p>
+    {% for key, question in gate_questions %}
+    <fieldset class="rv-set">
+      <legend class="field">{{ loop.index }}. {{ question }}</legend>
+      <label class="rv-choice"><input type="radio" name="gate_{{ key }}" value="no" required><span>No</span></label>
+      <label class="rv-choice"><input type="radio" name="gate_{{ key }}" value="yes" required><span>Yes or not sure</span></label>
+    </fieldset>
+    {% endfor %}
+    {% endif %}
+    <p class="fine-line">If any answer is “Yes or not sure”, the review stops here and the Operator looks at it with you. That is the right thing to happen, not a problem. Don't write the details anywhere on this review.</p>
+  </div>
+  <div class="btnrow">
+    <button class="btn btn-primary sm" type="submit">Finish the review</button>
+    <a class="btn btn-secondary sm" href="{{ back }}">Back to the review</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,99 @@
+{# Pieces the leader-review pages share. Like people/_ui.html: inline SVG
+   icons, links and plain forms only, and nothing here needs the page's
+   context. #}
+
+{% macro rv_styles() -%}
+<style>
+.rv-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.rv-dim { scroll-margin-top: 84px; }
+.rv-def { white-space: pre-line; color: var(--text-strong); line-height: 1.5; margin-top: 6px; }
+.rv-more { margin-top: 10px; }
+.rv-more > summary { cursor: pointer; font-weight: 700; color: var(--nav); min-height: 44px; display: flex; align-items: center; gap: 6px; }
+.rv-notes { list-style: none; margin: 4px 0 0; padding: 0; }
+.rv-notes li { padding: 10px 0; border-top: 1px solid var(--rule); font-size: 0.9375rem; line-height: 1.45; scroll-margin-top: 84px; }
+.rv-notes li:first-child { border-top: 0; }
+.rv-notes .when { display: block; font-size: 0.8125rem; color: var(--text-muted); }
+.rv-said { white-space: pre-line; overflow-wrap: anywhere; }
+.rv-set { border: 0; padding: 0; margin: 0; min-width: 0; }
+.rv-set legend { padding: 0; }
+.rv-choice { display: flex; gap: 10px; align-items: flex-start; padding: 11px 0; min-height: 44px; border-top: 1px solid var(--rule); font-size: 0.9375rem; line-height: 1.4; cursor: pointer; }
+.rv-choice input { margin-top: 2px; flex: 0 0 auto; }
+.rv-choice b { display: block; color: var(--text-strong); }
+.rv-choice small { display: block; color: var(--text-muted); font-size: 0.8125rem; white-space: pre-line; }
+.rv-ai { margin-top: 16px; padding: 12px 14px; border-radius: var(--r-xl); background: var(--cool-white); scroll-margin-top: 84px; }
+.rv-ai-label { display: block; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--info); }
+.rv-ai p { margin-top: 8px; font-size: 0.9375rem; line-height: 1.45; }
+.rv-ai ul { margin: 6px 0 0 18px; font-size: 0.9375rem; line-height: 1.45; }
+.rv-ai a { color: var(--nav); font-weight: 700; }
+.rv-quiet { font-size: var(--fs-small); color: var(--text-muted); margin-top: 12px; line-height: 1.4; }
+.rv-pair { display: flex; flex-wrap: wrap; gap: 0 12px; }
+.rv-pair > div { flex: 1 1 140px; min-width: 0; }
+.rv-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 0; border-top: 1px solid var(--rule); }
+.rv-line:first-of-type { border-top: 0; }
+.rv-line form { margin: 0; flex: 0 0 auto; }
+.rv-line .btn { min-width: 0; min-height: 44px; }
+.rv-line .what { min-width: 0; flex: 1 1 200px; font-size: 0.9375rem; line-height: 1.45; }
+.rv-line .what b { color: var(--text-strong); }
+.rv-flag { margin: 6px 0 0 18px; line-height: 1.45; }
+.rv-flag li { margin: 4px 0; }
+.rv-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.rv-acts form { margin: 0; }
+.rv-acts .btn { min-width: 0; min-height: 44px; }
+@media print { .card, .callout { break-inside: avoid; } }
+</style>
+{%- endmacro %}
+
+{# The reviewer's and the Operator's word for where a review is. Never
+   used on a leader's own pages. #}
+{% macro status_badge(status) -%}
+{%- if status == 'on_hold' %}<span class="badge b-red">On hold</span>
+{%- elif status == 'final' %}<span class="badge b-navy">Finalised</span>
+{%- elif status == 'shared' %}<span class="badge b-navy">Shared</span>
+{%- elif status == 'acknowledged' %}<span class="badge b-green">{{ icon('check', 'xs') }}Acknowledged</span>
+{%- else %}<span class="badge b-tan">Draft</span>{% endif %}
+{%- endmacro %}
+
+{# Dated notes, for a reviewer: each carries its id so the AI panel can
+   point at it. items: rv_observations rows. #}
+{% macro note_list(items, kinds) -%}
+<ul class="rv-notes">
+  {% for item in items %}
+  <li id="e-{{ item.id }}"><span class="when">{{ item.obs_date|pp_day }} · {{ kinds.get(item.kind, 'Note') }} · note {{ item.id }} · {{ item.author_name }}</span><span class="rv-said">{{ item.body }}</span></li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{# Dated notes as the leader reads them: the date, the kind and the words. #}
+{% macro leader_notes(items) -%}
+<ul class="rv-notes">
+  {% for item in items %}
+  <li><span class="when">{{ item.date|pp_day }} · {{ item.kind }}</span><span class="rv-said">{{ item.body }}</span></li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{# One standard as the leader reads it: the level and what that level
+   looks like, the reviewer's comment, and the notes behind it. #}
+{% macro leader_standard(d) -%}
+<div class="card rv-dim" id="d-{{ d.key }}">
+  <span class="card-title">{{ d.name }}</span>
+  <p class="rv-def">{{ d.definition }}</p>
+  {% if d.level %}
+  <p class="subhead">Level</p>
+  <p><span class="badge b-navy">{{ d.level_name }}</span></p>
+  <p class="rv-said" style="margin-top:8px;">{{ d.anchor }}</p>
+  {% elif d.not_enough %}
+  <p class="subhead">Level</p>
+  <p><span class="badge">Not enough to rate yet</span></p>
+  <p class="rv-quiet">Your reviewer did not see enough in this period to choose a level. That is not a mark against you.</p>
+  {% endif %}
+  {% if d.comment %}
+  <p class="subhead">Your reviewer's comment</p>
+  <p class="rv-said">{{ d.comment }}</p>
+  {% endif %}
+  {% if d.evidence %}
+  <p class="subhead">What it is based on</p>
+  {{ leader_notes(d.evidence) }}
+  {% endif %}
+</div>
+{%- endmacro %}

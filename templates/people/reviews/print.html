@@ -1,0 +1,79 @@
+{% extends "people/base.html" %}
+{% from "people/reviews/_parts.html" import rv_styles, leader_standard, leader_notes %}
+{% block title %}Review · {{ r.name }}{% endblock %}
+{% block head %}{{ rv_styles() }}
+<style>
+.rv-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 24px; margin-top: 28px; }
+.rv-sign div { border-top: 1px solid var(--text-strong); padding-top: 6px; font-size: var(--fs-small); color: var(--text-muted); }
+.rv-blank { display: inline-block; min-width: 9em; border-bottom: 1px solid var(--text-strong); }
+.rv-box { min-height: 96px; border: 1px solid var(--rule); border-radius: var(--r-lg); margin-top: 6px; padding: 10px 12px; }
+@media print { .pp-lockbar, .flash, .crumbs { display: none !important; } .wrap { max-width: none; } }
+</style>
+{% endblock %}
+{% block content %}
+<p class="callout no-print" style="margin-top:18px;">{{ icon('file') }}<span>This is the print view. Use your browser's print button, or share and then print on a phone. <a href="{{ back }}">Back to the review</a></span></p>
+<section class="hero compact">
+  <p class="eyebrow">Leader review · {{ r.cycle }}</p>
+  <h1 class="headline">{{ r.name }}</h1>
+  <p class="triage">{% if r.title %}{{ r.title }}{% if r.area %} · {{ r.area }}{% endif %} · {% endif %}{{ r.period_start|pp_day }} to {{ r.period_end|pp_day }} · written by {{ r.reviewer }}</p>
+</section>
+
+<p class="rv-quiet">A review is a starting point for a conversation, not a final word. Each standard shows the level chosen, what that level looks like, and the notes it is based on. Confidential to the leader, their reviewer and the Operator. Need this in another format? Ask the Operator.</p>
+
+{% for group in r.groups %}
+<section class="sec">
+  <div class="sec-head"><h2>{{ group.name }}</h2></div>
+  {% for d in group.dimensions %}{{ leader_standard(d) }}{% endfor %}
+</section>
+{% endfor %}
+
+{% if r.loose %}
+<section class="sec">
+  <div class="sec-head"><h2>Other notes from this period</h2></div>
+  <div class="card">{{ leader_notes(r.loose) }}</div>
+</section>
+{% endif %}
+
+<section class="sec">
+  <div class="sec-head"><h2>Strengths and growth focus</h2></div>
+  <div class="card">
+    <p class="subhead" style="margin-top:0;">Strengths</p>
+    <p class="rv-said">{{ r.strengths or 'Nothing written here.' }}</p>
+    <p class="subhead">Growth focus</p>
+    <p class="rv-said">{{ r.growth or 'Nothing written here.' }}</p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><h2>Next steps</h2></div>
+  <div class="card">
+    {% for a in r.actions %}
+    <div class="rv-line"><span class="what"><b>{{ a.action }}</b><br>Measure: {{ a.measure }}<br>Target: {{ a.target }}<br>Checked on {{ a.check_date|pp_day }}{% if a.done_at %} · done {{ a.done_at|pp_day }}{% endif %}</span></div>
+    {% else %}
+    <p class="rv-quiet" style="margin-top:0;">No next steps were written down.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="sec" id="confirm">
+  <div class="sec-head"><h2>Leader's confirmation</h2></div>
+  <div class="card">
+    <p>{{ support_text }}</p>
+    {% if r.discussed_on %}
+    <p style="margin-top:12px;">{{ ack_text.format(date=r.discussed_on|pp_day) }}</p>
+    <p class="pp-stamp" style="margin-top:8px;">Confirmed in Team Hub {{ r.ack_at|pp_when }}.</p>
+    <p class="subhead">Leader's comments</p>
+    <p class="rv-said">{{ r.ack_comment or 'None added.' }}</p>
+    {% else %}
+    <p style="margin-top:12px;">{{ ack_text.format(date='______________') }}</p>
+    <p class="subhead">Leader's comments (optional)</p>
+    <div class="rv-box"></div>
+    {% endif %}
+    <div class="rv-sign">
+      <div>Leader's signature</div><div>Date</div>
+      <div>Reviewer's signature</div><div>Date</div>
+    </div>
+    <p style="margin-top:28px;">Leader declined to sign; copy provided on <span class="rv-blank">&nbsp;</span>. Reviewer's initials <span class="rv-blank">&nbsp;</span></p>
+  </div>
+</section>
+{% endblock %}

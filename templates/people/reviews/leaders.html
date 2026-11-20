@@ -1,0 +1,90 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, empty %}
+{% from "people/reviews/_parts.html" import rv_styles %}
+{% block title %}Leaders under review{% endblock %}
+{% block head %}{{ rv_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), ('Leaders', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Leader reviews · the Operator only</p>
+  <h1 class="headline">Leaders</h1>
+  <p class="triage"><b>{{ rows|selectattr('active')|list|length }}</b> under review. Each one has a reviewer: you, or a leader you have given Leader reviews access.</p>
+</section>
+
+{% macro fields(prefix, s=none) %}
+  <label class="field" for="{{ prefix }}-leader">Team Hub sign-in</label>
+  <select id="{{ prefix }}-leader" name="leader">
+    <option value="">No Team Hub sign-in (name only)</option>
+    {% for l in team %}{% if (s and s.link == 'ok' and s.leader_id == l.id) or l in unlinked %}
+    <option value="{{ l.id }}"{{ ' selected' if s and s.link == 'ok' and s.leader_id == l.id }}>{{ l.name }}</option>
+    {% endif %}{% endfor %}
+  </select>
+  <p class="fine-line">Linking a sign-in is what lets the leader read their own review here. Without one, print it for them.</p>
+  <label class="field" for="{{ prefix }}-name">Name on the review{% if not s %} <span class="muted">(leave empty to use the sign-in name)</span>{% endif %}</label>
+  <input id="{{ prefix }}-name" name="display_name" type="text" maxlength="{{ caps.name }}" value="{{ s.display_name if s else '' }}"{{ ' required' if s }}>
+  <label class="field" for="{{ prefix }}-title">Title <span class="muted">(optional)</span></label>
+  <input id="{{ prefix }}-title" name="title" type="text" maxlength="{{ caps.title }}" list="rv-titles" value="{{ s.title if s else '' }}">
+  <label class="field" for="{{ prefix }}-area">Area they own <span class="muted">(optional)</span></label>
+  <input id="{{ prefix }}-area" name="area" type="text" maxlength="{{ caps.area }}" value="{{ s.area if s else '' }}">
+  <label class="field" for="{{ prefix }}-reviewer">Reviewer</label>
+  <select id="{{ prefix }}-reviewer" name="reviewer">
+    <option value="">Operator (you)</option>
+    {% for c in choices %}{% if not s or s.leader_id != c.id %}
+    <option value="{{ c.id }}"{{ ' selected' if s and s.reviewer_ok and s.reviewer_leader_id == c.id }}>{{ c.name }}</option>
+    {% endif %}{% endfor %}
+  </select>
+  <p class="fine-line">A reviewer sees this leader's notes and reviews, and nobody else's. Nobody reviews themselves. To add someone to this list, give them Leader reviews under <a href="{{ url_for('people.access') }}">Who has access</a>.</p>
+{% endmacro %}
+
+<datalist id="rv-titles">{% for t in titles %}<option value="{{ t }}">{% endfor %}</datalist>
+
+{% if not rows and unlinked %}
+<form method="post" action="{{ url_for('people.reviews_leader_add') }}" class="card" id="everyone">
+  <span class="card-title">Start with every Team Hub leader</span>
+  <p class="card-meta">Adds all {{ unlinked|length }} active leader sign-in{{ '' if unlinked|length == 1 else 's' }} in one tap, with you as the reviewer for each. You can change titles and reviewers afterwards.</p>
+  <input type="hidden" name="everyone" value="1">
+  <div class="btnrow"><button class="btn btn-primary sm" type="submit">{{ icon('users') }}Add every leader</button></div>
+</form>
+{% endif %}
+
+{% for s in rows %}
+<div class="card rv-dim" id="p-{{ s.id }}">
+  <span class="card-title">{{ s.display_name }}</span>
+  <span class="card-meta">{{ s.title or 'No title yet' }}{% if s.area %} · {{ s.area }}{% endif %} · reviewer: {{ s.reviewer_name or 'Operator' }}</span>
+  <div class="rv-tags">
+    {% if not s.active %}<span class="badge">Not under review right now</span>{% endif %}
+    {% if s.link == 'none' %}<span class="badge">No sign-in linked</span>{% endif %}
+    {% if s.link == 'stale' %}<span class="badge b-red">Needs re-linking</span>{% endif %}
+    {% if not s.reviewer_ok %}<span class="badge b-red">Reviewer needs re-linking</span>{% endif %}
+  </div>
+  {% if s.link == 'stale' %}
+  <p class="callout warm" style="margin-top:10px;">{{ icon('alert') }}<span>This leader's link no longer matches a Team Hub sign-in (a sign-in was renamed, removed or renumbered), so they can't open their review. Choose their sign-in again below and save.</span></p>
+  {% endif %}
+  {% if not s.reviewer_ok %}
+  <p class="callout warm" style="margin-top:10px;">{{ icon('alert') }}<span>The reviewer on record no longer matches a sign-in with Leader reviews access, so only you can open this leader's notes and reviews. Choose a reviewer again below and save.</span></p>
+  {% endif %}
+  <div class="btnrow">
+    <a class="btn btn-secondary sm" href="{{ url_for('people.reviews_leader', subject_id=s.id) }}">{{ icon('note') }}Observation log</a>
+  </div>
+  <details class="rv-more">
+    <summary>{{ icon('edit', 'sm') }}Change details</summary>
+    <form method="post" action="{{ url_for('people.reviews_leader_edit', subject_id=s.id) }}">
+      {{ fields('e' ~ s.id, s) }}
+      <label class="checkline"><input type="checkbox" name="active" value="1"{{ ' checked' if s.active }}><span>Under review. Untick to leave them out of new cycles; nothing already written is removed.</span></label>
+      <p class="fine-line">A new reviewer also takes over this leader's unfinished reviews. Finished reviews keep the reviewer who wrote them.</p>
+      <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save</button></div>
+    </form>
+  </details>
+</div>
+{% else %}
+{{ empty('Nobody is under review yet.') }}
+{% endfor %}
+
+<section class="sec" id="add">
+  <div class="sec-head"><h2>Add a leader</h2></div>
+  <form method="post" action="{{ url_for('people.reviews_leader_add') }}" class="card">
+    {{ fields('a') }}
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">{{ icon('plus') }}Add to reviews</button></div>
+  </form>
+</section>
+{% endblock %}
