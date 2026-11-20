@@ -281,7 +281,9 @@ def test_flagged_sentences_move_to_the_human_checks():
     assert "Check this wording (Pregnancy and family): Is your family okay?" in checks
     assert out["coaching_questions"][0] == "What gets in the way at close?" and len(out["coaching_questions"]) == 5
     assert "Is your family okay?" not in out["coaching_questions"]
-    assert "Thin evidence for teamwork." in checks
+    # the AI's own check lines are never passed on in its own words: only fixed sentences say so
+    assert "Thin evidence for teamwork." not in checks and not any("xxx" in line for line in checks)
+    assert people_ai.OWN_WORDS_LEFT_OUT in checks
     assert not any("terminate" in line for line in checks)           # a consequence is never passed on
     assert any("does not suggest discipline or dismissal" in line for line in checks)
     assert all(len(line) <= 400 for line in checks) and len(checks) <= 12

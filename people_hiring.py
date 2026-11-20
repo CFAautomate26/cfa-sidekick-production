@@ -60,13 +60,14 @@ AI_TASK = """Task: hiring_score.
 "data" holds "criteria" (each with a criterion_id, a name, a definition and level descriptions, lowest level first) and "answers" (each with a criterion_id and what the applicant wrote in answer to that criterion's question). For each answer, compare what the applicant wrote with that criterion's definition and level descriptions, and with nothing else.
 
 Reply with one JSON object in exactly this shape:
-{"criteria": [{"criterion_id": 0, "evidence_summary": "one or two sentences on what the answer shows about this criterion", "quote": "a short phrase copied word for word from that answer", "suggested_level": 1, "note": "which level description the answer matches, quoting that description, or what is missing"}], "human_checks": ["anything a person must check before using this"]}
+{"criteria": [{"criterion_id": 0, "evidence_summary": "one or two sentences on what the answer shows about this criterion", "quote": "a short phrase copied word for word from that answer", "suggested_level": 1, "note": "which level description the answer matches, quoting that description, or what is missing"}], "human_checks": ["only the Human check needed lines from the rules above that apply, copied exactly"]}
 
 Rules for this task, on top of the rules above:
 - The answer is the only evidence, and its id is the criterion_id. Include every criterion_id that has an answer, once.
-- "quote" must be copied exactly from that answer. If you cannot quote the answer, set "suggested_level" to null.
+- "quote" must be a phrase of at least three words copied exactly from that answer. If you cannot quote the answer, set "suggested_level" to null.
 - "suggested_level" is 1, 2, 3 or 4 (the position of the level description that fits best, lowest first), or null. If the answer does not address the criterion, or there is too little to tell, use null and write "Not enough in this answer to suggest a level."
 - Never use how the answer is written: spelling, grammar, length, fluency or dialect. Never guess at the applicant's age, schooling, background or circumstances.
+- "human_checks" holds only the "Human check needed: ..." lines from the rules above that apply. Anything else written there is discarded. Use an empty list when none apply.
 - One criterion at a time. No total, no average and no overall view. Never say whether the applicant should be interviewed, hired, moved on or turned down."""
 
 # Words in an applicant's own answer that may mean health or accommodation:
@@ -95,16 +96,32 @@ def _ai_build(payload: dict) -> tuple[str, dict]:
     return AI_TASK, {"criteria": payload["criteria"], "answers": payload["answers"]}
 
 
+QUOTE_MIN_WORDS = 3
+QUOTE_MIN_LETTERS = 12
+
+
+def _really_quoted(quoted: str, answer: str) -> bool:
+    """Is this a real quotation from the answer: at least three words (or
+    twelve characters), found in the answer as whole words? A single letter
+    or a common word is "in" every answer and proves nothing."""
+    quote_text, text = _squash(quoted), _squash(answer)
+    if len(quote_text.split()) < QUOTE_MIN_WORDS and len(quote_text) < QUOTE_MIN_LETTERS:
+        return False
+    return re.search(r"(?<![\w])" + re.escape(quote_text) + r"(?![\w])", text) is not None
+
+
 def _ai_validate(raw: dict, payload: dict) -> dict:
     """Keep only what can be stood behind: known criteria, a quote that
     really is in the answer (or no level), nothing that reads like a
-    decision, every length capped."""
+    decision, every length capped. What our own checks found about one
+    answer is kept with that answer ("checks"), so it is shown only where
+    the suggestion is. Of the AI's own "human checks" only the fixed lines
+    are kept (people_ai.fixed_checks), never its own words."""
     sent = {a["criterion_id"]: a["text"] for a in payload["answers"]}
-    names = {c["criterion_id"]: c["name"] for c in payload["criteria"]}
     items = raw.get("criteria")
     if not isinstance(items, list):
         raise ValueError("no criteria")
-    out, checks = [], []
+    out = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -112,37 +129,42 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
         if isinstance(criterion_id, bool) or not isinstance(criterion_id, int) \
                 or criterion_id not in sent or any(o["criterion_id"] == criterion_id for o in out):
             continue
-        name = names.get(criterion_id, "a criterion")
+        checks = []
         summary, quoted, note = (_clip(item.get("evidence_summary"), 600), _clip(item.get("quote"), 240),
                                  _clip(item.get("note"), 500))
         level = item.get("suggested_level")
         if isinstance(level, bool) or level not in hdb.LEVELS:
             level = None
-        if not quoted or _squash(quoted) not in _squash(sent[criterion_id]):
+        if not quoted or not _really_quoted(quoted, sent[criterion_id]):
             if level is not None or quoted:
-                checks.append(f"Human check needed: the AI's quote for “{name}” is not in the "
-                              "applicant's answer, so no level is suggested for it.")
+                checks.append("Human check needed: the AI did not point to a real phrase from this "
+                              "answer, so no level is suggested for it.")
             level, quoted = None, ""
         if _DECISION_WORDS.search(summary) or _DECISION_WORDS.search(note):
             summary = "" if _DECISION_WORDS.search(summary) else summary
             note = "" if _DECISION_WORDS.search(note) else note
-            checks.append(f"Human check needed: part of the AI's wording for “{name}” read like "
-                          "a hiring decision and was left out. The decision is yours.")
+            checks.append("Human check needed: part of the AI's wording here read like a hiring "
+                          "decision and was left out. The decision is yours.")
         found = sorted({f["category"] for f in people_ai.language_check(f"{summary} {note}")
                         if f["key"] != "consequence"})
         if found:
-            checks.append(f"Human check needed: the AI's wording for “{name}” touches on "
+            checks.append(f"Human check needed: the AI's wording here touches on "
                           f"{', '.join(found).lower()}. None of that may count for or against an applicant.")
         out.append({"criterion_id": criterion_id, "evidence_summary": summary, "quote": quoted,
-                    "suggested_level": level, "note": note, "flagged": found})
-    if payload.get("withheld"):
-        checks.append(WITHHELD_CHECK)
-    extra = raw.get("human_checks")
-    for line in extra if isinstance(extra, list) else []:
-        text = _clip(line, 300)
-        if text and text not in checks:
-            checks.append(text)
-    return {"criteria": out, "human_checks": checks[:12]}
+                    "suggested_level": level, "note": note, "flagged": found, "checks": checks})
+    overall = [WITHHELD_CHECK] if payload.get("withheld") else []
+    overall += [line for line in people_ai.fixed_checks(raw.get("human_checks"), "answers")
+                if line not in overall]
+    return {"criteria": out, "human_checks": overall}
+
+
+def _overall_checks(output: dict) -> list[str]:
+    """The check lines that are about the whole request. Only sentences
+    our own code wrote: anything else in a stored reply is not shown."""
+    ours = {WITHHELD_CHECK, people_ai.CONSEQUENCE_LEFT_OUT, people_ai.OWN_WORDS_LEFT_OUT,
+            *(sentence.format(what="answers") for _, sentence in people_ai.FIXED_CHECKS)}
+    lines = output.get("human_checks")
+    return [line for line in lines if line in ours] if isinstance(lines, list) else []
 
 
 people_ai.register_kind(AI_KIND, _ai_build, _ai_validate)
@@ -566,8 +588,8 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
 
     def ai_view(record: dict, scores: dict) -> dict:
         """What the candidate page shows of the AI assist. A suggestion for
-        a criterion is included only once this leader has saved their own
-        level for that answer."""
+        a criterion, and anything our checks found about it, is included
+        only once this leader has saved their own level for that answer."""
         blocked = ai_blocked(record)
         job = None if blocked else people_ai.latest_job(AI_KIND, record["id"])
         out = {"blocked": blocked, "status": job["status"] if job else None,
@@ -579,8 +601,10 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
                     out["suggestions"][item["criterion_id"]] = item
                 else:
                     out["waiting"] += 1
-            if out["suggestions"]:
-                out["checks"] = job["output"].get("human_checks", [])
+            # Fixed sentences only, none of them about one answer or a
+            # level, so they can show at once (one says an answer was not
+            # sent and needs reading by a person).
+            out["checks"] = _overall_checks(job["output"])
         return out
 
     @bp.route("/hiring/candidates/<int:application_id>")

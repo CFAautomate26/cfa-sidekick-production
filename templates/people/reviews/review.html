@@ -109,6 +109,8 @@
   <p class="callout" role="status" style="margin-top:10px;">{{ icon('clock') }}<span><strong>Drafting…</strong> This page refreshes itself every 5 seconds until the draft is ready. Saving is paused until then, so wait before you type.</span></p>
   {% elif ai.status == 'failed' %}
   <p class="callout tan" role="status" style="margin-top:10px;">{{ icon('alert') }}<span>The AI draft didn't finish{{ ' in time' if ai.job.error == 'timed out' }}. Your notes and ratings are untouched, and the review does not need a draft. You can try again.</span></p>
+  {% elif ai.status == 'stale' %}
+  <p class="callout tan" role="status" style="margin-top:10px;">{{ icon('alert') }}<span><strong>The notes for this review changed after this draft was made</strong>, so the draft is not shown. {{ 'Ask for a new draft.' if review.editable else 'It read notes or a reflection that no longer match what counts toward this review.' }}</span></p>
   {% elif ai.status == 'done' %}
   <p class="card-meta">Asked for by {{ stamp(ai.job.requested_by, ai.job.requested_at) }}. The draft for a standard appears under it once your own rating for that standard is saved. It is a second read of the same notes, with the leader's name and team members' names taken out. It is not a decision.</p>
   {% if ai.checks %}
@@ -116,11 +118,11 @@
   <ul class="rv-flag">{% for line in ai.checks %}<li>{{ line }}</li>{% endfor %}</ul>
   {% endif %}
   {% else %}
-  <p class="card-meta">An AI tool can read the notes for this period, with the leader's name and team members' names taken out, and prepare a draft for you to check. Leave guests' names out of your notes. It never sees your ratings. Rate each standard yourself first: the draft for a standard appears only after your own rating is saved.</p>
+  <p class="card-meta">An AI tool can read the notes for this period, with the leader's name and team members' names taken out, and prepare a draft for you to check. A note whose wording touches on health, family, age, religion, origin, gender, time away or a complaint is not sent at all. Leave guests' names out of your notes. It never sees your ratings. Rate each standard yourself first: the draft for a standard appears only after your own rating is saved.</p>
   {% endif %}
   {% if review.editable and ai.status != 'running' %}
   <form method="post" action="{{ url_for('people.reviews_ai', review_id=review.id) }}" class="btnrow no-print">
-    <button class="btn btn-secondary sm" type="submit">{{ icon('zap') }}{{ 'Try again' if ai.status == 'failed' else ('Ask for a new draft' if ai.status == 'done' else 'Ask the AI for a draft') }}</button>
+    <button class="btn btn-secondary sm" type="submit">{{ icon('zap') }}{{ 'Try again' if ai.status == 'failed' else ('Ask for a new draft' if ai.status in ('done', 'stale') else 'Ask the AI for a draft') }}</button>
   </form>
   {% endif %}
 </div>

@@ -793,8 +793,10 @@ def test_the_ai_reply_is_checked_before_anyone_sees_it(world, monkeypatch):
     assert by_id[first]["suggested_level"] == 3 and by_id[first]["quote"] == "I opened the farm stand every Saturday"
     # a quote that is not in the answer: no level, and a check for the person
     assert by_id[second]["suggested_level"] is None and by_id[second]["quote"] == ""
-    assert any("quote for “Guest care” is not in the applicant's answer" in c for c in output["human_checks"])
-    assert "Human check needed: the second answer is short." in output["human_checks"]
+    assert any("did not point to a real phrase from this answer" in c for c in by_id[second]["checks"])
+    assert by_id[first]["checks"] == []
+    # the AI's own check line is never passed on in its own words
+    assert output["human_checks"] == [people_ai.OWN_WORDS_LEFT_OUT]
     # the validator alone, on the awkward cases
     payload = {"criteria": [{"criterion_id": 1, "name": "Reliable"}],
                "answers": [{"criterion_id": 1, "text": "I “showed up” early every day."}], "withheld": [2]}
@@ -808,15 +810,17 @@ def test_the_ai_reply_is_checked_before_anyone_sees_it(world, monkeypatch):
     only = checked["criteria"][0]
     assert only["quote"] == 'i "showed up" EARLY' and only["suggested_level"] is None    # 9 is not a level
     assert len(only["evidence_summary"]) == 600 and only["note"] == ""                    # the decision is cut
-    assert any("read like a hiring decision" in c for c in checked["human_checks"])
-    assert people_hiring.WITHHELD_CHECK in checked["human_checks"]
+    assert any("read like a hiring decision" in c for c in only["checks"])
+    assert checked["human_checks"] == [people_hiring.WITHHELD_CHECK]
     with pytest.raises(ValueError):
         people_hiring._ai_validate({"criteria": "nope"}, payload)
     flagged = people_hiring._ai_validate({"criteria": [{
         "criterion_id": 1, "evidence_summary": "Mentions their church and their kids.", "quote": "early",
         "suggested_level": 2, "note": ""}]}, payload)
     assert flagged["criteria"][0]["flagged"] == ["Pregnancy and family", "Religion"]
-    assert any("touches on pregnancy and family, religion" in c for c in flagged["human_checks"])
+    assert any("touches on pregnancy and family, religion" in c for c in flagged["criteria"][0]["checks"])
+    assert flagged["criteria"][0]["suggested_level"] is None         # one word is not a quotation
+    assert flagged["human_checks"] == [people_hiring.WITHHELD_CHECK]
 
 
 def test_a_suggestion_shows_only_after_the_leader_has_saved_their_own_level(world, monkeypatch):

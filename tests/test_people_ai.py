@@ -323,10 +323,11 @@ def test_the_persons_name_becomes_a_label(world):
         ["Jamie Rivera"], [])
     assert clean == ("The leader opened late on Nov 14. The leader's line was not set, "
                      "and the leader left at 2.")
-    # whole words only, and only name parts of three letters or more
-    clean = people_ai.deidentify("Li Wei trained Liam. Li asked Weiss about Samantha's samples.",
-                                 ["Li Wei", "Sam"], [])
-    assert clean == "The leader trained Liam. Li asked Weiss about Samantha's samples."
+    # whole words only; a two-letter part of the name counts where it is written with a capital
+    clean = people_ai.deidentify("Li Wei trained Liam. Li asked Weiss about Samantha's samples; "
+                                 "a little oil on the grill.", ["Li Wei", "Sam"], [])
+    assert clean == ("The leader trained Liam. The leader asked Weiss about Samantha's samples; "
+                     "a little oil on the grill.")
     assert people_ai.deidentify("Wei was early.", ["Li Wei"], []) == "The leader was early."
     # a linked sign-in name and a hyphenated name are covered too
     clean = people_ai.deidentify("JR and Anne-Marie closed; Anne counted the safe.",

@@ -25,6 +25,7 @@ people.py imports this module, calls register(bp) before the app
 registers the blueprint, and calls nav_counts() for the menu.
 """
 
+import json
 import re
 from datetime import date
 
@@ -39,6 +40,8 @@ import shift_db
 
 AI_KIND = "review_draft"
 NO_EVIDENCE = "No evidence provided for this period."
+NEVER_COUNTS = ("Health, family, time away and any concern someone has raised must never count in "
+                "a review.")
 SINGLE_OBSERVATION = "Based on a single observation."
 
 HOLD_TEXT = ("This review is on hold. Nothing is wrong: it means the Operator needs to look at "
@@ -388,6 +391,11 @@ def _ai_state(review: dict, model: dict, rated: dict) -> dict:
         state["status"] = "running"
     elif job["status"] != "done" or not isinstance(job.get("output"), dict):
         state["status"] = "failed"
+    elif not _draft_is_current(job, review, model):
+        # The notes or the reflection the draft read have changed since
+        # (time away marked, a note left out or removed, a new note): none
+        # of it is shown, and nothing is recorded as shown.
+        state["status"] = "stale"
     else:
         state["status"] = "done"
         output = job["output"]
@@ -396,7 +404,7 @@ def _ai_state(review: dict, model: dict, rated: dict) -> dict:
         state["panels"] = {key: drafted[key] for key in own if isinstance(drafted.get(key), dict)}
         state["all_rated"] = all(d["key"] in own for d in model["dimensions"])
         # Checks that quote the draft's own wording wait with that wording;
-        # the rest are warnings, and show at once.
+        # the rest are fixed sentences our own code wrote, and show at once.
         waiting = [] if state["all_rated"] else (output.get("draft_checks") or [])
         state["checks"] = [line for line in output.get("human_checks") or [] if line not in waiting]
         if state["all_rated"]:
@@ -410,6 +418,19 @@ def _ai_state(review: dict, model: dict, rated: dict) -> dict:
         if first_time and review["editable"]:
             rdb.mark_ai_shown(review["id"], first_time)
     return state
+
+
+def _draft_is_current(job: dict, review: dict, model: dict) -> bool:
+    """Was this draft made from exactly the notes and reflection that
+    count toward the review right now? Compared with what was really sent
+    (kept on the job), in the same names-removed form."""
+    try:
+        sent = json.loads(job.get("input_json") or "")["data"]
+        now = ai_payload(review, model)
+        return (sent["evidence"] == now["evidence"]
+                and ((sent.get("leader_reflection") or {}).get("items") or []) == now["reflection"])
+    except (TypeError, ValueError, KeyError):
+        return False
 
 
 def review(review_id: int):
@@ -630,7 +651,10 @@ def ai_draft(review_id: int):
         flash("AI drafting is switched off.")
     else:
         payload = ai_payload(found, model)
-        if not payload["evidence"]:
+        if not payload["evidence"] and payload["withheld"]["notes"]:
+            flash("None of the notes for this period can be sent to the AI because of their wording. "
+                  "Read them yourself, and talk to the Operator.")
+        elif not payload["evidence"]:
             flash("There are no observations for this period yet, so there is nothing for the AI to read.")
         else:
             people_ai.start_job(AI_KIND, review_id, payload, people.actor(),
@@ -854,7 +878,7 @@ Reply with one JSON object with exactly these keys:
 - "strengths": up to three items, each {"text": "...", "cited": [ids]}.
 - "growth_areas": up to three items, each {"text": "...", "cited": [ids]}.
 - "coaching_questions": up to five open questions the reviewer could ask the leader in a coaching conversation. Questions only, no advice and no answers.
-- "human_checks": a list of short lines for anything a person must check before this draft is used. Use an empty list when there is nothing.
+- "human_checks": only the "Human check needed: ..." lines from the rules above that apply, copied exactly. Anything else written here is discarded. Use an empty list when none apply.
 
 A standard with no evidence gets "evidence_summary": "No evidence provided for this period.", an empty "cited" list and "suggested_level": null. One or two thin observations are not enough for a level: say so in "note" and use null. Never suggest a level from the leader's reflection alone."""
 
@@ -876,27 +900,48 @@ def _names_to_remove(found: dict) -> tuple[list[str], list[str]]:
     return own, sorted(n for n in everyone if n and n.casefold() not in mine)
 
 
+def _touches_protected(text: str) -> bool:
+    return any(f["key"] in _PROTECTED for f in people_ai.language_check(text))
+
+
 def ai_payload(found: dict, model: dict) -> dict:
     """Everything the AI is given for one review, with names, contact
     details and he/she words already taken out. Never in it: the leader's
     name, title or area, the reviewer's own ratings and comments, time-away
-    dates, or anything from Team Hub activity."""
+    dates, or anything from Team Hub activity. A note, or a part of the
+    leader's reflection, whose wording touches on health, family, religion,
+    age, origin, gender, or leave and complaints is not sent at all:
+    "withheld" counts them, so the page can say so."""
     own, others = _names_to_remove(found)
 
     def scrub(text: str) -> str:
         return people_ai.deidentify(text, own, others)
 
-    reflection = rdb.reflections(found["id"]) if found["reflection_at"] else {}
+    saved = rdb.reflections(found["id"]) if found["reflection_at"] else {}
     keys = [d["key"] for d in model["dimensions"]]
+    evidence, reflection = [], []
+    withheld = {"notes": 0, "reflection": 0}
+    for e in rdb.evidence(found):
+        text = scrub(e["body"])
+        if _touches_protected(text):
+            withheld["notes"] += 1
+            continue
+        evidence.append({"id": e["id"], "date": e["obs_date"],
+                         "dimension_key": e["dimension_key"] if e["dimension_key"] in keys else None,
+                         "kind": e["kind"], "text": text})
+    for key in keys:
+        if not saved.get(key):
+            continue
+        text = scrub(saved[key])
+        if _touches_protected(text):
+            withheld["reflection"] += 1
+            continue
+        reflection.append({"dimension_key": key, "text": text})
     return {
         "levels": list(model["levels"]),
         "dimensions": [{"key": d["key"], "name": d["name"], "definition": d["definition"],
                         "anchors": list(d["anchors"])} for d in model["dimensions"]],
-        "evidence": [{"id": e["id"], "date": e["obs_date"],
-                      "dimension_key": e["dimension_key"] if e["dimension_key"] in keys else None,
-                      "kind": e["kind"], "text": scrub(e["body"])} for e in rdb.evidence(found)],
-        "reflection": [{"dimension_key": key, "text": scrub(reflection[key])}
-                       for key in keys if reflection.get(key)],
+        "evidence": evidence, "reflection": reflection, "withheld": withheld,
     }
 
 
@@ -962,7 +1007,9 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
     """Our code, not the AI, decides what of a reply is kept. Only the
     standards that were sent; only citations of evidence that was sent; no
     level without a citation; flagged sentences moved out to the human
-    checks; and no level where the wording touched something protected."""
+    checks; no level where the wording touched something protected; and of
+    the AI's own "human checks" only the fixed lines (people_ai.fixed_checks),
+    never its own words."""
     supplied = {e["id"] for e in payload["evidence"]}
     given = raw.get("dimensions")
     if isinstance(given, list):
@@ -1018,15 +1065,18 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
         if text and len(questions) < 5:
             questions.append(text)
     draft_checks = list(dict.fromkeys(draft_checks))[:6]
-    checks.extend(draft_checks)
-    for value in raw.get("human_checks") if isinstance(raw.get("human_checks"), list) else []:
-        line = _clip(value, 300)
-        if not line:
-            continue
-        if any(f["key"] == "consequence" for f in people_ai.language_check(line)):
-            line = ("Human check needed: a line in the AI draft used a consequence word and was left "
-                    "out. This tool does not suggest discipline or dismissal.")
-        checks.append(line)
+    # Never the AI's own wording here: these lines are on the page before
+    # anyone has rated anything.
+    checks.extend(people_ai.fixed_checks(raw.get("human_checks")))
+    held = payload.get("withheld") or {}
+    if held.get("notes"):
+        n = held["notes"]
+        checks.append(f"Human check needed: {n} note{' was' if n == 1 else 's were'} not sent to the AI "
+                      f"because of {'its' if n == 1 else 'their'} wording. Read {'it' if n == 1 else 'them'} "
+                      "yourself, and talk to the Operator. " + NEVER_COUNTS)
+    if held.get("reflection"):
+        checks.append("Human check needed: part of the leader's reflection was not sent to the AI because "
+                      "of its wording. Read it yourself, and talk to the Operator. " + NEVER_COUNTS)
     sent = " ".join([e["text"] for e in payload["evidence"]]
                     + [r["text"] for r in payload.get("reflection") or []])
     touched = list(dict.fromkeys(f["category"] for f in people_ai.language_check(sent)
@@ -1035,8 +1085,9 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
         checks.append("Human check needed: the notes sent to the AI use wording about "
                       + ", ".join(t.lower() for t in touched)
                       + ". Make sure nothing personal or protected counts in this review.")
+    checks.extend(draft_checks)                  # these wait until every standard is rated
     return {"dimensions": dimensions, "strengths": strengths, "growth_areas": growth,
-            "coaching_questions": questions, "human_checks": list(dict.fromkeys(checks))[:12],
+            "coaching_questions": questions, "human_checks": list(dict.fromkeys(checks))[:16],
             "draft_checks": draft_checks}
 
 

@@ -98,6 +98,7 @@
         <p>{% if hint.suggested_level %}The AI suggests <strong>level {{ hint.suggested_level }}</strong>.{% else %}The AI suggests no level for this answer.{% endif %}{% if hint.quote %} It points to: “{{ hint.quote }}”{% endif %}</p>
         {% if hint.evidence_summary %}<p>{{ hint.evidence_summary }}</p>{% endif %}
         {% if hint.note %}<p>{{ hint.note }}</p>{% endif %}
+        {% for check in hint.checks or [] %}<p>{{ check }}</p>{% endfor %}
         <p>Your own level stands unless you change it.</p>
       </div>
       {% endif %}
