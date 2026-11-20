@@ -1,0 +1,62 @@
+{% extends "people/base.html" %}
+{% block title %}People{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">People</p>
+  <h1 class="headline">People</h1>
+  <p class="triage">{% if viewer.is_operator %}Leader reviews and hiring, and who can open them.{% elif viewer.caps %}What the Operator has opened for you.{% else %}Private pages about people. You see only what is yours.{% endif %}</p>
+</section>
+
+{% if viewer.is_operator and not has_model %}
+<p class="callout tan" style="margin-top:22px;">{{ icon('info') }}<span><strong>Start with Our standards.</strong> Reviews and hiring scorecards rate people against the store's own standards, and none are loaded yet.</span></p>
+{% endif %}
+{% if viewer.is_operator %}
+  {% for key, label in [('reviews', 'Leader reviews'), ('hiring', 'Hiring')] %}{% if key not in people_features %}
+<p class="callout warm" style="margin-top:12px;">{{ icon('alert') }}<span>{{ label }} did not load on the server. The rest of these pages are working.</span></p>
+  {% endif %}{% endfor %}
+{% endif %}
+
+{% set open_rows = reviews_url or hiring_url or mine_url %}
+{% if open_rows %}
+<div class="card list" style="margin-top:22px;">
+  {% if reviews_url %}
+  <a class="row" href="{{ reviews_url }}"><span class="lead-ico navy">{{ icon('clip') }}</span><span class="row-main"><span class="row-title">Leader reviews</span><span class="row-meta">{% if viewer.is_operator %}Observations, review cycles and calibration for every leader.{% else %}The leaders you review.{% endif %}</span>
+    {%- if counts.on_hold or counts.past_due or counts.drafts %}<span class="row-meta tags">
+      {%- if counts.on_hold %}<span class="badge b-red">{{ counts.on_hold }} on hold</span>{% endif %}
+      {%- if counts.past_due %}<span class="badge b-tan">{{ counts.past_due }} past due</span>{% endif %}
+      {%- if counts.drafts %}<span class="badge b-tan">{{ counts.drafts }} to finish</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
+  {% endif %}
+  {% if hiring_url %}
+  <a class="row" href="{{ hiring_url }}"><span class="lead-ico navy">{{ icon('users') }}</span><span class="row-main"><span class="row-title">Hiring</span><span class="row-meta">Job postings, applicants, interviews and decision notices.</span>
+    {%- if counts.new or counts.notices_due or counts.notices_overdue %}<span class="row-meta tags">
+      {%- if counts.notices_overdue %}<span class="badge b-red">{{ counts.notices_overdue }} notice{{ '' if counts.notices_overdue == 1 else 's' }} overdue</span>{% endif %}
+      {%- if counts.new %}<span class="badge b-red">{{ counts.new }} new</span>{% endif %}
+      {%- if counts.notices_due %}<span class="badge b-tan">{{ counts.notices_due }} notice{{ '' if counts.notices_due == 1 else 's' }} due</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
+  {% endif %}
+  {% if mine_url %}
+  <a class="row" href="{{ mine_url }}"><span class="lead-ico red">{{ icon('file') }}</span><span class="row-main"><span class="row-title">My review</span><span class="row-meta">Something is waiting for you.</span></span>{{ icon('chev', 'chev') }}</a>
+  {% endif %}
+</div>
+{% elif not viewer.caps %}
+<div class="empty" style="margin-top:22px;">Nothing here for your sign-in right now. If you were expecting something, ask the Operator.</div>
+{% endif %}
+
+{% if viewer.is_operator %}
+<section class="sec">
+  <div class="sec-head"><h2>Set up and look after</h2></div>
+  <div class="card list">
+    <a class="row" href="{{ url_for('people.access') }}"><span class="lead-ico">{{ icon('key') }}</span><span class="row-main"><span class="row-title">Who has access</span><span class="row-meta">Choose the leaders who help with hiring or write reviews.</span></span>{{ icon('chev', 'chev') }}</a>
+    <a class="row" href="{{ url_for('people.standards') }}"><span class="lead-ico">{{ icon('book') }}</span><span class="row-main"><span class="row-title">Our standards</span><span class="row-meta">The values, standards and level descriptions people are rated against.</span></span>{{ icon('chev', 'chev') }}</a>
+    <a class="row" href="{{ url_for('people.settings') }}"><span class="lead-ico">{{ icon('sliders') }}</span><span class="row-main"><span class="row-title">Settings</span><span class="row-meta">Hiring contact, wage floors, the lock and the AI switches.</span></span>{{ icon('chev', 'chev') }}</a>
+    <a class="row" href="{{ url_for('people.audit') }}"><span class="lead-ico">{{ icon('history') }}</span><span class="row-main"><span class="row-title">Activity log</span><span class="row-meta">Who opened or changed what, and when.</span></span>{{ icon('chev', 'chev') }}</a>
+    <a class="row" href="{{ url_for('people.backup') }}"><span class="lead-ico">{{ icon('download') }}</span><span class="row-main"><span class="row-title">Backup</span><span class="row-meta">Download a private copy of everything on these pages.</span></span>{{ icon('chev', 'chev') }}</a>
+  </div>
+</section>
+{% elif viewer.caps %}
+<section class="sec">
+  <div class="card list">
+    <a class="row" href="{{ url_for('people.standards') }}"><span class="lead-ico">{{ icon('book') }}</span><span class="row-main"><span class="row-title">Our standards</span><span class="row-meta">The values, standards and level descriptions people are rated against.</span></span>{{ icon('chev', 'chev') }}</a>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -336,3 +336,669 @@ def test_model_text_is_cleaned_on_the_way_in(world):
     model = people_db.get_model(model_id)
     assert model["name"] == "Our standards"
     assert model["dimensions"][0]["definition"] == "Line one\nline two"
+
+
+# =============================================================================
+# The pages: the gate, the lock, who gets what
+# =============================================================================
+
+import people  # noqa: E402
+
+CORE_PAGES = ("/shift/people", "/shift/people/access", "/shift/people/settings",
+              "/shift/people/standards", "/shift/people/audit", "/shift/people/backup")
+OPERATOR_ONLY = ("/shift/people/access", "/shift/people/settings", "/shift/people/audit",
+                 "/shift/people/backup")
+UNLOCK = "/shift/people/unlock"
+
+
+def page(client, path):
+    resp = client.get(path)
+    assert resp.status_code == 200, (path, resp.status_code, resp.headers.get("Location"))
+    return resp.data.decode()
+
+
+def flashed(client):
+    with client.session_transaction() as sess:
+        return [m for _, m in sess.get("_flashes", [])]
+
+
+def test_people_is_registered_on_a_fresh_boot():
+    assert "people" in cfa_app.app.blueprints and "careers" in cfa_app.app.blueprints
+    assert people.FEATURES == {"reviews", "hiring"}
+    rules = {r.rule for r in cfa_app.app.url_map.iter_rules() if r.endpoint.startswith("people.")}
+    assert set(CORE_PAGES) <= rules and UNLOCK in rules and "/shift/people/lock" in rules
+
+
+# --- the gate, in order ---------------------------------------------------------
+
+def test_signed_out_lands_on_the_front_door(world):
+    client = world["client"]
+    for path in CORE_PAGES + (UNLOCK,):
+        resp = client.get(path)
+        assert resp.status_code == 302 and "/login" in resp.headers["Location"], path
+    resp = client.get("/shift/people/settings")
+    assert "next=/shift/people/settings" in resp.headers["Location"]      # back here after sign-in
+    for path in (UNLOCK, "/shift/people/lock", "/shift/people/settings", "/shift/people/backup"):
+        resp = client.post(path, data={"pin": "9999"})
+        assert resp.status_code == 302 and "/login" in resp.headers["Location"], path
+
+
+def test_a_team_member_is_sent_back_to_the_hub(world):
+    client = world["client"]
+    kit.sign_in(client, "member")
+    for path in CORE_PAGES + (UNLOCK,):
+        resp = client.get(path)
+        assert resp.status_code == 302 and resp.headers["Location"].endswith("/hub/"), path
+    assert "That part of Team Hub is for leaders." in flashed(client)
+    resp = client.post(UNLOCK, data={"pin": "1042"})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/hub/")
+    with client.session_transaction() as sess:
+        assert "people_unlock_at" not in sess
+
+
+def test_an_idle_shared_device_and_a_removed_login_go_to_the_front_door(world):
+    client = world["client"]
+    client.post("/shift/login", data={"name": "Operator", "pin": "9999", "shared": "1"})
+    kit.unlock(client, "operator")
+    with client.session_transaction() as sess:
+        sess["seen_at"] -= 31 * 60
+    resp = client.get("/shift/people")
+    assert resp.status_code == 302 and "/login" in resp.headers["Location"]
+    hari = kit.open_as(world, "hari")
+    assert hari.get("/shift/people").status_code == 200
+    shift_db.set_leader_active(world["ids"]["hari"], False)
+    resp = hari.get("/shift/people")
+    assert resp.status_code == 302 and "/login" in resp.headers["Location"]
+
+
+@pytest.mark.parametrize("who", ["operator", "lena", "hari"])
+def test_pages_stay_locked_until_the_pin_is_entered_again(world, who):
+    client = world["client"]
+    kit.sign_in(client, who)
+    for path in CORE_PAGES:
+        resp = client.get(path)
+        assert resp.status_code == 302, path
+        assert resp.headers["Location"] == f"{UNLOCK}?next={path}", path
+    # a form post while locked is never carried out
+    resp = client.post("/shift/people/settings", data={"lock_minutes": "99"})
+    assert resp.status_code == 302 and resp.headers["Location"] == UNLOCK
+    assert "People pages locked themselves. Enter your PIN and try again." in flashed(client)
+    assert people_db.get_setting("lock_minutes") == "30"
+    lock_page = page(client, UNLOCK + "?next=/shift/people/standards")
+    assert "Enter your PIN to open People pages" in lock_page
+    assert "These pages hold private information about people, so they lock after 30 minutes." in lock_page
+    assert lock_page.count('type="password"') == 1
+    assert 'name="next" value="/shift/people/standards"' in lock_page
+    resp = client.post(UNLOCK, data={"pin": world["pins"][who], "next": "/shift/people/standards"})
+    assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people/standards"
+    assert client.get("/shift/people").status_code == 200
+    # once open, the lock page just sends you on
+    assert client.get(UNLOCK).headers["Location"] == "/shift/people"
+    assert [r["who"] for r in people_db.audit_feed() if r["action"] == "unlocked"] == [kit.NAMES[who]]
+
+
+def test_a_wrong_pin_stays_locked_and_counts_toward_the_sign_in_lockout(world, capsys):
+    client = world["client"]
+    kit.sign_in(client, "lena")
+    for attempt in range(5):
+        resp = client.post(UNLOCK, data={"pin": "0000", "next": "/shift/people/standards"})
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == UNLOCK + "?next=/shift/people/standards"
+        assert flashed(client)[-1] == "Wrong PIN."
+        assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
+    assert len(shift_app._pin_fails["lena"]) == 5
+    # locked out now: even the right PIN is refused, here and at sign-in
+    resp = client.post(UNLOCK, data={"pin": "1111"})
+    assert flashed(client)[-1] == "Too many wrong PINs. Try again in 10 minutes."
+    assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
+    other = cfa_app.app.test_client()
+    assert other.post("/shift/login", data={"name": "Lena", "pin": "1111"}).status_code == 401
+    wrong = [r for r in people_db.audit_feed() if r["action"] == "wrong PIN at the lock"]
+    assert len(wrong) == 5 and {r["who"] for r in wrong} == {"Lena"}
+    assert "0000" not in json.dumps(people_db.audit_feed())           # never the PIN itself
+    out = capsys.readouterr().out
+    assert "0000" not in out and "1111" not in out
+
+
+def test_the_right_pin_clears_earlier_misses_and_an_empty_one_is_not_a_miss(world):
+    client = world["client"]
+    kit.sign_in(client, "rae")
+    client.post(UNLOCK, data={"pin": ""})
+    assert flashed(client)[-1] == "Enter your PIN."
+    assert "rae" not in shift_app._pin_fails
+    client.post(UNLOCK, data={"pin": "1"})
+    client.post(UNLOCK, data={"pin": "22"})
+    assert len(shift_app._pin_fails["rae"]) == 2
+    kit.unlock(client, "rae")
+    assert "rae" not in shift_app._pin_fails
+
+
+def test_only_your_own_pin_opens_the_lock(world, monkeypatch):
+    client = world["client"]
+    kit.sign_in(client, "lena")
+    for someone_elses in (world["pins"]["ada"], world["pins"]["operator"], "PÏN"):
+        client.post(UNLOCK, data={"pin": someone_elses})
+        assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
+    # a leader whose id no longer matches their name's login never unlocks
+    with client.session_transaction() as sess:
+        sess["shift_leader_id"] = world["ids"]["ada"]             # Lena's name on Ada's id
+    client.post(UNLOCK, data={"pin": "1111"})
+    assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
+    # the Operator's lock opens with the master PIN only, never a leader's
+    operator = cfa_app.app.test_client()
+    kit.sign_in(operator, "operator")
+    operator.post(UNLOCK, data={"pin": "1111"})
+    assert operator.get("/shift/people").status_code == 302
+    kit.unlock(operator, "operator")
+    assert operator.get("/shift/people").status_code == 200
+
+
+def test_an_unlock_belongs_to_one_sign_in(world):
+    client = kit.open_as(world, "operator")
+    with client.session_transaction() as sess:
+        assert sess["people_unlock_for"] == "op" and isinstance(sess["people_unlock_at"], int)
+        stamp = sess["people_unlock_at"]
+    lena = kit.open_as(world, "lena")
+    with lena.session_transaction() as sess:
+        assert sess["people_unlock_for"] == f"l:{world['ids']['lena']}"
+        sess["people_unlock_for"] = "op"                          # someone else's unlock
+        sess["people_unlock_at"] = stamp
+    assert lena.get("/shift/people").headers["Location"].startswith(UNLOCK)
+
+
+@pytest.mark.parametrize("target,lands", [
+    ("/shift/people/settings", "/shift/people/settings"),
+    ("/shift/reviews/review/3?tab=2", "/shift/reviews/review/3?tab=2"),
+    ("/shift/hiring", "/shift/hiring"),
+    ("https://evil.example/shift/people", "/shift/people"),
+    ("//evil.example/shift/people", "/shift/people"),
+    ("/shift/people//evil.example", "/shift/people"),
+    ("/shift/people\\evil", "/shift/people"),
+    ("/shift/people/\x00x", "/shift/people"),
+    ("/shift/people\nSet-Cookie: x", "/shift/people"),
+    ("/shift/peoplex", "/shift/people"),
+    ("/shift/admin", "/shift/people"),
+    ("/hub/people", "/shift/people"),
+    ("/shift/people/unlock?next=/shift/people/unlock", "/shift/people"),
+    ("", "/shift/people"),
+])
+def test_next_only_ever_leads_back_into_people_pages(world, target, lands):
+    client = world["client"]
+    kit.sign_in(client, "operator")
+    resp = client.post(UNLOCK, data={"pin": "9999", "next": target})
+    assert resp.status_code == 302 and resp.headers["Location"] == lands
+    assert 'name="next"' not in cfa_app.app.test_client().get(UNLOCK).data.decode()
+
+
+def test_the_lock_comes_back_after_the_idle_time(world):
+    client = kit.open_as(world, "operator")
+    with client.session_transaction() as sess:
+        sess["people_unlock_at"] -= 20 * 60
+        earlier = sess["people_unlock_at"]
+    assert client.get("/shift/people").status_code == 200          # inside 30 minutes
+    with client.session_transaction() as sess:
+        assert sess["people_unlock_at"] > earlier                  # every page refreshes it
+        sess["people_unlock_at"] -= 31 * 60
+    resp = client.get("/shift/people/settings")
+    assert resp.headers["Location"] == UNLOCK + "?next=/shift/people/settings"
+    # the Operator can set a longer or shorter time
+    kit.unlock(client, "operator")
+    people_db.set_setting("lock_minutes", "45", "Operator")
+    with client.session_transaction() as sess:
+        sess["people_unlock_at"] -= 31 * 60
+    assert client.get("/shift/people").status_code == 200
+    people_db.set_setting("lock_minutes", "5", "Operator")
+    with client.session_transaction() as sess:
+        sess["people_unlock_at"] -= 6 * 60
+    assert client.get("/shift/people").status_code == 302
+    assert "lock after 5 minutes" in page(client, UNLOCK)
+
+
+def test_lock_now(world):
+    client = kit.open_as(world, "hari")
+    assert "Lock now" in page(client, "/shift/people")
+    resp = client.post("/shift/people/lock")
+    assert resp.status_code == 302 and resp.headers["Location"] == "/shift/"
+    with client.session_transaction() as sess:
+        assert "people_unlock_at" not in sess and "people_unlock_for" not in sess
+        assert sess["shift_name"] == "Hari"                        # still signed in to Team Hub
+    assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
+    assert client.get("/shift/").status_code == 200
+
+
+@pytest.mark.parametrize("headers,accepted", [
+    ({}, True),
+    ({"Origin": "http://localhost"}, True),
+    ({"Sec-Fetch-Site": "same-origin"}, True),
+    ({"Sec-Fetch-Site": "none"}, True),
+    ({"Origin": "https://evil.example"}, False),
+    ({"Origin": "http://localhost.evil.example"}, False),
+    ({"Origin": "null"}, False),
+    ({"Sec-Fetch-Site": "cross-site"}, False),
+    ({"Sec-Fetch-Site": "same-site"}, False),
+    ({"Origin": "http://localhost", "Sec-Fetch-Site": "cross-site"}, False),
+])
+def test_a_form_post_from_another_site_is_refused(world, headers, accepted):
+    client = kit.open_as(world, "operator")
+    resp = client.post("/shift/people/settings", data={"lock_minutes": "60"}, headers=headers)
+    assert resp.status_code == 302
+    if accepted:
+        assert people_db.get_setting("lock_minutes") == "60"
+    else:
+        assert resp.headers["Location"] == "/shift/people"
+        assert "That didn't come from Team Hub. Please try again." in flashed(client)
+        assert people_db.get_setting("lock_minutes") == "30"
+
+
+def test_another_site_cannot_open_the_lock_either(world):
+    client = world["client"]
+    kit.sign_in(client, "operator")
+    client.post(UNLOCK, data={"pin": "9999"}, headers={"Origin": "https://evil.example"})
+    assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
+    assert "operator" not in shift_app._pin_fails
+
+
+# --- who gets what ------------------------------------------------------------
+
+@pytest.mark.parametrize("who,allowed", [
+    ("operator", set(CORE_PAGES)),
+    ("hari", {"/shift/people", "/shift/people/standards"}),
+    ("rae", {"/shift/people", "/shift/people/standards"}),
+    ("lena", {"/shift/people"}),
+    ("ada", {"/shift/people"}),              # the admin role alone opens nothing
+])
+def test_core_pages_for_each_person(world, who, allowed):
+    client = kit.open_as(world, who)
+    for path in CORE_PAGES:
+        resp = client.get(path)
+        if path in allowed:
+            assert resp.status_code == 200, (who, path)
+        else:
+            assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people", (who, path)
+            assert flashed(client)[-1] == "That page isn't available on your sign-in."
+
+
+def test_an_admin_leader_without_a_grant_gets_nothing(world):
+    client = kit.open_as(world, "ada")
+    home = page(client, "/shift/people")
+    assert "Nothing here for your sign-in right now." in home
+    for link in OPERATOR_ONLY + ("/shift/people/standards",):
+        assert f'href="{link}"' not in home
+    for path, data in (("/shift/people/access/grant",
+                        {"leader_id": world["ids"]["ada"], "capability": "hiring"}),
+                       ("/shift/people/settings", {"ai_reviews": "1"}),
+                       ("/shift/people/standards/export", {}),
+                       ("/shift/people/standards/example", {}),
+                       ("/shift/people/backup", {})):
+        resp = client.post(path, data=data)
+        assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people", path
+    assert people_db.capabilities(world["ids"]["ada"], "Ada") == frozenset()
+    assert not people_db.setting_on("ai_reviews")
+    assert not [r for r in people_db.audit_feed() if r["action"] == "backup downloaded"]
+
+
+def test_home_lists_only_what_each_person_can_open(world, monkeypatch):
+    import people_hiring
+    import people_reviews
+    monkeypatch.setattr(people, "_page_url", lambda path: path + "/")    # as if the features had pages
+    operator = page(kit.open_as(world, "operator"), "/shift/people")
+    for label in ("Leader reviews", "Hiring", "Who has access", "Our standards", "Settings",
+                  "Activity log", "Backup", "Lock now"):
+        assert label in operator, label
+    assert "My review" not in operator
+    hari = page(kit.open_as(world, "hari"), "/shift/people")
+    assert 'href="/shift/hiring/"' in hari and "/shift/reviews" not in hari
+    assert "Our standards" in hari and "Who has access" not in hari and "Backup" not in hari
+    rae = page(kit.open_as(world, "rae"), "/shift/people")
+    assert 'href="/shift/reviews/"' in rae and "/shift/hiring" not in rae
+    lena = kit.open_as(world, "lena")
+    assert "/shift/reviews" not in page(lena, "/shift/people")
+    # "My review" appears only when the reviews feature says something is waiting
+    monkeypatch.setattr(people_reviews, "nav_counts",
+                        lambda kind, leader_id, name: {"mine": 1, "drafts": 4, "on_hold": 2})
+    monkeypatch.setattr(people_hiring, "nav_counts",
+                        lambda kind, leader_id, name: {"new": 3, "notices_overdue": 1})
+    home = page(lena, "/shift/people")
+    assert 'href="/shift/reviews/mine/"' in home and "My review" in home
+    assert "to finish" not in home and "on hold" not in home and "3 new" not in home
+    operator = page(kit.open_as(world, "operator"), "/shift/people")
+    assert "2 on hold" in operator and "3 new" in operator and "1 notice overdue" in operator
+
+
+def test_home_without_feature_pages_links_nowhere_that_is_not_there(world):
+    """With the placeholder features there is nothing to open yet."""
+    home = page(kit.open_as(world, "operator"), "/shift/people")
+    assert "/shift/reviews" not in home and "/shift/hiring" not in home
+    assert people._page_url("/shift/reviews") is None
+
+
+def test_view_helpers_for_the_feature_pages(world):
+    @people.requires("hiring")
+    def hiring_only():
+        return "the page"
+
+    def as_viewer(caps, kind="leader"):
+        from flask import g
+        g.people_viewer = people.Viewer(kind, None if kind == "operator" else 7, "Hari", "lead",
+                                        frozenset(caps))
+
+    with cfa_app.app.test_request_context("/shift/hiring/"):
+        as_viewer({"hiring"})
+        assert people.viewer().name == "Hari" and people.actor() == "Hari"
+        assert people.can("hiring") and not people.can("reviewer") and not people.can("operator")
+        assert not people.viewer().is_operator
+        assert hiring_only() == "the page"
+        as_viewer({"reviewer"})
+        resp = hiring_only()
+        assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people"
+        resp = people.deny()
+        assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people"
+        as_viewer(people.OPERATOR_CAPS, "operator")
+        assert people.viewer().is_operator and people.can("hiring") and people.can("reviewer")
+        resp = people._id_out_of_range(OverflowError())
+        assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people"
+
+
+# --- who has access (the Operator's page) ---------------------------------------
+
+def test_the_operator_grants_and_removes_access(world):
+    client = kit.open_as(world, "operator")
+    lena = world["ids"]["lena"]
+    before = page(client, "/shift/people/access")
+    for name in ("Lena", "Ada", "Hari", "Rae"):
+        assert name in before
+    assert before.count("Can open") == 2                          # Hari: hiring, Rae: reviews
+    assert "Being an admin leader opens neither one" in before
+    resp = client.post("/shift/people/access/grant",
+                       data={"leader_id": lena, "capability": "reviewer", "leader_name": "Ada"})
+    assert resp.status_code == 302 and resp.headers["Location"] == f"/shift/people/access#l{lena}"
+    assert people_db.capabilities(lena, "Lena") == frozenset({"reviewer"})    # her own row's name
+    assert people_db.capabilities(lena, "Ada") == frozenset()
+    assert page(client, "/shift/people/access").count("Can open") == 3
+    grant = next(g for g in people_db.grants() if g["leader_id"] == lena)
+    assert grant["granted_by"] == "Operator"
+    assert client.post("/shift/people/access/revoke", data={"grant_id": grant["id"]}).status_code == 302
+    assert people_db.capabilities(lena, "Lena") == frozenset()
+    for bad in ({"leader_id": 9999, "capability": "hiring"}, {"leader_id": lena, "capability": "owner"},
+                {"leader_id": "x", "capability": "hiring"}, {}):
+        assert client.post("/shift/people/access/grant", data=bad).status_code == 302
+    assert client.post("/shift/people/access/revoke", data={"grant_id": "nope"}).status_code == 302
+    assert people_db.capabilities(lena, "Lena") == frozenset()
+    # access taken away stops on the leader's next tap
+    hari = kit.open_as(world, "hari")
+    assert hari.get("/shift/people/standards").status_code == 200
+    held = next(g for g in people_db.grants() if g["leader_name"] == "Hari")
+    client.post("/shift/people/access/revoke", data={"grant_id": held["id"]})
+    assert hari.get("/shift/people/standards").status_code == 302
+
+
+def test_a_grant_that_no_longer_matches_a_sign_in_opens_nothing(world):
+    """A Team Hub restore can hand a leader id to someone else."""
+    hari = world["ids"]["hari"]
+    with shift_db.connect() as conn:
+        conn.execute("UPDATE leaders SET name='Jordan' WHERE id=?", (hari,))
+        conn.commit()
+    client = cfa_app.app.test_client()
+    assert client.post("/shift/login", data={"name": "Jordan", "pin": "3333"}).status_code == 302
+    client.post(UNLOCK, data={"pin": "3333"})
+    home = page(client, "/shift/people")
+    assert "Nothing here for your sign-in right now." in home
+    assert client.get("/shift/people/standards").status_code == 302
+    access = page(kit.open_as(world, "operator"), "/shift/people/access")
+    assert "No longer matching a sign-in" in access
+    assert access.count("Can open") == 1                          # only Rae's still counts
+
+
+# --- settings (the Operator's page) ---------------------------------------------
+
+def test_settings_page_saves_checks_and_explains(world):
+    client = kit.open_as(world, "operator")
+    html = page(client, "/shift/people/settings")
+    for key in ("employer_name", "hiring_contact_name", "hiring_contact_email",
+                "hiring_contact_phone", "min_wage_general", "min_wage_student",
+                "quick_link_days", "retention_months", "lock_minutes"):
+        assert f'name="{key}"' in html, key
+    assert 'value="17.95"' in html and 'value="16.90"' in html
+    assert "check the current rate on ontario.ca" in html
+    resp = client.post("/shift/people/settings", data={
+        "employer_name": "Example Restaurant", "hiring_contact_name": "Morgan Example",
+        "hiring_contact_email": "hiring@example.com", "hiring_contact_phone": ""})
+    assert resp.status_code == 302 and flashed(client)[-1] == "Settings saved."
+    assert people_db.get_setting("hiring_contact_name") == "Morgan Example"
+    html = page(client, "/shift/people/settings")
+    assert 'value="Morgan Example"' in html and 'value="hiring@example.com"' in html
+    # one bad value is named and left alone; the good ones still save
+    client.post("/shift/people/settings", data={"min_wage_general": "lots", "min_wage_student": "17",
+                                                "quick_link_days": "5", "retention_months": "3"})
+    said = flashed(client)
+    assert "The general minimum wage needs a dollar amount like 17.95." in said
+    assert "Months to keep applications must be a whole number from 12 to 120." in said
+    assert "Everything else was saved." in said
+    assert people_db.get_setting("min_wage_general") == "17.95"
+    assert people_db.get_setting("min_wage_student") == "17.00"
+    assert people_db.get_setting("quick_link_days") == "5"
+    assert people_db.get_setting("retention_months") == "24"
+
+
+def test_each_ai_switch_sits_under_its_checklist_and_shows_who_switched_it(world, monkeypatch):
+    client = kit.open_as(world, "operator")
+    html = page(client, "/shift/people/settings")
+    assert "No AI key is set up on the server" in html
+    assert html.count("Before you switch it on, these should be true") == 2
+    for line in ("Leaders have been told in writing that an AI tool helps prepare a draft",
+                 "every standard is about behaviour at work",
+                 "A first review cycle has been run without AI.",
+                 "Nothing from your Team Hub activity is used.",
+                 "Every posting that uses AI says so in the posting itself",
+                 "a person makes every decision"):
+        assert line in html, line
+    assert html.index("A first review cycle has been run without AI.") \
+        < html.index("Switch on AI for leader reviews")
+    assert "Switch on AI for hiring" in html and "Last switched by" not in html
+    client.post("/shift/people/settings", data={"ai_reviews": "1"})
+    assert people_db.setting_on("ai_reviews") and not people_db.setting_on("ai_hiring")
+    html = page(client, "/shift/people/settings")
+    assert "Switch off AI for leader reviews" in html and "Last switched by Operator" in html
+    client.post("/shift/people/settings", data={"ai_reviews": "0"})
+    assert not people_db.setting_on("ai_reviews")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    assert "No AI key is set up" not in page(client, "/shift/people/settings")
+
+
+# --- Our standards (the page) ---------------------------------------------------
+
+def upload(client, data, name="standards.json"):
+    raw = data if isinstance(data, bytes) else json.dumps(data).encode()
+    return client.post("/shift/people/standards/import",
+                       data={"file": (io.BytesIO(raw), name)}, content_type="multipart/form-data")
+
+
+def test_standards_page_shows_the_model_with_levels_folded_away(world):
+    html = page(kit.open_as(world, "operator"), "/shift/people/standards")
+    assert "Example standards" in html and "version 1" in html
+    for text in ("How we work", "How we work together", "Reliable", "Guest care", "Teamwork",
+                 "Learning", "Role model", "What each level looks like", "Hiring question",
+                 "Others plan around them."):
+        assert text in html, text
+    assert html.count("<details") >= 3 and "Change this wording" in html
+    assert "Load a standards file" in html and "See an example file" in html
+
+
+def test_with_no_model_the_page_says_what_one_is(world, tmp_path, monkeypatch):
+    monkeypatch.setenv("PEOPLE_DB_PATH", str(tmp_path / "empty-people.db"))
+    people_db.init_db()
+    client = kit.open_as(world, "operator")
+    html = page(client, "/shift/people/standards")
+    assert "No standards are loaded yet." in html
+    assert "Reviews and hiring scorecards need a model before they can start." in html
+    assert "Start with Our standards." in page(client, "/shift/people")
+    assert client.post("/shift/people/standards/export").status_code == 302
+
+
+def test_loading_a_file_makes_a_new_version_and_bad_files_change_nothing(world):
+    client = kit.open_as(world, "operator")
+    data = example()
+    data["name"] = "Second go"
+    resp = upload(client, data)
+    assert resp.status_code == 302 and flashed(client)[-1] == "Standards loaded as version 2."
+    assert people_db.active_model()["name"] == "Second go"
+    # every problem is listed, in plain words, and nothing is saved
+    data["levels"] = ["one", "two"]
+    data["groups"][0]["dimensions"][0]["key"] = "Not A Key"
+    data["groups"][0]["dimensions"][1]["anchors"] = ["just one"]
+    resp = upload(client, data)
+    assert resp.status_code == 400
+    html = resp.data.decode()
+    assert "Nothing was changed." in html
+    for problem in ("List exactly four level names, lowest first.", "small letters, numbers or dashes",
+                    "exactly four level descriptions"):
+        assert problem in html, problem
+    for raw in (b"this is not json", b"\xff\xfe\x00bad", b"[1, 2, 3]", b"[" * 5000):
+        resp = upload(client, raw)
+        assert resp.status_code == 400 and "Nothing was changed." in resp.data.decode()
+    resp = upload(client, b" " * (people_db.MODEL_MAX_BYTES + 1))
+    assert resp.status_code == 400 and "256 KB at most" in resp.data.decode()
+    resp = upload(client, b" " * (people_db.MODEL_MAX_BYTES + 200_000))     # past the request limit
+    assert resp.status_code == 302 and "256 KB at most" in flashed(client)[-1]
+    assert client.post("/shift/people/standards/import", data={}).status_code == 302
+    assert people_db.active_model()["version"] == 2 and len(people_db.model_versions()) == 2
+
+
+def test_downloads_are_attachments_in_the_import_format(world):
+    client = kit.open_as(world, "operator")
+    resp = client.post("/shift/people/standards/export")
+    assert resp.status_code == 200 and resp.mimetype == "application/json"
+    assert resp.headers["Content-Disposition"] == 'attachment; filename="our-standards-v1.json"'
+    assert json.loads(resp.data) == people_db.PEOPLE_EXAMPLE_MODEL
+    assert upload(client, resp.data).status_code == 302            # what comes out goes back in
+    resp = client.post("/shift/people/standards/example")
+    assert "example-standards.json" in resp.headers["Content-Disposition"]
+    assert people_db.validate_model(json.loads(resp.data)) == []
+
+
+def test_changing_one_standard_saves_a_new_version(world):
+    client = kit.open_as(world, "operator")
+    model = people_db.active_model()
+    form = {"model_id": model["id"], "key": "teamwork", "name": "Working together",
+            "definition": "Helps teammates and shares what they know.",
+            "anchor1": "One", "anchor2": "Two", "anchor3": "Three", "anchor4": "Four",
+            "evidence_examples": "Dated notes.", "hiring_question": "",
+            "hiring_anchor1": "", "hiring_anchor2": "", "hiring_anchor3": "", "hiring_anchor4": ""}
+    resp = client.post("/shift/people/standards/edit", data=form)
+    assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people/standards#s-teamwork"
+    assert flashed(client)[-1] == "Saved as version 2."
+    new = people_db.active_model()
+    dim = next(d for d in new["dimensions"] if d["key"] == "teamwork")
+    assert new["version"] == 2 and dim["name"] == "Working together"
+    assert dim["anchors"] == ["One", "Two", "Three", "Four"] and dim["hiring"] is None
+    assert [d["key"] for d in new["dimensions"]] == ["reliable", "guest-care", "teamwork"]
+    assert new["dimensions"][0] == dict(model["dimensions"][0])    # the others are untouched
+    assert people_db.get_model(model["id"])["dimensions"][2]["name"] == "Teamwork"
+    # a form opened before the change is refused, not applied to the new version
+    resp = client.post("/shift/people/standards/edit", data=form)
+    assert resp.status_code == 302 and "changed while that form was open" in flashed(client)[-1]
+    # problems come back with what was typed still in the boxes
+    form.update(model_id=new["id"], anchor3="", definition="Kept while fixing.")
+    resp = client.post("/shift/people/standards/edit", data=form)
+    assert resp.status_code == 400
+    html = resp.data.decode()
+    assert "Nothing was changed." in html and "level 3" in html and "Kept while fixing." in html
+    assert people_db.active_model()["version"] == 2
+    form.update(key="no-such-standard")
+    assert client.post("/shift/people/standards/edit", data=form).status_code == 302
+
+
+def test_a_leader_with_a_grant_reads_the_standards_but_cannot_change_them(world):
+    client = kit.open_as(world, "rae")
+    html = page(client, "/shift/people/standards")
+    assert "Reliable" in html and "read only" in html
+    for tool in ("Change this wording", "Load a standards file", "See an example file", "<form method=\"post\" action=\"/shift/people/standards"):
+        assert tool not in html, tool
+    model = people_db.active_model()
+    for path, data in (("/shift/people/standards/edit", {"model_id": model["id"], "key": "teamwork"}),
+                       ("/shift/people/standards/export", {}),
+                       ("/shift/people/standards/example", {})):
+        resp = client.post(path, data=data)
+        assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people", path
+    resp = upload(client, example())
+    assert resp.status_code == 302 and people_db.active_model()["version"] == 1
+
+
+# --- activity log and backup (the pages) ----------------------------------------
+
+def test_activity_log_page_is_newest_first_two_hundred_a_page(world):
+    for n in range(205):
+        people_db.audit("Rae", "review opened", "review", n)
+    client = kit.open_as(world, "operator")
+    first = page(client, "/shift/people/audit")
+    assert first.count("<tr>") == 201 and "review 204" in first and "Older" in first
+    assert "Newer" not in first
+    second = page(client, "/shift/people/audit?page=2")
+    assert "review 0<" in second and "Newer" in second and "standards saved" in second
+    assert "access given" in second and "leader" in second
+    assert "Nothing further back." in page(client, "/shift/people/audit?page=9")
+    for odd in ("0", "-3", "abc", "99999999999999999999", "²"):
+        assert "review 204" in page(client, f"/shift/people/audit?page={odd}")
+
+
+def test_backup_page_and_download(world):
+    client = kit.open_as(world, "operator")
+    html = page(client, "/shift/people/backup")
+    for text in ("This file holds private information about people.", "No copy has been downloaded yet.",
+                 "Restoring from this file is not built in this version.", "Keep only the newest copy"):
+        assert text in html, text
+    resp = client.post("/shift/people/backup")
+    assert resp.status_code == 200 and resp.mimetype == "application/json"
+    assert resp.headers["Content-Disposition"].startswith('attachment; filename="people-backup-')
+    assert resp.headers["Cache-Control"] == "private, no-store"
+    payload = json.loads(resp.data)
+    assert "meta" not in payload["tables"] and payload["tables"]["access_grants"]
+    assert "Last downloaded" in page(client, "/shift/people/backup")
+    assert [r["who"] for r in people_db.audit_feed() if r["action"] == "backup downloaded"] == ["Operator"]
+
+
+# --- headers, and no scripts anywhere ---------------------------------------------
+
+def test_every_page_has_the_strict_headers_and_runs_no_scripts(world):
+    hub_csp = cfa_app.app.test_client().get("/hub/login").headers["Content-Security-Policy"]
+    client = world["client"]
+    kit.sign_in(client, "operator")
+    pages = [(UNLOCK, client.get(UNLOCK))]
+    kit.unlock(client, "operator")
+    people_db.audit("Operator", "review opened", "review", 1)
+    pages += [(path, client.get(path)) for path in CORE_PAGES]
+    bad_upload = upload(client, b"nope")
+    pages.append(("standards with problems", bad_upload))
+    for name, resp in pages:
+        assert resp.status_code in (200, 400), name
+        assert resp.headers["Cache-Control"] == "private, no-store", name
+        assert resp.headers["X-Content-Type-Options"] == "nosniff", name
+        assert resp.headers["Referrer-Policy"] == "same-origin", name
+        assert resp.headers["X-Frame-Options"] == "DENY", name
+        assert resp.headers["Content-Security-Policy"] == hub_csp, name
+        html = resp.data.decode()
+        assert "<script" not in html.lower(), name
+        assert not re.search(r"<[^>]+\son[a-z]+\s*=", html), name
+        assert "javascript:" not in html.lower(), name
+        assert not re.search(r'(?:src|href)="https?://', html), name          # no outside assets
+        assert re.search(r'<section class="hero compact">\s*<p class="eyebrow">[^<]+</p>\s*'
+                         r'<h1 class="headline">[^<]+</h1>\s*<p class="triage">', html), name
+        assert '<nav class="tabbar"' in html and "Open the Team Hub menu" in html, name
+    # redirects from the gate carry the no-store header too
+    resp = cfa_app.app.test_client().get("/shift/people")
+    assert resp.status_code == 302 and resp.headers["Cache-Control"] == "private, no-store"
+
+
+# --- house rules for the source ---------------------------------------------------
+
+def test_people_source_never_touches_private_team_hub_content():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for name in ("people.py", "people_db.py", "people_ai.py", "people_reviews.py",
+                 "people_reviews_db.py", "people_hiring.py", "people_hiring_db.py", "careers.py"):
+        source = open(os.path.join(root, name), encoding="utf-8").read()
+        for word in ("oneonone", "daily_goals", "goal_updates", "lesson_progress"):
+            assert word not in source, (name, word)
+    for name in sorted(os.listdir(os.path.join(root, "templates", "people"))):
+        if name.endswith(".html"):
+            text = open(os.path.join(root, "templates", "people", name), encoding="utf-8").read()
+            assert "<script" not in text and "|safe" not in text, name

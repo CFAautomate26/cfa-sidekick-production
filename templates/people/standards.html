@@ -1,0 +1,133 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, level_pills %}
+{% block title %}Our standards{% endblock %}
+{% block head %}
+<style>
+.pp-std { padding: 0; }
+.pp-std > summary { list-style: none; cursor: pointer; }
+.pp-std > summary::-webkit-details-marker { display: none; }
+.pp-std[open] > summary .chev { transform: rotate(90deg); }
+.pp-std-body { border-top: 1px solid var(--rule); padding: 14px 16px 16px; }
+.pp-std-body .def { white-space: pre-line; color: var(--text-strong); line-height: 1.5; }
+.pp-edit { margin-top: 16px; border-top: 1px solid var(--rule); padding-top: 4px; }
+.pp-edit > summary { cursor: pointer; font-weight: 700; color: var(--nav); min-height: 44px; display: flex; align-items: center; gap: 6px; }
+.pp-edit textarea { min-height: 84px; }
+.pp-tools form { margin: 0; }
+</style>
+{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Our standards', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · {{ 'the Operator edits' if viewer.is_operator else 'read only' }}</p>
+  <h1 class="headline">Our standards</h1>
+  {% if model %}
+  <p class="triage"><b>{{ model.name }}</b> · version {{ model.version }} · <b>{{ model.dimensions|length }}</b> standard{{ '' if model.dimensions|length == 1 else 's' }} in {{ model.groups|length }} group{{ '' if model.groups|length == 1 else 's' }}.</p>
+  {% else %}
+  <p class="triage">No standards are loaded yet.</p>
+  {% endif %}
+</section>
+
+{% if problems %}
+<div class="callout warm" role="alert" style="margin-top:22px;">{{ icon('alert') }}<span><strong>Nothing was changed.</strong> {{ 'This needs fixing first:' if problems|length == 1 else 'These need fixing first:' }}
+  <ul class="pp-problems">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul></span></div>
+{% endif %}
+
+{% if not model %}
+<div class="card" style="margin-top:22px;">
+  <span class="card-title">What this is</span>
+  <p class="card-meta">The standards model is the store's own list of what good looks like: the values and standards, a short definition of each, and a description of each of four levels, lowest first. Leader reviews rate each standard against those descriptions, and hiring scorecards can borrow them, so everyone is measured against the same written words.</p>
+  <p class="card-meta">Reviews and hiring scorecards need a model before they can start. {% if viewer.is_operator %}Load the store's file below. The example file shows the layout.{% else %}The Operator loads it.{% endif %}</p>
+</div>
+{% else %}
+<div class="card" style="margin-top:22px;">
+  <span class="card-title">The four levels, lowest first</span>
+  <p style="margin-top:10px;">{{ level_pills(model.levels) }}</p>
+  <p class="fine-line">Saved by {{ model.created_by }}, {{ model.created_at|pp_when }}. A review keeps the version it was started with, so past reviews never change wording.</p>
+</div>
+
+{% for group in model.groups %}
+<section class="sec">
+  <div class="sec-head"><h2>{{ group.name }}</h2></div>
+  {% for dim in group.dimensions %}
+  {% set d = draft if draft.key == dim.key else none %}
+  <details class="card list pp-std" id="s-{{ dim.key }}"{{ ' open' if d }}>
+    <summary class="row"><span class="row-main"><span class="row-title">{{ dim.name }}</span><span class="row-meta">{{ dim.definition|truncate(110) }}</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="pp-std-body">
+      <p class="def">{{ dim.definition }}</p>
+      <p class="subhead">What each level looks like</p>
+      <ol class="pp-anchors">
+        {% for anchor in dim.anchors %}<li><b>{{ model.levels[loop.index0] }}</b>{{ anchor }}</li>{% endfor %}
+      </ol>
+      {% if dim.evidence_examples %}
+      <p class="subhead">Examples of evidence</p>
+      <p class="pp-text">{{ dim.evidence_examples }}</p>
+      {% endif %}
+      {% if dim.hiring %}
+      <p class="subhead">Hiring question</p>
+      <p class="pp-text">{{ dim.hiring.question }}</p>
+      <ol class="pp-anchors">
+        {% for anchor in dim.hiring.anchors %}<li><b>{{ model.levels[loop.index0] }}</b>{{ anchor }}</li>{% endfor %}
+      </ol>
+      {% endif %}
+      {% if viewer.is_operator %}
+      <details class="pp-edit"{{ ' open' if d }}>
+        <summary>{{ icon('edit', 'sm') }}Change this wording</summary>
+        <form method="post" action="{{ url_for('people.standards_edit') }}">
+          <input type="hidden" name="model_id" value="{{ model.id }}"><input type="hidden" name="key" value="{{ dim.key }}">
+          <label class="field" for="n-{{ dim.key }}">Name</label>
+          <input id="n-{{ dim.key }}" name="name" type="text" maxlength="{{ caps.name }}" value="{{ d.name if d else dim.name }}" required>
+          <label class="field" for="d-{{ dim.key }}">Definition</label>
+          <textarea id="d-{{ dim.key }}" name="definition" maxlength="{{ caps.definition }}" required>{{ d.definition if d else dim.definition }}</textarea>
+          {% for n in range(4) %}
+          <label class="field" for="a{{ n }}-{{ dim.key }}">{{ model.levels[n] }}: what it looks like</label>
+          <textarea id="a{{ n }}-{{ dim.key }}" name="anchor{{ n + 1 }}" maxlength="{{ caps.anchor }}" required>{{ d.anchors[n] if d else dim.anchors[n] }}</textarea>
+          {% endfor %}
+          <label class="field" for="e-{{ dim.key }}">Examples of evidence <span class="muted">(optional)</span></label>
+          <textarea id="e-{{ dim.key }}" name="evidence_examples" maxlength="{{ caps.evidence_examples }}">{{ d.evidence_examples if d else dim.evidence_examples }}</textarea>
+          <label class="field" for="q-{{ dim.key }}">Hiring question <span class="muted">(optional: leave it and the four boxes below empty for none)</span></label>
+          <textarea id="q-{{ dim.key }}" name="hiring_question" maxlength="{{ caps.question }}">{{ d.hiring_question if d else (dim.hiring.question if dim.hiring else '') }}</textarea>
+          {% for n in range(4) %}
+          <label class="field" for="h{{ n }}-{{ dim.key }}">Hiring answer at {{ model.levels[n] }}</label>
+          <textarea id="h{{ n }}-{{ dim.key }}" name="hiring_anchor{{ n + 1 }}" maxlength="{{ caps.anchor }}">{{ d.hiring_anchors[n] if d else (dim.hiring.anchors[n] if dim.hiring else '') }}</textarea>
+          {% endfor %}
+          <p class="fine-line">Saving makes a new version. Reviews already started keep the wording they began with.</p>
+          <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save as a new version</button></div>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+</section>
+{% endfor %}
+{% endif %}
+
+{% if viewer.is_operator %}
+<section class="sec">
+  <div class="sec-head"><h2>Load or download the file</h2></div>
+  <form method="post" action="{{ url_for('people.standards_import') }}" enctype="multipart/form-data" class="card">
+    <span class="card-title">Load a standards file</span>
+    <p class="card-meta">A JSON text file, 256 KB at most. It is checked first: if anything is wrong you get the list and nothing changes. A file that passes becomes a new version{% if model %} and replaces version {{ model.version }} for reviews started from now on{% endif %}.</p>
+    <label class="field" for="file">Standards file</label>
+    <input id="file" type="file" name="file" accept=".json,application/json" required>
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">{{ icon('upload') }}Check and load</button></div>
+  </form>
+  <div class="card pp-tools">
+    <span class="card-title">Download</span>
+    <p class="card-meta">The store's own wording is kept here, not in the app's code. Download it to edit in a text editor, or to keep a copy.</p>
+    <div class="btnrow">
+      {% if model %}<form method="post" action="{{ url_for('people.standards_export') }}"><button class="btn btn-secondary sm" type="submit">{{ icon('download') }}Our standards (version {{ model.version }})</button></form>{% endif %}
+      <form method="post" action="{{ url_for('people.standards_example') }}"><button class="btn btn-secondary sm" type="submit">{{ icon('file') }}See an example file</button></form>
+    </div>
+  </div>
+  {% if versions|length > 1 %}
+  <div class="card table pp-scroll">
+    <table class="plain">
+      <thead><tr><th scope="col">Version</th><th scope="col">Name</th><th scope="col">Saved</th><th scope="col">By</th></tr></thead>
+      <tbody>{% for v in versions %}<tr><td>{{ v.version }}{% if v.active %} (in use){% endif %}</td><td>{{ v.name }}</td><td class="nowrap">{{ v.created_at|pp_when }}</td><td class="who">{{ v.created_by }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

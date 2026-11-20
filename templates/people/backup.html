@@ -1,0 +1,33 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs %}
+{% block title %}Backup{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Backup', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · the Operator only</p>
+  <h1 class="headline">Backup</h1>
+  <p class="triage">{% if last %}Last downloaded <b>{{ last.at|pp_when }}</b> by {{ last.who }}.{% else %}No copy has been downloaded yet.{% endif %}</p>
+</section>
+
+<p class="callout warm" style="margin-top:22px;">{{ icon('lock') }}<span><strong>This file holds private information about people.</strong> Keep it somewhere only you can open. Never put it in email, a group chat, Slack or a shared drive.</span></p>
+
+<div class="card">
+  <span class="card-title">What is in the file</span>
+  <p class="card-meta">Everything on People pages, as one file: who has access, settings, every version of our standards, leader reviews and observations, job postings and applications, the record of what was sent to and received from the AI service, and the activity log. The Team Hub backup does not include any of this, and this file does not include Team Hub.</p>
+  <p class="fine-line">Private links that applicants hold are stored scrambled, and the key that scrambles them stays on the server: it is not in the file.</p>
+  <form method="post" action="{{ url_for('people.backup') }}">
+    <div class="btnrow"><button class="btn btn-primary" type="submit">{{ icon('download') }}Download the backup</button></div>
+  </form>
+  <p class="fine-line">Each download is written in the activity log.</p>
+</div>
+
+<div class="card">
+  <span class="card-title">Where to keep it, and for how long</span>
+  <p class="card-meta">A backup is a copy from one day. When old applications are later removed here, your older files still hold them. Keep only the newest copy and delete the ones before it, unless a complaint or legal claim is under way: then keep every copy and call the lawyer.</p>
+</div>
+
+<div class="card">
+  <span class="card-title">Putting a backup back</span>
+  <p class="card-meta">Restoring from this file is not built in this version. The file is a safety copy: if the server's disk were ever lost, the records would be rebuilt from it by hand.</p>
+</div>
+{% endblock %}

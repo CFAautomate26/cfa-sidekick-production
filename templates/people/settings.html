@@ -1,0 +1,87 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, stamp %}
+{% block title %}Settings{% endblock %}
+{% block head %}
+<style>
+.pp-checklist { margin: 10px 0 0 20px; line-height: 1.45; }
+.pp-checklist li { margin: 6px 0; }
+.pp-switch { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule); }
+.pp-switch form { margin: 0; }
+.pp-switch .btn { min-width: 0; }
+.pp-wording { margin-top: 12px; }
+.pp-wording > summary { cursor: pointer; font-weight: 700; color: var(--nav); min-height: 44px; display: flex; align-items: center; }
+.pp-wording blockquote { margin-top: 6px; padding: 12px 14px; background: var(--tan-050); border-radius: var(--r-xl); font-size: 0.9375rem; line-height: 1.5; }
+</style>
+{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Settings', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · the Operator only</p>
+  <h1 class="headline">Settings</h1>
+  <p class="triage">Every change here is written in the activity log.</p>
+</section>
+
+{% for group_key, group_title, keys in groups %}
+<form method="post" action="{{ url_for('people.settings') }}" class="card" id="{{ group_key }}"{% if loop.first %} style="margin-top:22px;"{% endif %} autocomplete="off">
+  <span class="card-title">{{ group_title }}</span>
+  {% for key in keys %}
+  {% set label, hint, problem, kind = fields[key] %}
+  <label class="field" for="f-{{ key }}">{{ label }}</label>
+  <input id="f-{{ key }}" name="{{ key }}" type="{{ 'text' if kind == 'number' else kind }}"{% if kind == 'number' %} inputmode="numeric"{% endif %} value="{{ settings[key].value }}" maxlength="120" aria-describedby="h-{{ key }}">
+  <p class="fine-line" id="h-{{ key }}">{{ hint }}</p>
+  {% endfor %}
+  <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save</button></div>
+</form>
+{% endfor %}
+
+{% if not ai_ready %}
+<p class="callout tan">{{ icon('info') }}<span>No AI key is set up on the server (OPENAI_API_KEY), so nothing is sent to an AI service, whatever the switches below say.</span></p>
+{% endif %}
+
+<div class="card" id="ai-reviews">
+  <span class="card-title">AI drafting for leader reviews</span>
+  <p class="card-meta">The AI prepares a draft from the evidence for the reviewer to check. It never rates on its own, never recommends a consequence and never compares leaders. The reviewer rates each standard first, and a person makes every decision.</p>
+  <p class="subhead">Before you switch it on, these should be true</p>
+  <ol class="pp-checklist">
+    <li>Leaders have been told in writing that an AI tool helps prepare a draft and that a person decides.</li>
+    <li>Our standards have been checked, so every standard is about behaviour at work.</li>
+    <li>You have looked at the AI provider's data terms: no training on our information, how long it is kept, where it is stored, and that it can be deleted.</li>
+    <li>A first review cycle has been run without AI.</li>
+  </ol>
+  <p class="subhead">What the AI is sent</p>
+  <p class="card-meta">The reviewer's observations for the period and the leader's own reflection. First the leader's name, the names of people on the Team Hub roster, email addresses, phone numbers and he/she words are taken out. It is never sent the leader's name, title or area, the reviewer's own ratings, or anything from Team Hub activity (checklists, to-dos, training or read receipts). What was sent and what came back is kept on record.</p>
+  <details class="pp-wording">
+    <summary>Wording you can use to tell leaders</summary>
+    <blockquote>Starting [date], we are introducing a regular leader review. Here is how it works. Your reviewer writes down what they have observed about your work against our written standards, which you already have [say where]. If we ask you for one, you add your own reflection. An AI tool then helps prepare a first draft from those notes and your reflection. Your name and the names of people on our team are taken out before anything is sent to the AI service, which is run for us by an outside provider [and may process information outside Canada]. Nothing from your Team Hub activity is used. The AI does not decide anything about you. Your reviewer rates each standard themselves, checks the draft, and a person makes every decision. You will see your review, talk it through with [reviewer or Operator], and can add your own comments, which stay with the review. [Time you spend on your review is paid time.] Reviews are confidential to you, your reviewer and [Operator name]. Time away on a protected leave or under an accommodation is not counted against you. If anything is affecting your work that you would like support or an accommodation for, please tell [name] at any time. Questions about the process or how your information is handled: [contact].</blockquote>
+    <p class="fine-line">Square brackets are facts for you to fill in or confirm. Only send what is true for this store.</p>
+  </details>
+  {% set s = settings['ai_reviews'] %}
+  <div class="pp-switch">
+    <span>{% if s.value == '1' %}<span class="badge b-green">{{ icon('check', 'xs') }}On</span>{% else %}<span class="badge">Off</span>{% endif %}
+      {% if s.updated_by %}{{ stamp('Last switched by ' ~ s.updated_by, s.updated_at) }}{% endif %}</span>
+    <form method="post" action="{{ url_for('people.settings') }}"><input type="hidden" name="ai_reviews" value="{{ '0' if s.value == '1' else '1' }}">
+      <button class="btn {{ 'btn-secondary' if s.value == '1' else 'btn-primary' }} sm" type="submit">{{ 'Switch off AI for leader reviews' if s.value == '1' else 'Switch on AI for leader reviews' }}</button></form>
+  </div>
+</div>
+
+<div class="card" id="ai-hiring">
+  <span class="card-title">AI assist for hiring</span>
+  <p class="card-meta">The AI compares an applicant's written answers with the posting's criteria and suggests a level for the leader to check. It never rejects, advances or ranks anyone. This switch only makes AI possible: it also has to be switched on for each posting, and that posting then says so.</p>
+  <p class="subhead">Before you switch it on, these should be true</p>
+  <ol class="pp-checklist">
+    <li>A lawyer has looked at using AI to help assess applicants here, before you rely on it.</li>
+    <li>You have looked at the AI provider's data terms: no training on applicants' information, how long it is kept, where it is stored, and that it can be deleted.</li>
+    <li>Every posting that uses AI says so in the posting itself, before anyone applies.</li>
+    <li>Leaders who score applications know the AI suggestion is a second read: they score first, and a person makes every decision.</li>
+  </ol>
+  <p class="subhead">What the AI is sent</p>
+  <p class="card-meta">The posting's criteria and the applicant's written answers. First the applicant's name, the names of people on the Team Hub roster, email addresses, phone numbers and he/she words are taken out. It is never sent the applicant's name or contact details, their availability, how they heard about us, their experience, the 18-or-over and work-entitlement answers, or interview notes. It runs only for applicants who applied while the posting was showing its AI statement.</p>
+  {% set s = settings['ai_hiring'] %}
+  <div class="pp-switch">
+    <span>{% if s.value == '1' %}<span class="badge b-green">{{ icon('check', 'xs') }}On</span>{% else %}<span class="badge">Off</span>{% endif %}
+      {% if s.updated_by %}{{ stamp('Last switched by ' ~ s.updated_by, s.updated_at) }}{% endif %}</span>
+    <form method="post" action="{{ url_for('people.settings') }}"><input type="hidden" name="ai_hiring" value="{{ '0' if s.value == '1' else '1' }}">
+      <button class="btn {{ 'btn-secondary' if s.value == '1' else 'btn-primary' }} sm" type="submit">{{ 'Switch off AI for hiring' if s.value == '1' else 'Switch on AI for hiring' }}</button></form>
+  </div>
+</div>
+{% endblock %}

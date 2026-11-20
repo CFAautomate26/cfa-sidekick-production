@@ -1,0 +1,39 @@
+{# People pages (leader reviews and hiring). Modelled on hub/base.html:
+   the shared Team Hub chrome, no scripts at all. `nav`, `viewer`,
+   `people_features`, `people_unlocked`, `people_lock_minutes` and
+   `people_at_risk` come from people.py's context processor. The shared
+   pieces every People page uses are the macros in people/_ui.html; their
+   styles (people_styles) are already included here. #}
+{% from "shared/_chrome.html" import head_tags, masthead, tabbar, foot, flashes %}
+{% from "people/_ui.html" import people_styles %}
+<!doctype html>
+<html lang="en">
+<head>
+{{ head_tags(url_for('shift.manifest')) }}
+<title>{% block title %}{% endblock %}{% if self.title() %} · {% endif %}Team Hub</title>
+{% include "shared/cfa_style.html" %}
+{% include "hub/_style.html" %}
+{{ people_styles() }}
+{% block head %}{% endblock %}
+</head>
+<body>
+{{ masthead(nav) }}
+{% if people_at_risk and viewer and viewer.is_operator %}
+<div class="banner-risk">SHIFT_DB_PATH is not set. Reviews and applications will NOT survive a deploy.</div>
+{% endif %}
+
+<main class="wrap">
+  {{ flashes() }}
+  {% block content %}{% endblock %}
+  {% block lockbar %}{% if people_unlocked %}
+  <div class="pp-lockbar no-print">
+    <span>{{ icon('lock', 'xs') }} Private pages. They lock after {{ people_lock_minutes }} minutes without a tap.</span>
+    <form method="post" action="{{ url_for('people.lock') }}"><button class="btn btn-secondary sm" type="submit">Lock now</button></form>
+  </div>
+  {% endif %}{% endblock %}
+  {{ foot(nav) }}
+</main>
+
+{{ tabbar(nav) }}
+</body>
+</html>

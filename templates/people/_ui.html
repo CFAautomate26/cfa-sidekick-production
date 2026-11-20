@@ -1,0 +1,157 @@
+{# The pieces every People page shares, so leader reviews and hiring look
+   and read like one product. Inline SVG, links and plain forms only: these
+   pages run no scripts. None of these macros needs the page's context, so
+   a plain {% from "people/_ui.html" import ... %} works anywhere
+   (including the public careers pages). #}
+
+{# Page-local CSS for the macros below (class prefix pp-). people/base.html
+   already includes it; a page with its own base calls it once in <head>. #}
+{% macro people_styles() -%}
+<style>
+.pp-guide { padding: 0; }
+.pp-guide > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 14px 16px; min-height: 52px; font-weight: 700; color: var(--text-strong); }
+.pp-guide > summary::-webkit-details-marker { display: none; }
+.pp-guide-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pp-guide-title .i { color: var(--nav); }
+.pp-guide > summary .chev { color: var(--nav); width: 20px; height: 20px; stroke-width: 2.2; }
+.pp-guide[open] > summary .chev { transform: rotate(90deg); }
+.pp-guide-body { border-top: 1px solid var(--rule); padding: 2px 16px 16px; display: grid; gap: 0 28px; }
+.pp-guide-body ul { margin: 0 0 0 18px; font-size: 0.9375rem; line-height: 1.45; color: var(--text); }
+.pp-guide-body li { margin: 5px 0; }
+.pp-guide-body .pp-never li::marker { color: var(--red-700); }
+.pp-guide-stop { grid-column: 1 / -1; margin-top: 16px; }
+@media (min-width: 960px) { .pp-guide-body { grid-template-columns: 1fr 1fr; } }
+.pp-escalate { margin: 12px 0; }
+.pp-levels { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-level { display: inline-flex; align-items: center; gap: 4px; padding: 6px 11px; border-radius: var(--r-full);
+  font-size: 0.8125rem; font-weight: 700; line-height: 1.2; color: var(--text-muted); background: #fff;
+  box-shadow: inset 0 0 0 1px var(--rule); }
+.pp-level.on { background: var(--nav); color: #fff; box-shadow: none; }
+.pp-bar { display: flex; align-items: center; gap: 10px; }
+.pp-bar .bar { flex: 1 1 auto; min-width: 48px; margin-top: 0; }
+.pp-bar-n { flex: 0 0 auto; font-size: var(--fs-small); color: var(--text-muted); white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.pp-stamp { font-size: 0.8125rem; color: var(--text-muted); }
+.pp-text { white-space: pre-line; }
+.pp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pp-anchors { list-style: none; margin: 8px 0 0; padding: 0; }
+.pp-anchors li { padding: 9px 0; border-top: 1px solid var(--rule); font-size: 0.9375rem; line-height: 1.45; white-space: pre-line; }
+.pp-anchors li b { display: block; font-size: 0.8125rem; color: var(--text-strong); white-space: normal; }
+.pp-problems { margin: 6px 0 0 18px; line-height: 1.45; }
+.pp-problems li { margin: 4px 0; }
+.pp-lockbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px;
+  margin-top: 32px; padding: 10px 14px; border-radius: var(--r-xl); background: var(--cool-white); color: var(--info);
+  font-size: 0.8125rem; font-weight: 600; }
+.pp-lockbar > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pp-lockbar form { margin: 0; }
+.pp-lockbar .btn { min-width: 0; min-height: 44px; }
+</style>
+{%- endmacro %}
+
+{# items: (label, url) pairs; a None url is plain text (where you are). #}
+{% macro crumbs(items) -%}
+<nav class="crumbs" aria-label="You are here">
+  {%- for label, url in items %}{% if not loop.first %}{{ icon('chev') }}{% endif %}{% if url %}<a href="{{ url }}">{{ label }}</a>{% else %}<span>{{ label }}</span>{% endif %}{% endfor -%}
+</nav>
+{%- endmacro %}
+
+{# "What to write, what never to write": beside every box where a leader
+   writes about a person. kind: 'review' or 'hiring'. #}
+{% macro guidance(kind, open=true) -%}
+<details class="card pp-guide"{{ ' open' if open }}>
+  <summary><span class="pp-guide-title">{{ icon('edit', 'sm') }}What to write, and what never to write</span>{{ icon('chev', 'chev') }}</summary>
+  <div class="pp-guide-body">
+  {%- if kind == 'hiring' %}
+    <div>
+      <p class="subhead">Write</p>
+      <ul>
+        <li>What the applicant said or wrote, as close to their own words as you can.</li>
+        <li>Which criterion it is about, and which level description it matches.</li>
+        <li>Your notes on the day, while you remember.</li>
+        <li>The same questions, in the same order, for every applicant.</li>
+      </ul>
+    </div>
+    <div class="pp-never">
+      <p class="subhead">Never write or score</p>
+      <ul>
+        <li>Name, photo, address or neighbourhood.</li>
+        <li>Age, school, grade or gaps in work history.</li>
+        <li>Accent, voice, looks or clothing. Where someone is from. “Canadian experience”.</li>
+        <li>Family, children, pregnancy, relationships, religion or religious days.</li>
+        <li>Health, disability, or anything about an accommodation request.</li>
+        <li>Why someone is not available at certain times.</li>
+        <li>Anything from social media.</li>
+        <li>A record of offences.</li>
+        <li>“Fit”, “vibe” or a gut feeling with no example behind it.</li>
+      </ul>
+    </div>
+    <p class="callout tan pp-guide-stop">{{ icon('alert') }}<span>If an applicant tells you about a disability, a need for accommodation, their religion or their family: do not write it in a note and do not score it. Tell the Operator. Whether someone can legally work in Canada, and whether they are 18 or older, are yes or no checks for the offer stage. They are never part of a score.</span></p>
+  {%- else %}
+    <div>
+      <p class="subhead">Write</p>
+      <ul>
+        <li>What you saw or heard yourself, with the date and the shift.</li>
+        <li>Which standard it is about, by name.</li>
+        <li>What it meant for guests, the team or the store.</li>
+        <li>What they did well, in the same detail as what needs work.</li>
+        <li>What support was offered and what you expect next, in words someone could see or count.</li>
+        <li>Write it within a day or two. Give every leader the same level of detail.</li>
+      </ul>
+    </div>
+    <div class="pp-never">
+      <p class="subhead">Never write</p>
+      <ul>
+        <li>Health, disability, injuries, medication or how someone seems to be coping (“seems burnt out”).</li>
+        <li>Pregnancy, plans for children, childcare, eldercare or home life.</li>
+        <li>Religion, church, or taking part in prayer or devotionals.</li>
+        <li>Age, “maturity”, “energy” or school.</li>
+        <li>Accent, culture or where someone is from. Gender, sexuality or relationships.</li>
+        <li>Guesses about why something happened.</li>
+        <li>Labels for the person (“lazy”, “bad attitude”, “not a culture fit”, “not committed”).</li>
+        <li>Sick days, approved leave or approved limits on availability.</li>
+        <li>That they raised a concern or complaint about safety, pay, harassment or discrimination, or anything about WSIB.</li>
+        <li>Things you were told but have not checked.</li>
+        <li>Comparisons with a named co-worker.</li>
+        <li>Guest names or contact details, or other people's personal details. Describe what happened, not the person.</li>
+      </ul>
+    </div>
+    <p class="callout tan pp-guide-stop">{{ icon('alert') }}<span>If you think something personal may be behind a change in someone's work: stop, do not rate that standard, and talk to the Operator before you finish. Do not ask about a diagnosis. Ask: “Is there anything you need from us to help you meet this expectation?”</span></p>
+  {%- endif %}
+  </div>
+</details>
+{%- endmacro %}
+
+{# Shown wherever an action could lead toward discipline or dismissal, or
+   toward turning an applicant down on a sensitive ground. kind: 'review'
+   or 'hiring'. #}
+{% macro escalation(kind) -%}
+{%- if kind == 'hiring' %}
+<p class="callout warm pp-escalate">{{ icon('shield') }}<span><strong>This tool does not decide who is hired or turned down.</strong> A person does, every time. Before turning someone down for a reason connected to a disability, an accommodation request, availability that is limited by religion, or a record of offences: stop and take it to the Operator. The store's escalation matrix applies, and a lawyer is called first.</span></p>
+{%- else %}
+<p class="callout warm pp-escalate">{{ icon('shield') }}<span><strong>This tool does not decide discipline, pay, hours, demotion or dismissal,</strong> and nothing in it happens automatically. If this review could lead toward any of those, stop and go through the store's escalation matrix with the Operator before anyone acts. A lawyer comes first for any dismissal for cause, and before a review is used toward ending the job of someone who is pregnant, on or just back from a leave, has a disability or an accommodation, has a WSIB claim, or has recently raised a concern or complaint.</span></p>
+{%- endif %}
+{%- endmacro %}
+
+{# The four level names as pills, lowest first; selected is 1 to 4, or
+   none when no level is chosen. #}
+{% macro level_pills(levels, selected=none) -%}
+<span class="pp-levels">
+  {%- for name in levels %}<span class="pp-level{{ ' on' if selected == loop.index }}">{% if selected == loop.index %}{{ icon('check', 'xs') }}<span class="sr">Chosen: </span>{% endif %}{{ name }}</span>{% endfor -%}
+</span>
+{%- endmacro %}
+
+{# A plain HTML bar with its count beside it: "3 of 8". #}
+{% macro bar(count, total) -%}
+{%- set width = [[(100 * count / total)|round|int, 0]|max, 100]|min if total else 0 -%}
+<span class="pp-bar"><span class="bar navy"><span style="width: {{ width }}%"></span></span><span class="pp-bar-n">{{ count }} of {{ total }}</span></span>
+{%- endmacro %}
+
+{% macro empty(text) -%}
+<div class="empty">{{ text }}</div>
+{%- endmacro %}
+
+{# Who did it and when: "Rae · Nov 20, 2:05 pm". #}
+{% macro stamp(by, at) -%}
+<span class="pp-stamp">{{ by }}{% if by and at %} · {% endif %}{{ at|pp_when if at }}</span>
+{%- endmacro %}

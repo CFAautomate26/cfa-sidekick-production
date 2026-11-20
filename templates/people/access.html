@@ -1,0 +1,64 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, stamp %}
+{% block title %}Who has access{% endblock %}
+{% block head %}
+<style>
+.pp-person { padding: 14px 16px; }
+.pp-person .name { font-weight: 700; font-size: var(--fs-h3); color: var(--text-strong); letter-spacing: -0.015em; }
+.pp-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--rule); }
+.pp-cap form { margin: 0; flex: 0 0 auto; }
+.pp-cap .btn { min-width: 0; min-height: 44px; }
+.pp-cap .what { min-width: 0; }
+.pp-cap .what b { display: block; color: var(--text-strong); }
+</style>
+{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Who has access', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · the Operator only</p>
+  <h1 class="headline">Who has access</h1>
+  <p class="triage">You see everything. Each leader sees only what you tick here.</p>
+</section>
+
+<div class="card" style="margin-top:22px;">
+  <p><strong>Hiring.</strong> Sees every job posting and every applicant: contact details, answers, interview notes and scores. Publishing a posting, switching AI on for it and removing old applications stay with you.</p>
+  <p style="margin-top:10px;"><strong>Leader reviews.</strong> Writes observations and reviews, but only for the leaders you assign to them, and never their own.</p>
+  <p class="fine-line">Being an admin leader opens neither one: only a tick here does. Every leader can read their own review once it has been shared with them. Removing a tick takes effect on their next tap.</p>
+</div>
+
+{% for l in rows %}
+<div class="card pp-person" id="l{{ l.id }}">
+  <span class="name">{{ l.name }}</span>
+  {% for cap in capabilities %}
+  {% set held = l.held.get(cap) %}
+  <div class="pp-cap">
+    <span class="what"><b>{{ labels[cap] }}</b>
+      {% if held %}<span class="badge b-green">{{ icon('check', 'xs') }}Can open</span> {{ stamp(held.granted_by, held.granted_at) }}{% else %}<span class="pp-stamp">No access</span>{% endif %}</span>
+    {% if held %}
+    <form method="post" action="{{ url_for('people.access_revoke') }}"><input type="hidden" name="grant_id" value="{{ held.id }}">
+      <button class="btn btn-secondary sm" type="submit" aria-label="Remove {{ labels[cap] }} access from {{ l.name }}">Remove</button></form>
+    {% else %}
+    <form method="post" action="{{ url_for('people.access_grant') }}"><input type="hidden" name="leader_id" value="{{ l.id }}"><input type="hidden" name="capability" value="{{ cap }}">
+      <button class="btn btn-primary sm" type="submit" aria-label="Give {{ l.name }} {{ labels[cap] }} access">Give access</button></form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No leaders have a sign-in yet. Add them under Leader logins first.</div>
+{% endfor %}
+
+{% if stale %}
+<section class="sec">
+  <div class="sec-head"><h2>No longer matching a sign-in</h2></div>
+  <p class="sec-note">These were given to a sign-in that has since been removed, renamed or renumbered (a Team Hub restore can do that). They open nothing. Remove them, then tick the right leader above.</p>
+  <div class="card list">
+    {% for grant in stale %}
+    <div class="row static"><span class="row-main"><span class="row-title">{{ grant.leader_name }}</span><span class="row-meta">{{ labels.get(grant.capability, grant.capability) }} · given {{ grant.granted_at|pp_day }} by {{ grant.granted_by }}</span></span>
+      <form method="post" action="{{ url_for('people.access_revoke') }}" style="margin:0;"><input type="hidden" name="grant_id" value="{{ grant.id }}">
+        <button class="btn btn-secondary sm" type="submit" aria-label="Remove the old {{ labels.get(grant.capability, grant.capability) }} access for {{ grant.leader_name }}">Remove</button></form></div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

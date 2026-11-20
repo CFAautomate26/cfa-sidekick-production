@@ -76,6 +76,26 @@ if shift_db is not None:
     except Exception as e:  # pragma: no cover - defensive boot guard
         print(f"WARNING: Team Hub failed to load, /shift and bots unaffected: {e!r}")
 
+# The People section (leader reviews and hiring) keeps its records in its
+# own database file and registers on its own, so a People problem can't
+# take down /shift, /hub (or the bots).
+if shift_db is not None:
+    try:
+        import people_db
+        from people import people_bp
+
+        people_db.init_db()
+        app.register_blueprint(people_bp)
+        try:
+            from careers import careers_bp
+
+            app.register_blueprint(careers_bp)
+        except Exception as e:  # the public careers pages can't take People down
+            print(f"WARNING: careers pages failed to load, People unaffected: {e!r}")
+        print("People registered at /shift/people")
+    except Exception as e:  # pragma: no cover - defensive boot guard
+        print(f"WARNING: People failed to load, /shift, /hub and bots unaffected: {e!r}")
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GROUPME_BOT_ID = os.getenv("GROUPME_BOT_ID")
 # No fallback on purpose: a repo-committed default token would leave the

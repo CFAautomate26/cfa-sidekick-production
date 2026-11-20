@@ -1,0 +1,31 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs %}
+{% block title %}Activity log{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Activity log', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · the Operator only</p>
+  <h1 class="headline">Activity log</h1>
+  <p class="triage">Who opened or changed what on People pages, newest first. It records that something happened, never what was written.</p>
+</section>
+
+{% if rows %}
+<div class="card table pp-scroll" style="margin-top:22px;">
+  <table class="plain">
+    <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">What</th><th scope="col">Which</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr><td class="nowrap">{{ r.at|pp_when }}</td><td class="who">{{ r.who }}</td><td>{{ r.action }}</td>
+      <td>{% if r.object_type %}{{ r.object_type }}{% if r.object_id is not none %} {{ r.object_id }}{% endif %}{% endif %}{% if r.detail %}{% if r.object_type %} · {% endif %}{{ r.detail }}{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="btnrow">
+  {% if page > 1 %}<a class="btn btn-secondary sm" href="{{ url_for('people.audit', page=page - 1) }}">Newer</a>{% endif %}
+  {% if has_more %}<a class="btn btn-secondary sm" href="{{ url_for('people.audit', page=page + 1) }}">Older</a>{% endif %}
+</div>
+{% else %}
+<div class="empty" style="margin-top:22px;">{{ 'Nothing further back.' if page > 1 else 'Nothing has happened yet.' }}</div>
+{% endif %}
+{% endblock %}

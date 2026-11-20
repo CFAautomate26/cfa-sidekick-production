@@ -1,0 +1,18 @@
+{% extends "people/base.html" %}
+{% block title %}Enter your PIN{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <p class="eyebrow">People · signed in as {{ viewer.name }}</p>
+  <h1 class="headline">Enter your PIN</h1>
+  <p class="triage">Enter your PIN to open People pages.</p>
+</section>
+
+<form method="post" action="{{ url_for('people.unlock') }}" class="card narrow" autocomplete="off" style="margin-top:22px;">
+  {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+  <label class="field" for="pin">Your PIN</label>
+  <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="32" required autofocus>
+  <div class="btnrow"><button class="btn btn-primary" type="submit">Open People pages</button></div>
+</form>
+
+<p class="callout" style="margin-top:12px;">{{ icon('lock') }}<span>These pages hold private information about people, so they lock after {{ people_lock_minutes }} minutes. It is the same PIN you sign in with.</span></p>
+{% endblock %}
