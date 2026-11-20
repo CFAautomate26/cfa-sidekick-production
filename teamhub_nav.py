@@ -91,13 +91,15 @@ def _url(endpoint: str, **kw) -> str:
 
 
 def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
-            categories: list | None = None) -> dict:
+            categories: list | None = None, people: list | None = None) -> dict:
     """Everything the chrome needs for one viewer.
 
     kind: member | leader | operator; role: a leader's lead | admin.
     counts: unread, recoveries, coming_back, repairs_to_call, repairs_waiting,
     meetings, todos, to_read, drafts (missing = 0).
     categories: the Hub categories a member may see (their menu words).
+    people: the People rows for a leader or the Operator (see _people_rows);
+    never shown to a team member.
     """
     counts = counts or {}
     up = hub_up()
@@ -164,6 +166,7 @@ def nav_for(kind: str, name: str, role: str = "", counts: dict | None = None,
             {"icon": "users", "label": "Team roster", "url": _url("shift.roster")},
             {"icon": "history", "label": "History", "url": _url("shift.history")},
         ]
+        small += people or []
         if admin:
             small.append({"caption": "Admin"})
             drafts = counts.get("drafts", 0)
@@ -227,6 +230,22 @@ def _hub_drafts() -> int:
         return 0
 
 
+def _people_rows(kind: str, name: str, leader_id: int | None) -> list[dict]:
+    """The People section's menu rows (leader reviews and hiring), for a
+    leader or the Operator. People registers separately and decides for
+    itself who gets a row; whatever goes wrong there, the menu carries on
+    without one."""
+    try:
+        if "people" not in current_app.blueprints:
+            return []
+        import people
+        import teamhub_ui
+        return [dict(row) for row in people.nav_rows(kind, leader_id, name)
+                if row["icon"] in teamhub_ui.ICONS and row["label"] and row["url"]]
+    except Exception:           # People's trouble must never break /shift or /hub
+        return []
+
+
 def leader_nav(kind: str, name: str, role: str, leader_id: int | None) -> dict:
     """Navigation for a signed-in leader or the Operator."""
     open_recs, coming_back, _ = shift_db.recovery_feed(resolved_limit=0)
@@ -242,7 +261,7 @@ def leader_nav(kind: str, name: str, role: str, leader_id: int | None) -> dict:
                         shift_db.open_task_counts(leader_id))[0]}
     if kind == "operator" or role == "admin":
         counts["drafts"] = _hub_drafts()
-    return nav_for(kind, name, role, counts)
+    return nav_for(kind, name, role, counts, people=_people_rows(kind, name, leader_id))
 
 
 def member_nav(viewer) -> dict:

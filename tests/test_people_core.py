@@ -989,6 +989,113 @@ def test_every_page_has_the_strict_headers_and_runs_no_scripts(world):
     assert resp.status_code == 302 and resp.headers["Cache-Control"] == "private, no-store"
 
 
+# --- the Team Hub menu ----------------------------------------------------------
+
+def menu(client, path="/shift/more"):
+    html = page(client, path)
+    return html, re.findall(r'<span class="grow">([^<]+)</span>', html)
+
+
+def test_people_row_is_in_the_menu_for_the_right_people(world):
+    for who, expected in (("operator", True), ("hari", True), ("rae", True),
+                          ("lena", False), ("ada", False)):
+        client = world["client"] if who == "operator" else cfa_app.app.test_client()
+        kit.sign_in(client, who)                       # the menu needs no unlock
+        html, rows = menu(client)
+        assert ("People" in rows) is expected, who
+        assert ('href="/shift/people"' in html) is expected, who
+        assert "My review" not in rows
+        assert "Team roster" in rows and "History" in rows          # the rest is untouched
+        if expected and who != "operator":
+            assert rows.index("People") > rows.index("History")
+        hub_html, hub_rows = menu(client, "/hub/menu")               # the Hub's copy of the menu too
+        assert ("People" in hub_rows) is expected, who
+    # the leader tabs and the big words are exactly as they were
+    tabs = re.findall(r"<span>([^<]+)</span>", html[html.index("menu-big"):html.index("menu-hr")])
+    assert "People" not in tabs
+
+
+def test_a_team_member_never_sees_a_people_link(world):
+    client = world["client"]
+    kit.sign_in(client, "member")
+    html, rows = menu(client, "/hub/menu")
+    assert "People" not in rows and "My review" not in rows
+    assert "/shift/people" not in html and "/shift/reviews" not in html and "/shift/hiring" not in html
+    assert "/shift/people" not in page(client, "/hub/")
+
+
+def test_menu_badges_and_my_review_come_from_the_features(world, monkeypatch):
+    import people_hiring
+    import people_reviews
+    monkeypatch.setattr(people, "_page_url", lambda path: path)
+    monkeypatch.setattr(people_reviews, "nav_counts",
+                        lambda kind, leader_id, name: ({"on_hold": 1, "past_due": 2}
+                                                       if kind == "operator" else
+                                                       {"mine": 2, "drafts": 4}))
+    monkeypatch.setattr(people_hiring, "nav_counts",
+                        lambda kind, leader_id, name: {"new": 3, "notices_due": 1})
+
+    def rows_for(who):
+        client = cfa_app.app.test_client()
+        kit.sign_in(client, who)
+        html, rows = menu(client)
+        return html, rows
+
+    html, rows = rows_for("lena")                      # no grant: only her own review
+    assert "People" not in rows and "My review" in rows
+    assert re.search(r'href="/shift/reviews/mine".{0,400}2 waiting', html, re.S)
+    assert "to finish" not in html and "3 new" not in html and "on hold" not in html
+    html, rows = rows_for("hari")                      # hiring only
+    assert re.search(r"People</span><span class=\"badge b-red\">3 new", html)
+    assert "to finish" not in html and "on hold" not in html
+    html, rows = rows_for("rae")                       # reviewer only
+    assert re.search(r"People</span><span class=\"badge b-tan\">4 to finish", html)
+    assert "3 new" not in html and "My review" in rows
+    html, rows = rows_for("operator")
+    assert re.search(r"People</span><span class=\"badge b-red\">1 on hold", html)
+    assert "My review" not in rows
+    # one feature's trouble does not hide the other's count, or the row
+    monkeypatch.setattr(people_reviews, "nav_counts", lambda *a: 1 / 0)
+    html, rows = rows_for("operator")
+    assert re.search(r"People</span><span class=\"badge b-red\">3 new", html)
+
+
+def test_a_people_fault_never_breaks_team_hub(world, monkeypatch):
+    client = world["client"]
+    kit.sign_in(client, "operator")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("People is broken")
+
+    real_rows = people.nav_rows
+    monkeypatch.setattr(people, "nav_rows", boom)
+    assert client.get("/shift/").status_code == 200
+    html, rows = menu(client)
+    assert "People" not in rows and "Team roster" in rows
+    assert client.get("/hub/library").status_code == 200 and client.get("/hub/menu").status_code == 200
+    # a row with an icon that does not exist is dropped, not a broken menu
+    monkeypatch.setattr(people, "nav_rows", lambda *a: [
+        {"icon": "no-such-icon", "label": "People", "url": "/shift/people", "badge": "", "tone": "b-tan"}])
+    html, rows = menu(client)
+    assert "People" not in rows
+    # and with the People store itself unreadable, a leader's pages still open
+    monkeypatch.setattr(people, "nav_rows", real_rows)
+    hari = cfa_app.app.test_client()
+    kit.sign_in(hari, "hari")
+    monkeypatch.setattr(people_db, "capabilities", boom)
+    assert hari.get("/shift/").status_code == 200
+    html, rows = menu(hari)
+    assert "People" not in rows and "Shift notes" in rows
+
+
+def test_the_menu_carries_on_when_people_is_not_registered(world, monkeypatch):
+    client = world["client"]
+    kit.sign_in(client, "operator")
+    monkeypatch.delitem(cfa_app.app.blueprints, "people")
+    html, rows = menu(client)
+    assert "People" not in rows and "/shift/people" not in html and "Team roster" in rows
+
+
 # --- house rules for the source ---------------------------------------------------
 
 def test_people_source_never_touches_private_team_hub_content():
