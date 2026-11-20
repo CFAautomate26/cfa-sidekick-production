@@ -380,7 +380,8 @@ def _ai_state(review: dict, model: dict, rated: dict) -> dict:
         return state
     state["on"] = True
     job = people_ai.latest_job(AI_KIND, review["id"])
-    state["job"] = job
+    # The page is handed only what it prints about the job, never the reply itself.
+    state["job"] = {key: job.get(key) for key in ("requested_by", "requested_at", "error")} if job else None
     if not job:
         state["status"] = "none"
     elif job["status"] in ("queued", "working"):
@@ -420,6 +421,7 @@ def review(review_id: int):
     rated = rdb.ratings(review_id)
     by_key, loose = _evidence_by_standard(found, model)
     gate = rdb.gate_answers(found) if who.is_operator and found["status"] == "on_hold" else None
+    found = {**found, "gate_json": None}        # the answers reach a page only through `gate`
     return render_template(
         "people/reviews/review.html", review=found, model=model, rated=rated, evidence=by_key,
         loose=loose, actions=rdb.actions(review_id), away=rdb.time_away(found),
@@ -579,7 +581,7 @@ def finalise(review_id: int):
         return _back(review_id)
     people_db.audit(people.actor(), "review checks opened", "review", review_id)
     return render_template(
-        "people/reviews/finalise.html", review=found, missing=missing, flags=flags,
+        "people/reviews/finalise.html", review={**found, "gate_json": None}, missing=missing, flags=flags,
         thin=[d for d in model["dimensions"] if rated.get(d["key"]) and rated[d["key"]]["level"]
               and not by_key[d["key"]]],
         gate_questions=rdb.GATE, released=bool(found["released_at"]))
@@ -703,12 +705,18 @@ def review_print(review_id: int):
 
 def mine():
     who = people.viewer()
-    rows = [] if who.is_operator else rdb.reviews_for_leader(who.leader_id, who.name)
-    return render_template(
-        "people/reviews/mine.html",
-        shared=[r for r in rows if r["status"] in ("shared", "acknowledged")],
-        asks=[r for r in rows if r["status"] not in ("shared", "acknowledged")],
-        is_open=rdb.reflection_open)
+    shared, asks = [], []
+    for row in [] if who.is_operator else rdb.reviews_for_leader(who.leader_id, who.name):
+        # Built field by field: where a review stands before it is shared
+        # (draft, on hold, finalised) is never handed to the leader's page.
+        item = {"id": row["id"], "cycle_name": row["cycle_name"], "period_start": row["period_start"],
+                "period_end": row["period_end"]}
+        if row["status"] in ("shared", "acknowledged"):
+            shared.append({**item, "confirmed_at": row["ack_at"] if row["status"] == "acknowledged" else None})
+        else:
+            asks.append({**item, "sent_at": row["reflection_at"],
+                         "waiting": rdb.waiting_for_leader(row)})
+    return render_template("people/reviews/mine.html", shared=shared, asks=asks)
 
 
 def _my_review(review_id: int):
