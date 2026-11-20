@@ -1,0 +1,36 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, stamp %}
+{% from "people/hiring/_bits.html" import hiring_nav, hiring_styles %}
+{% block title %}Postings{% endblock %}
+{% block head %}{{ hiring_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), ('Postings', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · Hiring</p>
+  <h1 class="headline">Postings</h1>
+  <p class="triage">A posting can't go live until it has pay, a vacancy statement and the accommodation notice.</p>
+</section>
+{{ hiring_nav(tabs) }}
+<div class="btnrow"><a class="btn btn-primary sm" href="{{ url_for('people.hiring_posting_new') }}">{{ icon('plus', 'sm') }}New posting</a></div>
+
+{% if postings %}
+<div class="card list" style="margin-top:16px;">
+  {% for p in postings %}
+  <a class="row" id="p{{ p.id }}" href="{{ url_for('people.hiring_posting', posting_id=p.id) }}"><span class="row-main"><span class="row-title">{{ p.title }}</span><span class="row-meta">{{ types[p.employment_type] }}{% if p.pay %} · {{ p.pay }}{% endif %} · {{ p.applications }} application{{ '' if p.applications == 1 else 's' }}</span>
+    <span class="row-meta tags">{% if p.status == 'open' %}<span class="badge b-green">Live</span>{% elif p.status == 'draft' %}<span class="badge b-tan">Draft</span>{% else %}<span class="badge">Closed {{ p.closed_at|pp_day }}</span>{% endif %}{% if p.ai_assist %}<span class="badge b-navy">AI assist</span>{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty" style="margin-top:16px;">No postings yet.</div>
+{% endif %}
+
+{% if viewer.is_operator %}
+<section class="sec">
+  <div class="sec-head"><h2>Records for an inspection</h2></div>
+  <div class="card">
+    <p class="card-meta">Ontario's Employment Standards Act says to keep a copy of every posting and its application form for three years after it comes down, and a copy of what each interviewed applicant was told for three years. This file holds all of them, ready to hand to an employment standards officer. It includes applicants' names, so keep it private.</p>
+    <form method="post" action="{{ url_for('people.hiring_records') }}" class="btnrow"><button class="btn btn-secondary sm" type="submit">{{ icon('download', 'sm') }}Download hiring records</button></form>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

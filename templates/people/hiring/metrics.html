@@ -1,0 +1,112 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, empty %}
+{% from "people/hiring/_bits.html" import hiring_nav, hiring_styles %}
+{% block title %}Hiring numbers{% endblock %}
+{% block head %}{{ hiring_styles() }}{% endblock %}
+{% macro share(s) -%}
+{%- if s.pct is not none %}<b>{{ s.pct }}%</b> <span class="pp-bar-n">({{ s.count }} of {{ s.of }})</span>{% else %}<span class="pp-bar-n">{{ s.count }} of {{ s.of }} · not enough data yet</span>{% endif -%}
+{%- endmacro %}
+{% macro middle(m, unit) -%}
+{%- if m.median is not none %}<span class="hr-num">{{ m.median }} <small>{{ unit }} · from {{ m.n }}</small></span>{% else %}<span class="pp-bar-n">{{ m.n }} so far · not enough data yet</span>{% endif -%}
+{%- endmacro %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), ('Numbers', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · Hiring</p>
+  <h1 class="headline">Hiring numbers</h1>
+  <p class="triage"><b>{{ m.applications }}</b> application{{ '' if m.applications == 1 else 's' }} in the last {{ days }} days · <b>{{ m.hired }}</b> hired</p>
+</section>
+{{ hiring_nav(tabs) }}
+
+<form method="get" action="{{ url_for('people.hiring_metrics') }}" class="card" style="margin-top:16px;">
+  <div class="hr-two">
+    <div><label class="field" for="f-posting" style="margin-top:0;">Posting</label>
+      <select id="f-posting" name="posting"><option value="">All postings</option>
+        {% for p in postings %}<option value="{{ p.id }}"{{ ' selected' if posting_id == p.id }}>{{ p.title }}{{ ' (closed)' if p.status == 'closed' }}</option>{% endfor %}</select></div>
+    <div><label class="field" for="f-days" style="margin-top:0;">Applied in the last</label>
+      <select id="f-days" name="days">{% for d in periods %}<option value="{{ d }}"{{ ' selected' if days == d }}>{{ d }} days</option>{% endfor %}</select></div>
+  </div>
+  <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Show</button></div>
+</form>
+<p class="fine-line">Counts sit beside every percentage. Below {{ small }} cases a percentage or a middle value would mislead, so none is shown. These numbers describe the process, never a person.</p>
+
+<section class="sec" id="funnel">
+  <div class="sec-head"><h2>From application to hire</h2></div>
+  <div class="card">
+    {% for step in m.funnel %}
+    <div class="hr-stat"{% if loop.first %} style="margin-top:0;"{% endif %}>
+      <div class="row-between"><span>{{ step.label }}</span><b>{{ step.count }}</b></div>
+      <span class="bar navy" role="img" aria-label="{{ step.count }} of {{ m.applications }} applications"><span style="width: {{ (100 * step.count / m.applications)|round|int if m.applications else 0 }}%"></span></span>
+      {% if step.share %}<p class="fine-line" style="margin-top:4px;">Of the step before: {{ share(step.share) }}</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="sec" id="speed">
+  <div class="sec-head"><h2>How fast we move</h2></div>
+  <div class="card">
+    <span class="card-title">Answered the quick questions</span>
+    <p class="card-meta">{{ share(m.answered) }}</p>
+  </div>
+  <div class="card">
+    <span class="card-title">Time to first contact</span>
+    <p class="card-meta">From applying to the first time a leader reached out or booked an interview (the middle value).</p>
+    <p style="margin-top:8px;">{{ middle(m.hours_to_contact, 'hours') }}</p>
+  </div>
+  <div class="card">
+    <span class="card-title">Time to hire</span>
+    <p class="card-meta">From applying to being moved to hired (the middle value).</p>
+    <p style="margin-top:8px;">{{ middle(m.days_to_hire, 'days') }}</p>
+  </div>
+  <div class="card">
+    <span class="card-title">Days in each stage</span>
+    <p class="card-meta">The middle value for applications that have left the stage.</p>
+    <table class="plain" style="margin-top:8px;">
+      {% for s in m.days_in_stage %}
+      <tr><td>{{ s.label }}</td><td class="who">{% if s.median is not none %}{{ s.median }} days <span class="pp-bar-n">(from {{ s.n }})</span>{% else %}<span class="pp-bar-n">{{ s.n }} so far · not enough data yet</span>{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</section>
+
+<section class="sec" id="sources">
+  <div class="sec-head"><h2>Where applicants heard about us</h2></div>
+  {% if m.sources %}
+  <div class="card pp-scroll">
+    <table class="plain">
+      <thead><tr><th>Source</th><th>Applied</th><th>Hired</th></tr></thead>
+      {% for s in m.sources %}
+      <tr><td>{{ s.label }}</td><td class="who">{{ s.applied }}</td><td class="who">{{ s.hired }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% else %}
+  {{ empty('No applications in this period.') }}
+  {% endif %}
+</section>
+
+<section class="sec" id="interviews">
+  <div class="sec-head"><h2>Interviews, offers and notices</h2></div>
+  <div class="card">
+    <span class="card-title">Interview no-shows</span>
+    <p class="card-meta">No-shows, of interviews that were either attended or missed.</p>
+    <p class="card-meta">{{ share(m.no_show) }}</p>
+  </div>
+  <div class="card">
+    <span class="card-title">Offers accepted</span>
+    <p class="card-meta">Accepted, of offers that have been answered.</p>
+    <p class="card-meta">{{ share(m.offers) }}</p>
+  </div>
+  <div class="card">
+    <span class="card-title">Decision notices</span>
+    <p class="card-meta">One count for each 45-day clock that an interview started.</p>
+    <table class="plain" style="margin-top:8px;">
+      <tr><td>Given on time</td><td class="who">{{ m.notices['on-time'] }}</td></tr>
+      <tr><td>Given late</td><td class="who">{{ m.notices['late'] }}</td></tr>
+      <tr><td>Still due</td><td class="who">{{ m.notices['due'] }}</td></tr>
+      <tr><td>Overdue</td><td class="who">{{ m.notices['overdue'] }}</td></tr>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs %}
+{% from "people/hiring/_bits.html" import hiring_nav, hiring_styles %}
+{% block title %}Hiring{% endblock %}
+{% block head %}{{ hiring_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · Hiring</p>
+  <h1 class="headline">Hiring</h1>
+  <p class="triage"><b>{{ counts.new }}</b> new · <b>{{ counts.notices_due }}</b> notice{{ '' if counts.notices_due == 1 else 's' }} due this week · <b>{{ counts.notices_overdue }}</b> overdue</p>
+</section>
+{{ hiring_nav(tabs) }}
+
+{% if counts.notices_overdue %}
+<p class="callout warm" style="margin-top:16px;">{{ icon('alert') }}<span><strong>{{ counts.notices_overdue }} decision notice{{ ' is' if counts.notices_overdue == 1 else 's are' }} overdue.</strong> Anyone we interviewed must be told where things stand within 45 days. <a class="textlink" href="{{ url_for('people.hiring_notices') }}">See who</a></span></p>
+{% elif counts.notices_due %}
+<p class="callout tan" style="margin-top:16px;">{{ icon('clock') }}<span><strong>{{ counts.notices_due }} decision notice{{ ' is' if counts.notices_due == 1 else 's are' }} due within a week.</strong> <a class="textlink" href="{{ url_for('people.hiring_notices') }}">See who</a></span></p>
+{% endif %}
+{% for a in attention %}
+<p class="callout warm" style="margin-top:12px;">{{ icon('alert') }}<span><strong>“{{ a.title }}” is live but no longer passes the publish check.</strong> {{ a.problems|join(' ') }} <a class="textlink" href="{{ url_for('people.hiring_posting', posting_id=a.id) }}#check">Fix the posting</a></span></p>
+{% endfor %}
+<p class="callout" style="margin-top:12px;">{{ icon('info') }}<span>Nothing here moves, ranks or turns down an applicant. A person does, every time. People are listed by how long they have waited.</span></p>
+
+{% for p in postings %}
+<section class="sec" id="p{{ p.id }}">
+  <div class="sec-head"><h2>{{ p.title }}{% if p.status == 'closed' %} <span class="badge b-tan">Closed</span>{% endif %}</h2><a class="more" href="{{ url_for('people.hiring_posting', posting_id=p.id) }}">Posting</a></div>
+  <div class="hr-counts" aria-label="How many are in each stage">
+    {% for stage in stages %}<span class="badge{{ ' b-navy' if stage in active_stages and p.counts[stage] }}">{{ stage_labels[stage] }} {{ p.counts[stage] }}</span>{% endfor %}
+  </div>
+  {% for stage in active_stages %}{% if p.stages[stage] %}
+  <p class="subhead">{{ stage_labels[stage] }}</p>
+  <div class="card list">
+    {% for a in p.stages[stage] %}
+    <a class="row" id="a{{ a.id }}" href="{{ url_for('people.hiring_candidate', application_id=a.id) }}"><span class="row-main"><span class="row-title">{{ a.name }}</span><span class="row-meta">{{ a.days }} day{{ '' if a.days == 1 else 's' }} in this stage</span>
+      {%- if a.check_work or a.link_expired or a.hold or (a.unanswered and not a.link_expired) %}<span class="row-meta tags">
+        {%- if a.check_work %}<span class="badge b-red">Check before any offer</span>{% endif %}
+        {%- if a.link_expired %}<span class="badge b-tan">Questions not answered</span>{% elif a.unanswered %}<span class="badge">Questions still open</span>{% endif %}
+        {%- if a.hold %}<span class="badge b-navy">On hold</span>{% endif %}</span>{% endif %}</span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}{% endfor %}
+  {% if not p.active %}<div class="empty">Nobody is waiting on this posting.</div>{% endif %}
+</section>
+{% else %}
+<div class="empty" style="margin-top:22px;">No posting is live. {% if drafts %}{{ drafts }} draft{{ '' if drafts == 1 else 's' }} waiting under Postings.{% else %}Write one under Postings.{% endif %}</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,190 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, stamp %}
+{% from "people/hiring/_bits.html" import hiring_styles, problem_list %}
+{% from "careers/_posting.html" import posting_body %}
+{% block title %}{{ posting.title }}{% endblock %}
+{% block head %}{{ hiring_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), ('Postings', url_for('people.hiring_postings')), (posting.title, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · Hiring · posting</p>
+  <h1 class="headline">{{ posting.title }}</h1>
+  <p class="triage">{% if posting.status == 'open' %}<b>Live</b> since {{ posting.published_at|pp_day }}{% elif posting.status == 'draft' %}<b>Draft</b>, not on the careers page yet{% else %}<b>Closed</b> on {{ posting.closed_at|pp_day }}{% endif %}{% if view.pay %} · {{ view.type_label }} · {{ view.pay }}{% endif %}</p>
+</section>
+
+<div class="hr-acts">
+  {% if posting.status != 'closed' %}<a class="btn btn-secondary sm" href="{{ url_for('people.hiring_posting_edit', posting_id=posting.id) }}">{{ icon('edit', 'sm') }}Edit wording and pay</a>{% endif %}
+  <form method="post" action="{{ url_for('people.hiring_posting_copy', posting_id=posting.id) }}"><button class="btn btn-secondary sm" type="submit">Copy to a new draft</button></form>
+</div>
+
+{% if posting.status == 'open' and public_url %}
+<p class="callout" style="margin-top:16px;">{{ icon('share') }}<span><strong>Applicants apply here:</strong> <span class="hr-def">{{ public_url }}</span><br>Anywhere else this job is advertised (a job site, a social post, a poster) has to carry the same pay, vacancy, accommodation{% if posting.ai_assist %}, AI{% endif %} statements, or link straight to this page.</span></p>
+{% endif %}
+
+{# ---------- the publish check ---------- #}
+{% if posting.status != 'closed' %}
+<section class="sec" id="check">
+  <div class="sec-head"><h2>Publish check</h2></div>
+  {% if problems %}
+  {{ problem_list(problems, 'This posting can\'t go live yet.' if posting.status == 'draft' else 'This live posting needs attention.') }}
+  {% else %}
+  <p class="callout">{{ icon('checkcircle') }}<span><strong>The publish check passes.</strong> Pay, a vacancy statement, the accommodation notice and a named contact are all here.</span></p>
+  {% endif %}
+  {% if flags %}
+  <div class="callout tan">{{ icon('info') }}<span><strong>Words to read again.</strong> They don't block the posting, but a person has to decide they are about the job.
+    <ul class="pp-problems">{% for flag in flags %}<li><strong>“{{ flag.term }}”</strong>: {{ flag.advice }}</li>{% endfor %}</ul></span></div>
+  {% endif %}
+  {% if posting.status == 'draft' %}
+    {% if viewer.is_operator %}
+    <form method="post" action="{{ url_for('people.hiring_publish', posting_id=posting.id) }}" class="card">
+      <span class="card-title">Publish</span>
+      <p class="card-meta">Puts the posting on the public careers page and keeps an exact copy of it with the blank application form.</p>
+      {% if flags %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read these and the wording is about the job.</span></label>{% endif %}
+      <div class="btnrow"><button class="btn btn-primary" type="submit"{{ ' disabled' if problems }}>Publish this posting</button></div>
+    </form>
+    {% else %}
+    <p class="fine-line">Only the Operator can publish a posting.</p>
+    {% endif %}
+  {% endif %}
+</section>
+{% endif %}
+
+{# ---------- AI assist ---------- #}
+<section class="sec" id="ai">
+  <div class="sec-head"><h2>AI assist</h2></div>
+  <div class="card">
+    <p class="card-meta" style="margin-top:0;">{% if posting.ai_assist %}<span class="badge b-green">{{ icon('check', 'xs') }}On for this posting</span>{% else %}<span class="badge">Off for this posting</span>{% endif %}</p>
+    <p class="card-meta">When it is on, the posting tells applicants that AI helps assess applications, and a leader can ask for a suggested level on a written answer after saving their own. It works only for people who applied while the posting said so. A person makes every decision.</p>
+    {% if viewer.is_operator and posting.status != 'closed' %}
+      {% if not ai_setting and not posting.ai_assist %}
+      <p class="fine-line">To use it, first switch on AI assist for hiring in <a class="textlink" href="{{ url_for('people.settings') }}#ai-hiring">People settings</a>.</p>
+      {% else %}
+      {% if not ai_ready %}<p class="fine-line">No AI key is set up on the server, so nothing is sent to an AI service yet.</p>{% endif %}
+      <form method="post" action="{{ url_for('people.hiring_posting_ai', posting_id=posting.id) }}" class="btnrow">
+        <input type="hidden" name="on" value="{{ '0' if posting.ai_assist else '1' }}">
+        <button class="btn btn-secondary sm" type="submit">{{ 'Switch AI assist off for this posting' if posting.ai_assist else 'Switch AI assist on for this posting' }}</button>
+      </form>
+      {% endif %}
+    {% elif posting.status != 'closed' %}
+    <p class="fine-line">Only the Operator can switch this.</p>
+    {% endif %}
+  </div>
+</section>
+
+{# ---------- criteria ---------- #}
+<section class="sec" id="criteria">
+  <div class="sec-head"><h2>What applications are scored on</h2></div>
+  <p class="sec-note">{{ limits.MIN_QUESTIONS }} to {{ limits.MAX_QUESTIONS }} criteria need a question for the applicant. Every applicant gets the same questions, and every interviewer the same scorecard.</p>
+  {% for c in posting.criteria %}
+  <details class="card tool" id="c{{ c.id }}">
+    <summary class="row"><span class="row-main"><span class="row-title">{{ c.name }}</span><span class="row-meta">{{ c.question or 'Interview only: no question for the applicant' }}</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      {% if posting.status == 'closed' %}
+      <p class="hr-def">{{ c.definition }}</p>
+      {% if c.anchors %}<ol class="pp-anchors">{% for a in c.anchors %}<li><b>Level {{ loop.index }}</b>{{ a }}</li>{% endfor %}</ol>{% endif %}
+      {% else %}
+      <form method="post" action="{{ url_for('people.hiring_criterion_save', posting_id=posting.id, criterion_id=c.id) }}">
+        <label class="field" for="c{{ c.id }}-name" style="margin-top:0;">Name</label>
+        <input id="c{{ c.id }}-name" name="name" type="text" maxlength="{{ limits.CRITERION_NAME_MAX }}" value="{{ c.name }}">
+        <label class="field" for="c{{ c.id }}-def">What it means</label>
+        <textarea id="c{{ c.id }}-def" name="definition" rows="3" maxlength="{{ limits.DEFINITION_MAX }}">{{ c.definition }}</textarea>
+        <label class="field" for="c{{ c.id }}-q">Question for the applicant <small>(leave empty for interview only)</small></label>
+        <textarea id="c{{ c.id }}-q" name="question" rows="2" maxlength="{{ limits.QUESTION_MAX }}">{{ c.question }}</textarea>
+        <label class="field" for="c{{ c.id }}-iq">Interview question <small>(optional)</small></label>
+        <textarea id="c{{ c.id }}-iq" name="interview_question" rows="2" maxlength="{{ limits.QUESTION_MAX }}">{{ c.interview_question }}</textarea>
+        {% for n in limits.LEVELS %}
+        <label class="field" for="c{{ c.id }}-a{{ n }}">Level {{ n }}{{ ' (lowest)' if n == 1 else ' (highest)' if n == 4 else '' }}: what an answer at this level sounds like</label>
+        <textarea id="c{{ c.id }}-a{{ n }}" name="anchor{{ n }}" rows="2" maxlength="{{ limits.ANCHOR_MAX }}">{{ c.anchors[n - 1] if c.anchors|length >= n else '' }}</textarea>
+        {% endfor %}
+        {% if posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read the advice on flagged words, and the wording is about the job.</span></label>{% endif %}
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save criterion</button></div>
+      </form>
+      <form method="post" action="{{ url_for('people.hiring_criterion_remove', posting_id=posting.id, criterion_id=c.id) }}" class="btnrow"><button class="btn btn-secondary sm" type="submit">Remove this criterion</button></form>
+      {% endif %}
+    </div>
+  </details>
+  {% else %}
+  <div class="empty">No criteria yet. Add at least {{ limits.MIN_QUESTIONS }} with a question for the applicant.</div>
+  {% endfor %}
+
+  {% if posting.status != 'closed' %}
+  {% if standards %}
+  <form method="post" action="{{ url_for('people.hiring_criterion_add', posting_id=posting.id) }}" class="card" style="margin-top:12px;">
+    <span class="card-title">Add from Our standards</span>
+    <p class="card-meta">Copies the standard's name, meaning, hiring question and level descriptions. You can change the copy afterwards.</p>
+    <label class="field" for="add-standard">Standard</label>
+    <select id="add-standard" name="dimension_key">
+      {% for d in standards %}<option value="{{ d.key }}">{{ d.name }}{{ '' if d.hiring else ' (no hiring question yet)' }}</option>{% endfor %}
+    </select>
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add this standard</button></div>
+  </form>
+  {% elif not has_model %}
+  <p class="fine-line">No standards are loaded yet, so criteria are written by hand. The Operator loads them under Our standards.</p>
+  {% endif %}
+  <details class="card tool" id="add-own" style="margin-top:12px;">
+    <summary class="row"><span class="row-main"><span class="row-title">Write a criterion by hand</span><span class="row-meta">Something this job needs that Our standards doesn't cover.</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      <form method="post" action="{{ url_for('people.hiring_criterion_add', posting_id=posting.id) }}">
+        <label class="field" for="n-name" style="margin-top:0;">Name</label>
+        <input id="n-name" name="name" type="text" maxlength="{{ limits.CRITERION_NAME_MAX }}">
+        <label class="field" for="n-def">What it means, in a sentence about the job</label>
+        <textarea id="n-def" name="definition" rows="3" maxlength="{{ limits.DEFINITION_MAX }}"></textarea>
+        <label class="field" for="n-q">Question for the applicant <small>(leave empty for interview only)</small></label>
+        <textarea id="n-q" name="question" rows="2" maxlength="{{ limits.QUESTION_MAX }}"></textarea>
+        <label class="field" for="n-iq">Interview question <small>(optional)</small></label>
+        <textarea id="n-iq" name="interview_question" rows="2" maxlength="{{ limits.QUESTION_MAX }}"></textarea>
+        {% for n in limits.LEVELS %}
+        <label class="field" for="n-a{{ n }}">Level {{ n }}{{ ' (lowest)' if n == 1 else ' (highest)' if n == 4 else '' }}: what an answer at this level sounds like <small>(optional)</small></label>
+        <textarea id="n-a{{ n }}" name="anchor{{ n }}" rows="2" maxlength="{{ limits.ANCHOR_MAX }}"></textarea>
+        {% endfor %}
+        {% if posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read the advice on flagged words, and the wording is about the job.</span></label>{% endif %}
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add criterion</button></div>
+      </form>
+    </div>
+  </details>
+  {% endif %}
+</section>
+
+{# ---------- what applicants see ---------- #}
+<section class="sec" id="preview">
+  <div class="sec-head"><h2>What applicants see</h2></div>
+  <div class="hr-preview">
+    <section class="hero compact">
+      <p class="eyebrow">{{ view.employer }}</p>
+      <p class="headline" style="font-size:1.5rem;">{{ view.title }}</p>
+      <p class="triage"><b>{{ view.type_label }}</b>{% if view.pay %} · <b>{{ view.pay }}</b>{% else %} · pay not set{% endif %}</p>
+    </section>
+    {{ posting_body(view, body) }}
+  </div>
+</section>
+
+{# ---------- kept copies ---------- #}
+<section class="sec" id="copies">
+  <div class="sec-head"><h2>Kept copies</h2></div>
+  <p class="sec-note">An exact copy of the posting and its blank application form is kept each time it is published, changed or closed. They are kept at least three years after it comes down and are never deleted here.</p>
+  {% if copies %}
+  <div class="card list">
+    {% for copy in copies %}
+    <a class="row compact" href="{{ url_for('people.hiring_snapshot', posting_id=posting.id, snapshot_id=copy.id) }}"><span class="row-main"><span class="row-title">{{ copy.reason|capitalize }}</span><span class="row-meta">{{ stamp(copy.taken_by, copy.taken_at) }}{% if copy.ai_statement %} · with the AI statement{% endif %}</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">Nothing has been shown to the public yet, so there is nothing to keep.</div>
+  {% endif %}
+</section>
+
+{% if posting.status == 'open' %}
+<section class="sec" id="close">
+  <div class="sec-head"><h2>Close this posting</h2></div>
+  {% if viewer.is_operator %}
+  <form method="post" action="{{ url_for('people.hiring_close', posting_id=posting.id) }}" class="card">
+    <p class="card-meta" style="margin-top:0;">Takes it off the careers page for good and records today as the day public access ended. Applications already in stay in the pipeline. A closed posting can't be reopened; copy it to a new draft instead.</p>
+    <label class="checkline"><input type="checkbox" name="confirm" value="1"><span>Yes, close this posting.</span></label>
+    <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Close posting</button></div>
+  </form>
+  {% else %}
+  <p class="fine-line">Only the Operator can close a posting.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

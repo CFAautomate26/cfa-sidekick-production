@@ -1,0 +1,187 @@
+{# Everything about a candidate that is never part of a score: how to reach
+   them, how they heard of us, messages, decision notices, the offer checks
+   and the record itself. #}
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, empty, stamp %}
+{% from "people/hiring/_bits.html" import hiring_styles, stage_badge %}
+{% block title %}{{ c.name }}: contact and offer checks{% endblock %}
+{% block head %}{{ hiring_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), (c.name, url_for('people.hiring_candidate', application_id=c.id)), ('Contact and offer checks', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Hiring · {{ c.posting_title }}</p>
+  <h1 class="headline">Contact and offer checks</h1>
+  <p class="triage"><b>{{ c.name }}</b> · {{ stage_labels[c.stage] }}</p>
+</section>
+<p class="callout" style="margin-top:22px;">{{ icon('shield') }}<span>Nothing on this page is part of a score. It is kept off the scoring page on purpose.</span></p>
+
+{% if c.purged %}
+<p class="callout tan">{{ icon('lock') }}<span><strong>This applicant's details were removed on {{ c.purged_at|pp_day }}.</strong> The decision notices below are kept until they are three years old.</span></p>
+{% else %}
+{% if contact.work_entitled == 'no' %}
+<p class="callout warm" id="check-work">{{ icon('alert') }}<span><strong>Check before any offer: said they are not legally entitled to work in Canada.</strong> It is a yes or no check for the offer stage, never part of a score. A person checks it; nothing is decided automatically.</span></p>
+{% endif %}
+
+<section class="sec" id="reach">
+  <div class="sec-head"><h2>How to reach them</h2></div>
+  <div class="card">
+    <table class="plain">
+      <tr><td>Email</td><td class="who">{{ contact.email or 'Not given' }}</td></tr>
+      <tr><td>Phone</td><td class="who">{{ contact.phone or 'Not given' }}</td></tr>
+      <tr><td>Heard about us</td><td>{{ heard or 'Not said' }}{% if contact.referrer %} ({{ contact.referrer }}){% endif %}</td></tr>
+    </table>
+    <p class="fine-line">Use these only for this application. No offers, coupons or marketing in a message to an applicant.</p>
+    <details class="hr-fold" id="correct">
+      <summary>{{ icon('chev', 'sm') }}Correct these at the applicant's request</summary>
+      <p class="fine-line">Applicants are told they can ask to see, correct or withdraw their application. Fix a name or a way to reach them here. For anything else they want changed, add a note on their page. To withdraw, move them to withdrew.</p>
+      <form method="post" action="{{ url_for('people.hiring_correct', application_id=c.id) }}" autocomplete="off">
+        <div class="hr-two">
+          <div><label class="field" for="fix-first">First name</label><input id="fix-first" name="first_name" type="text" maxlength="{{ limits.NAME_MAX }}" value="{{ c.first_name }}"></div>
+          <div><label class="field" for="fix-last">Last name</label><input id="fix-last" name="last_name" type="text" maxlength="{{ limits.NAME_MAX }}" value="{{ c.last_name }}"></div>
+          <div><label class="field" for="fix-email">Email</label><input id="fix-email" name="email" type="text" inputmode="email" maxlength="120" value="{{ contact.email }}"></div>
+          <div><label class="field" for="fix-phone">Phone</label><input id="fix-phone" name="phone" type="tel" maxlength="30" value="{{ contact.phone }}"></div>
+        </div>
+        <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Save the correction</button></div>
+      </form>
+    </details>
+  </div>
+</section>
+
+{# ---------- messages ---------- #}
+<section class="sec" id="messages">
+  <div class="sec-head"><h2>Messages</h2></div>
+  <p class="sec-note">Ready-to-send wording. A link opens your own email or text app with the message filled in. Nothing is sent from Team Hub, so log what you sent afterwards.</p>
+  {% for m in messages %}
+  <details class="card tool" id="m-{{ m.key }}">
+    <summary class="row"><span class="row-main"><span class="row-title">{{ m.label }}</span><span class="row-meta">{{ 'Counts as a decision notice once you log it.' if m.kind else 'Offers accommodation for the interview, as the law asks.' }}</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      <p class="hr-msg">{{ m.body }}</p>
+      <div class="hr-acts">
+        {% if m.mailto %}<a class="btn btn-secondary sm" href="{{ m.mailto }}">{{ icon('mega', 'sm') }}Open in email</a>{% endif %}
+        {% if m.sms %}<a class="btn btn-secondary sm" href="{{ m.sms }}">{{ icon('phone', 'sm') }}Open in text messages</a>{% endif %}
+      </div>
+      {% if m.kind %}
+      <form method="post" action="{{ url_for('people.hiring_notice', application_id=c.id) }}" style="margin-top:16px; padding-top:14px; border-top:1px solid var(--rule);">
+        <span class="card-title">Log it once it is sent or said</span>
+        <input type="hidden" name="kind" value="{{ m.kind }}">
+        <div class="hr-two">
+          <div><label class="field" for="g-{{ m.key }}-method">How they were told</label>
+            <select id="g-{{ m.key }}-method" name="method">{% for method in methods %}<option value="{{ method }}">{{ method|capitalize }}</option>{% endfor %}</select></div>
+          <div><label class="field" for="g-{{ m.key }}-on">Date they were told</label>
+            <input id="g-{{ m.key }}-on" name="given_on" type="date" required value="{{ today }}"></div>
+        </div>
+        <label class="field" for="g-{{ m.key }}-said">What was said or sent <small>(change it to match)</small></label>
+        <textarea id="g-{{ m.key }}-said" name="said" rows="6" maxlength="{{ limits.SAID_MAX }}">{{ m.body }}</textarea>
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Log this notice</button></div>
+      </form>
+      {% else %}
+      <form method="post" action="{{ url_for('people.hiring_contacted', application_id=c.id) }}" class="inline-form" style="margin-top:16px;">
+        <label class="sr" for="reached-method">How you reached out</label>
+        <select id="reached-method" name="method">{% for method in contact_methods %}<option value="{{ method }}">{{ method|capitalize }}</option>{% endfor %}</select>
+        <button class="btn btn-primary sm" type="submit">I reached out</button>
+      </form>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+
+{# ---------- decision notices ---------- #}
+<section class="sec" id="notices">
+  <div class="sec-head"><h2>Decision notices</h2></div>
+  <p class="sec-note">Anyone we interview must be told whether a hiring decision has been made within 45 days of their last interview, even when the answer is “not yet”. Each notice is kept three years.</p>
+  {% for clock in clocks %}
+  <p class="callout {{ 'warm' if clock.status == 'overdue' else 'tan' if clock.status == 'due' else '' }}">{{ icon('clock') }}<span>Interviewed {{ clock.interviewed|pp_day }}.
+    {% if clock.status == 'overdue' %}<strong>A notice is overdue</strong>: it was due {{ clock.deadline|pp_day }}.
+    {% elif clock.status == 'due' %}<strong>A notice is due by {{ clock.deadline|pp_day }}</strong> ({{ clock.days_left }} day{{ '' if clock.days_left == 1 else 's' }} left).
+    {% elif clock.status == 'late' %}Told on {{ clock.given_on|pp_day }}, after the {{ clock.deadline|pp_day }} deadline.
+    {% else %}Told on {{ clock.given_on|pp_day }}, in time.{% endif %}</span></p>
+  {% endfor %}
+  {% for n in notices %}
+  <div class="card" id="g{{ n.id }}">
+    <div class="row-between"><span class="card-title">{{ notice_kinds[n.kind] }}</span><span class="badge">{{ n.method|capitalize }} · {{ n.given_on|pp_day }}</span></div>
+    {% if n.said %}<p class="hr-said">{{ n.said }}</p>{% else %}<p class="card-meta">The wording was removed when this notice turned three years old.</p>{% endif %}
+    <p class="card-meta">Logged by {{ stamp(n.logged_by, n.logged_at) }}</p>
+  </div>
+  {% else %}
+  {{ empty('No notice has been logged for this applicant.') }}
+  {% endfor %}
+</section>
+
+{% if not c.purged %}
+{# ---------- the offer ---------- #}
+{% if c.stage in ('offer', 'hired') %}
+<section class="sec" id="offer">
+  <div class="sec-head"><h2>The offer</h2></div>
+  <div class="card">
+    {% if offer.open %}
+    <p class="card-meta" style="margin-top:0;">An offer has been made. Record their answer when you have it.</p>
+    <div class="hr-acts">
+      <form method="post" action="{{ url_for('people.hiring_offer_reply', application_id=c.id) }}"><input type="hidden" name="reply" value="accepted"><button class="btn btn-primary sm" type="submit">They accepted</button></form>
+      <form method="post" action="{{ url_for('people.hiring_offer_reply', application_id=c.id) }}"><input type="hidden" name="reply" value="declined"><button class="btn btn-secondary sm" type="submit">They declined</button></form>
+    </div>
+    {% else %}
+    <p class="card-meta" style="margin-top:0;">{% if offer.last_reply %}The last offer was {{ offer.last_reply }}.{% else %}Record the offer once you have made it.{% endif %}</p>
+    {% if c.stage == 'offer' %}
+    <form method="post" action="{{ url_for('people.hiring_offer', application_id=c.id) }}" class="btnrow"><button class="btn btn-primary sm" type="submit">I made the offer</button></form>
+    {% endif %}
+    {% endif %}
+    <p class="fine-line">Recording an answer never moves the application. Move them to hired yourself once the offer checks are done.</p>
+  </div>
+</section>
+{% endif %}
+
+{# ---------- offer checks ---------- #}
+<section class="sec" id="offer-checks">
+  <details class="card tool"{{ ' open' if c.stage in ('offer', 'hired') }}>
+    <summary class="row"><span class="lead-ico navy">{{ icon('shield') }}</span><span class="row-main"><span class="row-title">Offer checks</span><span class="row-meta">{{ 'For the offer stage only. Never part of a score.' }}</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      {% if c.stage in ('offer', 'hired') %}
+      <table class="plain">
+        <tr><td>Legally entitled to work in Canada?</td><td class="who">{{ contact.work_entitled|capitalize or 'Not answered' }}</td></tr>
+        <tr><td>18 or older?</td><td class="who">{{ contact.adult|capitalize or 'Not answered' }}</td></tr>
+      </table>
+      <p class="fine-line">These are what the applicant answered on the form. They are yes or no checks, not reasons to rate someone higher or lower.</p>
+      {% else %}
+      <p class="card-meta" style="margin-top:0;">The applicant's two yes or no answers open here when the application reaches the offer stage.</p>
+      {% endif %}
+      <p class="subhead">Before the first shift</p>
+      <ul class="pp-problems">{% for line in reminders %}<li>{{ line }}</li>{% endfor %}</ul>
+    </div>
+  </details>
+</section>
+
+{% if c.stage == 'hired' %}
+<section class="sec" id="roster">
+  <div class="sec-head"><h2>Team Hub roster</h2></div>
+  <div class="card">
+    {% if on_roster %}
+    <p class="card-meta" style="margin-top:0;">{{ icon('checkcircle', 'xs') }} {{ c.name }} is on the Team Hub roster.</p>
+    {% elif viewer.is_operator %}
+    <p class="card-meta" style="margin-top:0;">Copies the name, and only the name, to the Team Hub roster. Nothing else about this application ever leaves these pages.</p>
+    <form method="post" action="{{ url_for('people.hiring_roster', application_id=c.id) }}" class="btnrow"><button class="btn btn-primary sm" type="submit">Add to the Team Hub roster</button></form>
+    {% else %}
+    <p class="card-meta" style="margin-top:0;">The Operator adds a new hire to the Team Hub roster.</p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{# ---------- the record ---------- #}
+<section class="sec" id="records">
+  <div class="sec-head"><h2>This record</h2></div>
+  <div class="card">
+    <p class="card-meta" style="margin-top:0;">{% if c.hold %}<span class="badge b-navy">On hold: do not delete</span>{% else %}If they are not hired, their details are due to be removed {{ c.keep_months }} months after the decision, which is what they were told when they applied.{% endif %}</p>
+    <p class="card-meta">Put a hold on if you know of a complaint, a claim or a lawyer's letter about this application. A record on hold is never removed. Tell the Operator at once: the store's escalation matrix applies.</p>
+    {% if not c.hold %}
+    <form method="post" action="{{ url_for('people.hiring_hold', application_id=c.id) }}" class="btnrow"><input type="hidden" name="on" value="1"><button class="btn btn-secondary sm" type="submit">Hold: do not delete</button></form>
+    {% elif viewer.is_operator %}
+    <form method="post" action="{{ url_for('people.hiring_hold', application_id=c.id) }}" class="btnrow"><input type="hidden" name="on" value="0"><button class="btn btn-secondary sm" type="submit">Take the hold off</button></form>
+    {% else %}
+    <p class="fine-line">Only the Operator can take a hold off.</p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

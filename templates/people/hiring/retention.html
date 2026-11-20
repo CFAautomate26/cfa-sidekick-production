@@ -1,0 +1,65 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, empty %}
+{% from "people/hiring/_bits.html" import hiring_nav, hiring_styles %}
+{% block title %}Retention{% endblock %}
+{% block head %}{{ hiring_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), ('Retention', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · Hiring · the Operator only</p>
+  <h1 class="headline">Retention</h1>
+  <p class="triage"><b>{{ r.due|length }}</b> due to be removed · <b>{{ r.held|length }}</b> on hold · <b>{{ r.purged }}</b> already removed</p>
+</section>
+{{ hiring_nav(tabs) }}
+
+<div class="card" style="margin-top:16px;">
+  <span class="card-title">What removing does</span>
+  <p class="card-meta">Applicants are told their application is kept for a set number of months after the hiring decision if they are not hired ({{ months }} months for anyone applying today), and that you then remove it. Nothing is removed automatically: it happens when you press the button below.</p>
+  <ul class="pp-problems">
+    <li><strong>Removed:</strong> name, email, phone, the yes or no answers, availability, referrer, experience, written answers, leaders' notes, the notes on scores, any AI copy of the answers, and the applicant's private link.</li>
+    <li><strong>Kept:</strong> the bare record (posting, stages and dates, levels), so the numbers stay true.</li>
+    <li><strong>Kept three years by law:</strong> every decision notice, with the applicant's name, until it is three years old. After that its wording and the name are removed too.</li>
+    <li><strong>Never removed:</strong> postings and the kept copies of them, anyone who was hired, and any application on hold.</li>
+  </ul>
+  <p class="fine-line">Change the number of months in <a class="textlink" href="{{ url_for('people.settings') }}#hiring">People settings</a>. Each applicant keeps the number they were told. The retention period is a choice to confirm with a lawyer: a human rights application can be made up to a year after a decision, and sometimes later.</p>
+</div>
+
+<section class="sec" id="due">
+  <div class="sec-head"><h2>Due to be removed</h2></div>
+  {% if r.due %}
+  <div class="card pp-scroll">
+    <table class="plain">
+      <thead><tr><th>Applicant</th><th>Posting</th><th>Decision</th><th>Decided</th><th>Told</th></tr></thead>
+      {% for d in r.due %}
+      <tr><td class="who"><a href="{{ url_for('people.hiring_candidate', application_id=d.id) }}">{{ d.name }}</a></td><td>{{ d.posting_title }}</td>
+        <td>{{ stage_labels[d.stage] }}</td><td class="nowrap">{{ d.decided_on|pp_day }}</td><td class="nowrap">{{ d.keep_months }} months</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <form method="post" action="{{ url_for('people.hiring_purge') }}" class="card">
+    <label class="checkline"><input type="checkbox" name="confirm" value="1"><span>Remove the personal details of {{ 'this applicant' if r.due|length == 1 else 'these ' ~ r.due|length ~ ' applicants' }}. This can't be undone.</span></label>
+    <p class="fine-line">If you know of a complaint or claim about any of them, put that application on hold first.</p>
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">Remove their details</button></div>
+  </form>
+  {% else %}
+  {{ empty('Nothing is due to be removed today.') }}
+  {% endif %}
+</section>
+
+{% if r.undecided %}
+<p class="callout tan">{{ icon('clock') }}<span><strong>{{ r.undecided }} application{{ '' if r.undecided == 1 else 's' }} on closed postings still {{ 'has' if r.undecided == 1 else 'have' }} no decision.</strong> The clock starts at the decision, so mark each one as not selected or withdrawn (or hired).</span></p>
+{% endif %}
+
+<section class="sec" id="held">
+  <div class="sec-head"><h2>On hold</h2></div>
+  {% if r.held %}
+  <div class="card list">
+    {% for h in r.held %}
+    <a class="row compact" href="{{ url_for('people.hiring_contact', application_id=h.id) }}#records"><span class="row-main"><span class="row-title">{{ h.name }}</span><span class="row-meta">{{ h.posting_title }} · kept until you take the hold off</span></span>{{ icon('chev', 'chev') }}</a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ empty('No application is on hold.') }}
+  {% endif %}
+</section>
+{% endblock %}

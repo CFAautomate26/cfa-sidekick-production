@@ -1,0 +1,52 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs %}
+{% from "people/hiring/_bits.html" import hiring_styles, problem_list %}
+{% block title %}{{ 'Edit posting' if posting else 'New posting' }}{% endblock %}
+{% block head %}{{ hiring_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), ('Postings', url_for('people.hiring_postings')), (posting.title if posting else 'New posting', url_for('people.hiring_posting', posting_id=posting.id) if posting else none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · Hiring</p>
+  <h1 class="headline">{{ 'Edit posting' if posting else 'New posting' }}</h1>
+  <p class="triage">{% if posting and posting.status == 'open' %}This posting is live. A copy of every change is kept.{% else %}Save a draft now. The publish check tells you what is still missing.{% endif %}</p>
+</section>
+{{ problem_list(problems, 'Not saved yet.') }}
+<form method="post" class="card" style="margin-top:22px;" autocomplete="off">
+  <label class="field" for="p-title">Job title</label>
+  <input id="p-title" name="title" type="text" maxlength="{{ limits.TITLE_MAX }}" required value="{{ f.title or '' }}">
+  <p class="fine-line">A title that fits anyone, such as Team member or Kitchen team member.</p>
+
+  <label class="field" for="p-type">Hours</label>
+  <select id="p-type" name="employment_type">
+    {% for key, label in types.items() %}<option value="{{ key }}"{{ ' selected' if f.employment_type == key }}>{{ label }}</option>{% endfor %}
+  </select>
+
+  <label class="field" for="p-description">Description</label>
+  <textarea id="p-description" name="description" rows="12" maxlength="{{ limits.DESCRIPTION_MAX }}">{{ f.description or '' }}</textarea>
+  <p class="fine-line">At least {{ limits.DESCRIPTION_MIN }} characters. Say what the work is, the shifts and what we offer. A line starting with # is a heading, a line starting with - is a bullet, and **two stars** make bold. Describe the job, not the kind of person.</p>
+
+  <p class="subhead">Pay</p>
+  <div class="hr-two">
+    <div><label class="field" for="p-min">Lowest hourly wage ($)</label>
+      <input id="p-min" name="pay_min" type="text" inputmode="decimal" maxlength="8" value="{{ f.pay_min or '' }}"></div>
+    <div><label class="field" for="p-max">Highest hourly wage ($)</label>
+      <input id="p-max" name="pay_max" type="text" inputmode="decimal" maxlength="8" value="{{ f.pay_max or '' }}"></div>
+  </div>
+  <p class="fine-line">Wages only: tips and bonuses can't be used to state pay. The general minimum wage in Settings is ${{ conf.min_wage_general }} an hour and the student minimum wage is ${{ conf.min_wage_student }}. The range can be about $24 an hour wide at most.</p>
+  <label class="checkline"><input type="checkbox" name="student_rate" value="1"{{ ' checked' if f.student_rate in (1, '1') }}><span>The lower figure is the student minimum wage. The posting will say who that rate applies to.</span></label>
+
+  <fieldset class="hr-levels" style="margin-top:18px;">
+    <legend class="field" style="margin-top:0;">Is this for an existing vacancy?</legend>
+    {% for key, label in vacancies.items() %}
+    <label class="hr-level"><input type="radio" name="vacancy" value="{{ key }}"{{ ' checked' if f.vacancy == key }}><span>{{ label }}</span></label>
+    {% endfor %}
+  </fieldset>
+  <p class="fine-line">Ontario law says every posting must state which it is.</p>
+
+  {% if posting and posting.status == 'open' %}
+  <label class="checkline" style="margin-top:18px;"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read the advice on flagged words, and the wording is about the job. Needed only if this change adds a flagged word.</span></label>
+  {% endif %}
+  <div class="btnrow"><button class="btn btn-primary" type="submit">{{ 'Save' if posting else 'Save draft' }}</button>
+    <a class="textlink" href="{{ url_for('people.hiring_posting', posting_id=posting.id) if posting else url_for('people.hiring_postings') }}">Cancel</a></div>
+</form>
+{% endblock %}

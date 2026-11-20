@@ -1,0 +1,84 @@
+{# Pieces the hiring pages share. Links and plain forms only: no scripts. #}
+
+{% macro hiring_nav(tabs) -%}
+<nav class="seg no-print" aria-label="Hiring pages">
+  {%- for t in tabs %}<a href="{{ t.url }}"{% if t.on %} class="on" aria-current="page"{% endif %}>{{ t.label }}</a>{% endfor -%}
+</nav>
+{%- endmacro %}
+
+{% macro problem_list(problems, lead='Fix these first.') -%}
+{% if problems %}
+<div class="callout warm" role="alert">{{ icon('alert') }}<span><strong>{{ lead }}</strong>
+  <ul class="pp-problems">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul></span></div>
+{% endif %}
+{%- endmacro %}
+
+{# A level picker: the four level descriptions are the radio labels. #}
+{% macro level_picker(criterion, chosen, levels, prefix='') -%}
+<fieldset class="hr-levels">
+  <legend class="sr">Your level for {{ criterion.name }}</legend>
+  {% for n in levels %}
+  <label class="hr-level"><input type="radio" name="level_{{ criterion.id }}" value="{{ n }}"{{ ' checked' if chosen == n }}><span><b>Level {{ n }}</b>{% if criterion.anchors and criterion.anchors[n - 1] %} {{ criterion.anchors[n - 1] }}{% endif %}</span></label>
+  {% endfor %}
+  <label class="hr-level"><input type="radio" name="level_{{ criterion.id }}" value=""{{ ' checked' if not chosen }}><span>No level yet</span></label>
+</fieldset>
+{%- endmacro %}
+
+{% macro stage_badge(stage, labels) -%}
+<span class="badge {{ 'b-green' if stage == 'hired' else 'b-tan' if stage in ('not-selected', 'withdrawn') else 'b-navy' }}">{{ labels[stage] }}</span>
+{%- endmacro %}
+
+{% macro hiring_styles() -%}
+<style>
+.seg { margin-bottom: 4px; }
+.hr-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.hr-levels { border: 0; margin: 10px 0 0; min-width: 0; }
+.hr-level { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--rule); min-height: 44px;
+  font-size: 0.9375rem; line-height: 1.4; cursor: pointer; }
+.hr-level input { margin-top: 1px; flex: 0 0 auto; width: 20px; height: 20px; }
+.hr-level b { color: var(--text-strong); }
+.hr-crit { padding-top: 18px; margin-top: 18px; border-top: 2px solid var(--rule); }
+.hr-crit:first-of-type { padding-top: 0; margin-top: 0; border-top: 0; }
+.hr-answer { margin: 10px 0 0; padding: 12px 14px; background: var(--tan-050); border-radius: var(--r-xl); font-size: 1rem;
+  line-height: 1.5; color: var(--text-strong); white-space: pre-line; }
+.hr-q { font-size: 0.9375rem; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+.hr-ai { margin-top: 12px; padding: 12px 14px; border-radius: var(--r-xl); background: var(--cool-white); color: var(--info);
+  font-size: 0.9375rem; line-height: 1.45; }
+.hr-ai b { display: block; font-size: 0.8125rem; text-transform: uppercase; letter-spacing: var(--track-eyebrow); }
+.hr-ai p { margin-top: 6px; }
+.hr-grid { border-collapse: collapse; width: 100%; font-size: var(--fs-small); }
+.hr-grid th, .hr-grid td { padding: 8px 6px; border-bottom: 1px solid var(--rule); text-align: center; }
+.hr-grid th[scope=row], .hr-grid td:first-child { text-align: left; color: var(--text-strong); font-weight: 400; }
+.hr-grid .i { color: var(--ok); display: inline-block; vertical-align: middle; }
+.hr-sum { border-collapse: collapse; min-width: 100%; font-size: var(--fs-small); }
+.hr-sum th, .hr-sum td { padding: 9px 10px; border-bottom: 1px solid var(--rule); text-align: center; white-space: nowrap; }
+.hr-sum th:first-child, .hr-sum td:first-child { text-align: left; white-space: normal; min-width: 9em; color: var(--text-strong); }
+.hr-sum thead th { font-weight: 700; color: var(--text-strong); vertical-align: bottom; }
+.hr-sum small { display: block; font-weight: 400; color: var(--text-muted); }
+.hr-two { display: grid; gap: 0 14px; }
+@media (min-width: 560px) { .hr-two { grid-template-columns: 1fr 1fr; } }
+.hr-acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+.hr-acts form { margin: 0; }
+.hr-acts .btn { min-width: 0; }
+.hr-fold { margin-top: 12px; }
+.hr-fold > summary { cursor: pointer; font-weight: 700; color: var(--nav); min-height: 44px; display: flex; align-items: center; gap: 6px; }
+.hr-msg { white-space: pre-line; margin: 10px 0 0; padding: 12px 14px; background: var(--tan-050); border-radius: var(--r-xl);
+  font-size: 0.9375rem; line-height: 1.5; color: var(--text-strong); }
+.hr-copy { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 0.9375rem; line-height: 1.5; color: var(--text-strong); }
+.hr-def { font-size: 0.9375rem; line-height: 1.45; margin-top: 4px; }
+.hr-said { white-space: pre-line; font-size: 0.9375rem; line-height: 1.45; margin-top: 6px; }
+.hr-stat { margin-top: 14px; }
+.hr-stat .row-between b { color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.hr-stat .bar { margin-top: 6px; }
+.hr-num { font-size: 1.75rem; font-weight: 700; color: var(--info); letter-spacing: -0.02em; line-height: 1.1; }
+.hr-num small { font-size: 0.875rem; font-weight: 400; color: var(--text-muted); letter-spacing: 0; }
+.hr-late td { color: var(--red-700); }
+.hr-late td.who { color: var(--red-700); }
+.cr-statement { margin-top: 12px; font-size: 0.9375rem; line-height: 1.5; color: var(--text); }
+.cr-look { list-style: none; margin: 8px 0 0; padding: 0; }
+.cr-look li { padding: 10px 0; border-top: 1px solid var(--rule); line-height: 1.45; }
+.cr-look li:first-child { border-top: 0; }
+.cr-look b { display: block; color: var(--text-strong); }
+.hr-preview { border: 2px dashed var(--rule-strong); border-radius: var(--r-2xl); padding: 4px 14px 16px; margin-top: 12px; }
+</style>
+{%- endmacro %}

@@ -1,0 +1,278 @@
+{# The candidate page is a scoring screen. It is never given the
+   applicant's email, phone number, 18-or-over or work-entitlement answer,
+   or how they heard of us: those are on the contact page. #}
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, guidance, escalation, empty, stamp %}
+{% from "people/hiring/_bits.html" import hiring_styles, level_picker, stage_badge %}
+{% block title %}{{ c.name }}{% endblock %}
+{% block head %}{{ hiring_styles() }}
+{% if ai.status in ('queued', 'working') %}<meta http-equiv="refresh" content="6">{% endif %}
+{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), (c.name, none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">Hiring · {{ c.posting_title }}</p>
+  <h1 class="headline">{{ c.name }}</h1>
+  <p class="triage"><b>{{ stage_labels[c.stage] }}</b> · {{ c.days_in_stage }} day{{ '' if c.days_in_stage == 1 else 's' }} in this stage · applied {{ c.created_at|pp_day }}</p>
+</section>
+
+{% if c.purged %}
+<p class="callout tan" style="margin-top:22px;">{{ icon('lock') }}<span><strong>This applicant's details were removed on {{ c.purged_at|pp_day }}.</strong> Only the bare record is kept: the stages, the levels and any decision notice still inside its three years.</span></p>
+{% else %}
+  {% if c.hold %}<p class="callout" style="margin-top:22px;">{{ icon('lock') }}<span><strong>On hold: do not delete.</strong> This application is kept until the Operator takes the hold off.</span></p>{% endif %}
+  {% if not c.answered_at %}
+  <p class="callout tan" style="margin-top:{{ '12' if c.hold else '22' }}px;">{{ icon('clock') }}<span>{% if c.link_expired %}<strong>The quick questions were not answered</strong> and the applicant's link has closed. That is a fact for you to weigh, not a decision.{% else %}The quick questions are not answered yet. The applicant's link is open until {{ c.answers_until|pp_when }}.{% endif %}</span></p>
+  {% endif %}
+{% endif %}
+
+<div class="card list" style="margin-top:16px;">
+  <a class="row" href="{{ url_for('people.hiring_contact', application_id=c.id) }}"><span class="lead-ico navy">{{ icon('chat') }}</span><span class="row-main"><span class="row-title">Contact, messages and offer checks</span><span class="row-meta">Kept apart from this page, because none of it is part of a score.</span></span>{{ icon('chev', 'chev') }}</a>
+</div>
+
+{# ---------- stage ---------- #}
+<section class="sec" id="stage">
+  <div class="sec-head"><h2>Stage</h2></div>
+  <div class="card">
+    <p class="card-meta" style="margin-top:0;">{{ stage_badge(c.stage, stage_labels) }} since {{ c.stage_at|pp_day }}. Nothing moves on its own: you decide.</p>
+    {% if moves %}
+    <div class="hr-acts">
+      {% for to in moves if to in ('screening', 'interview', 'offer') %}
+      <form method="post" action="{{ url_for('people.hiring_stage', application_id=c.id) }}"><input type="hidden" name="from" value="{{ c.stage }}"><input type="hidden" name="to" value="{{ to }}">
+        <button class="btn btn-primary sm" type="submit">{{ 'Reopen to screening' if c.stage in ('not-selected', 'withdrawn') else 'Move to ' ~ stage_labels[to]|lower }}</button></form>
+      {% endfor %}
+    </div>
+    {% if 'hired' in moves %}
+    <form method="post" action="{{ url_for('people.hiring_stage', application_id=c.id) }}" style="margin-top:16px;"><input type="hidden" name="from" value="{{ c.stage }}"><input type="hidden" name="to" value="hired">
+      <label class="checkline"><input type="checkbox" name="checks_done" value="1"><span>The offer checks are done: proof of age seen after the offer (at least 14 for serving areas, 15 for the kitchen), and legally able to work in Canada.</span></label>
+      <div class="btnrow"><button class="btn btn-primary sm" type="submit">Move to hired</button></div>
+    </form>
+    {% endif %}
+    {% if 'not-selected' in moves %}
+    <details class="hr-fold" id="not-selected">
+      <summary>{{ icon('chev', 'sm') }}Not selected, or the applicant withdrew</summary>
+      {{ escalation('hiring') }}
+      <form method="post" action="{{ url_for('people.hiring_stage', application_id=c.id) }}"><input type="hidden" name="from" value="{{ c.stage }}"><input type="hidden" name="to" value="not-selected">
+        <label class="field" for="s-reason">The job-related reason</label>
+        <select id="s-reason" name="reason" required>
+          <option value="">Choose one</option>
+          {% for reason in reasons %}<option value="{{ reason }}">{{ reason }}</option>{% endfor %}
+        </select>
+        <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Mark as not selected</button></div>
+      </form>
+      <form method="post" action="{{ url_for('people.hiring_stage', application_id=c.id) }}" class="btnrow"><input type="hidden" name="from" value="{{ c.stage }}"><input type="hidden" name="to" value="withdrawn">
+        <button class="btn btn-secondary sm" type="submit">The applicant withdrew</button></form>
+      <p class="fine-line">If they were interviewed, tell them where things stand within 45 days all the same.</p>
+    </details>
+    {% endif %}
+    {% elif not c.purged and c.stage in ('not-selected', 'withdrawn') %}
+    <p class="fine-line">Only the Operator can reopen this application.</p>
+    {% endif %}
+  </div>
+</section>
+
+{% if not c.purged %}
+<section class="sec" id="guide">
+  {{ guidance('hiring') }}
+</section>
+
+{# ---------- the written answers, and this leader's own levels ---------- #}
+<section class="sec" id="answers">
+  <div class="sec-head"><h2>Quick-question answers</h2></div>
+  {% if c.answers %}
+  <p class="sec-note">Score what was written against each level description. Your levels are your own: other leaders' levels show only after you have saved yours.</p>
+  <form method="post" action="{{ url_for('people.hiring_score', application_id=c.id) }}" class="card">
+    {% for crit in c.criteria if crit.id in c.answers %}
+    <div class="hr-crit" id="k{{ crit.id }}">
+      <span class="card-title">{{ crit.name }}</span>
+      <p class="hr-def">{{ crit.definition }}</p>
+      <p class="hr-q">Asked: {{ crit.question }}</p>
+      <p class="hr-answer">{{ c.answers[crit.id] }}</p>
+      {% set own = scores.mine.get(crit.id) %}
+      {{ level_picker(crit, own.level if own else none, levels) }}
+      <label class="field" for="note-{{ crit.id }}">Your note <small>(what in the answer led you to this level)</small></label>
+      <textarea id="note-{{ crit.id }}" name="note_{{ crit.id }}" rows="2" maxlength="{{ limits.SCORE_NOTE_MAX }}">{{ own.note if own else '' }}</textarea>
+      {% set hint = ai.suggestions.get(crit.id) %}
+      {% if hint %}
+      <div class="hr-ai" id="ai-{{ crit.id }}">
+        <b>Suggested, for reviewer decision. Not a decision.</b>
+        <p>{% if hint.suggested_level %}The AI suggests <strong>level {{ hint.suggested_level }}</strong>.{% else %}The AI suggests no level for this answer.{% endif %}{% if hint.quote %} It points to: “{{ hint.quote }}”{% endif %}</p>
+        {% if hint.evidence_summary %}<p>{{ hint.evidence_summary }}</p>{% endif %}
+        {% if hint.note %}<p>{{ hint.note }}</p>{% endif %}
+        <p>Your own level stands unless you change it.</p>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <div class="btnrow"><button class="btn btn-primary" type="submit">Save my levels</button></div>
+  </form>
+
+  <div class="card" id="ai-assist">
+    <span class="card-title">AI assist</span>
+    {% if ai.blocked %}
+    <p class="card-meta">{{ ai.blocked }}</p>
+    {% else %}
+    <p class="card-meta">A second read of the written answers against the criteria. It sees no name, contact details, availability or experience, and it never moves anyone. Save your own level first: a suggestion shows only beside an answer you have already scored.</p>
+    {% if ai.status in ('queued', 'working') %}
+    <p class="callout tan">{{ icon('clock') }}<span>The AI is reading the answers. This page refreshes by itself.</span></p>
+    {% elif ai.status == 'failed' %}
+    <p class="callout warm">{{ icon('alert') }}<span>The last request did not finish{% if ai.error %}: {{ ai.error }}{% endif %}</span></p>
+    {% elif ai.status == 'done' %}
+    <p class="fine-line">Suggestions are ready ({{ stamp(ai.by, ai.at) }}).{% if ai.waiting %} {{ ai.waiting }} more will show once you save your own level for {{ 'that answer' if ai.waiting == 1 else 'those answers' }}.{% endif %}</p>
+    {% for check in ai.checks %}<p class="callout tan">{{ icon('alert') }}<span>{{ check }}</span></p>{% endfor %}
+    {% endif %}
+    {% if ai.status not in ('queued', 'working') %}
+    <form method="post" action="{{ url_for('people.hiring_ai', application_id=c.id) }}" class="btnrow"><button class="btn btn-secondary sm" type="submit">{{ 'Ask again' if ai.status else 'Ask for a second read' }}</button></form>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% else %}
+  {{ empty('No written answers yet.') }}
+  {% endif %}
+</section>
+
+{# ---------- availability and experience: facts, not scored ---------- #}
+<section class="sec" id="availability">
+  <div class="sec-head"><h2>When they could work</h2></div>
+  <p class="sec-note">A fact for scheduling. It is not scored, and nobody is asked why they can't work at a certain time.</p>
+  <div class="card pp-scroll">
+    <table class="hr-grid">
+      <thead><tr><td></td>{% for part, part_label in dayparts %}<th scope="col">{{ part_label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for day, day_label in days %}
+      <tr><th scope="row">{{ day_label }}</th>{% for part, part_label in dayparts %}<td>{% if part in c.availability.get(day, []) %}{{ icon('check', 'sm') }}<span class="sr">Yes</span>{% else %}<span class="sr">No</span>{% endif %}</td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="sec" id="experience">
+  <div class="sec-head"><h2>Experience they told us about</h2></div>
+  {% if c.experience %}<div class="card"><p class="pp-text">{{ c.experience }}</p></div>{% else %}{{ empty('Nothing was added.') }}{% endif %}
+</section>
+{% endif %}
+
+{# ---------- interviews and scorecards ---------- #}
+<section class="sec" id="interviews">
+  <div class="sec-head"><h2>Interviews</h2></div>
+  <p class="sec-note">Log every interview, including a phone call or a chat at a hiring event where you asked questions to see if they suit the job. Each one that is held starts a 45-day clock for telling the applicant where things stand.</p>
+  {% for clock in clocks if clock.status in ('due', 'overdue') %}
+  <p class="callout {{ 'warm' if clock.status == 'overdue' else 'tan' }}">{{ icon('clock') }}<span>{% if clock.status == 'overdue' %}<strong>A decision notice is overdue.</strong> It was due {{ clock.deadline|pp_day }}.{% else %}<strong>Tell them where things stand by {{ clock.deadline|pp_day }}</strong> ({{ clock.days_left }} day{{ '' if clock.days_left == 1 else 's' }} left), even if the answer is that no decision has been made yet.{% endif %} <a class="textlink" href="{{ url_for('people.hiring_contact', application_id=c.id) }}#messages">Messages and notices</a></span></p>
+  {% endfor %}
+  {% for talk in talks %}
+  <article class="card" id="i{{ talk.id }}">
+    <div class="row-between"><span class="card-title">{{ talk.on_date|pp_day }}{% if talk.at_time %}, {{ talk.at_time }}{% endif %} · {{ talk.mode }}</span>
+      <span class="badge {{ 'b-green' if talk.outcome == 'attended' else 'b-red' if talk.outcome == 'no-show' else 'b-tan' }}">{{ outcome_labels[talk.outcome] }}</span></div>
+    <p class="card-meta">{% if talk.interviewer %}With {{ talk.interviewer }} · {% endif %}logged by {{ talk.created_by }}</p>
+    {% set card = scores.my_cards.get(talk.id) %}
+    {% if not c.purged and not (card and card.submitted) %}
+    <form method="post" action="{{ url_for('people.hiring_outcome', application_id=c.id, interview_id=talk.id) }}" class="inline-form" style="margin-top:12px;">
+      <label class="sr" for="o-{{ talk.id }}">What happened</label>
+      <select id="o-{{ talk.id }}" name="outcome">
+        {% for key in ('attended', 'no-show', 'cancelled', 'rescheduled') %}<option value="{{ key }}"{{ ' selected' if talk.outcome == key }}>{{ outcome_labels[key] }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-secondary sm" type="submit">Record</button>
+    </form>
+    {% endif %}
+    {% if talk.outcome == 'attended' and not c.purged %}
+      {% if card and card.submitted %}
+      <p class="fine-line">{{ icon('checkcircle', 'xs') }} You submitted your scorecard. It is in the table below.</p>
+      {% else %}
+      <details class="hr-fold" id="kit-{{ talk.id }}"{{ ' open' if card }}>
+        <summary>{{ icon('chev', 'sm') }}My scorecard for this interview</summary>
+        <p class="fine-line">The same questions, in the same order, for every applicant. Score what they said against each level. Other interviewers' scorecards show after you submit yours.</p>
+        <form method="post" action="{{ url_for('people.hiring_scorecard', application_id=c.id, interview_id=talk.id) }}">
+          {% for crit in c.criteria %}
+          <div class="hr-crit">
+            <span class="card-title">{{ loop.index }}. {{ crit.name }}</span>
+            <p class="hr-def">{{ crit.definition }}</p>
+            <p class="hr-q">{% if crit.interview_question %}Ask: {{ crit.interview_question }}{% elif crit.question %}Ask them to tell you more about: {{ crit.question }}{% else %}Ask for a real example of this.{% endif %}</p>
+            {{ level_picker(crit, card.levels.get(crit.id) if card else none, levels) }}
+            <label class="field" for="sc-{{ talk.id }}-{{ crit.id }}">What they said</label>
+            <textarea id="sc-{{ talk.id }}-{{ crit.id }}" name="note_{{ crit.id }}" rows="2" maxlength="{{ limits.SCORE_NOTE_MAX }}">{{ card.notes.get(crit.id, '') if card else '' }}</textarea>
+          </div>
+          {% endfor %}
+          <div class="btnrow"><button class="btn btn-secondary sm" type="submit" name="action" value="save">Save draft</button>
+            <button class="btn btn-primary sm" type="submit" name="action" value="submit">Submit scorecard</button></div>
+          <p class="fine-line">A submitted scorecard can't be changed.</p>
+        </form>
+      </details>
+      {% endif %}
+    {% endif %}
+  </article>
+  {% else %}
+  {{ empty('No interviews logged.') }}
+  {% endfor %}
+
+  {% if not c.purged and c.stage in ('new', 'screening', 'interview', 'offer') %}
+  <details class="card tool" id="add-interview">
+    <summary class="row"><span class="lead-ico">{{ icon('plus') }}</span><span class="row-main"><span class="row-title">Add an interview</span><span class="row-meta">Planned, or one that already happened.</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body">
+      <form method="post" action="{{ url_for('people.hiring_interview', application_id=c.id) }}">
+        <div class="hr-two">
+          <div><label class="field" for="iv-date" style="margin-top:0;">Date</label><input id="iv-date" name="on_date" type="date" required value="{{ today }}"></div>
+          <div><label class="field" for="iv-time" style="margin-top:0;">Time <small>(optional, like 15:30)</small></label><input id="iv-time" name="at_time" type="text" inputmode="numeric" maxlength="5" placeholder="15:30"></div>
+        </div>
+        <label class="field" for="iv-mode">How</label>
+        <select id="iv-mode" name="mode">{% for mode in modes %}<option value="{{ mode }}">{{ mode|capitalize }}</option>{% endfor %}</select>
+        <label class="field" for="iv-who">Interviewer</label>
+        <input id="iv-who" name="interviewer" type="text" maxlength="80" value="{{ viewer.name }}">
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add interview</button></div>
+      </form>
+      <p class="fine-line">The invitation has to offer accommodation for the interview. The message on the contact page already does.</p>
+    </div>
+  </details>
+  {% endif %}
+</section>
+
+{# ---------- every submitted level, side by side ---------- #}
+<section class="sec" id="summary">
+  <div class="sec-head"><h2>Levels so far</h2></div>
+  <p class="sec-note">Each scorer's own level for each criterion. There is no total and no average on purpose: weigh each criterion yourself, then decide.</p>
+  {% if scores.hidden %}<p class="callout tan">{{ icon('lock') }}<span>{{ scores.hidden }} scorecard{{ '' if scores.hidden == 1 else 's' }} from {{ 'another interviewer' if scores.hidden == 1 else 'other interviewers' }} will show here once you submit your own.</span></p>{% endif %}
+  {% if scores.cards %}
+  <div class="card pp-scroll">
+    <table class="hr-sum">
+      <thead><tr><th scope="col">Criterion</th>{% for card in scores.cards %}<th scope="col">{{ card.scorer }}<small>{{ 'Written answers' if card.source == 'answers' else 'Interview' }}</small></th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for crit in c.criteria %}
+      <tr><td>{{ crit.name }}</td>{% for card in scores.cards %}<td>{{ card.levels.get(crit.id) or '–' }}</td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  {{ empty('No levels to show yet.') }}
+  {% endif %}
+</section>
+
+{# ---------- notes ---------- #}
+{% if not c.purged %}
+<section class="sec" id="notes">
+  <div class="sec-head"><h2>Notes</h2></div>
+  <form method="post" action="{{ url_for('people.hiring_note', application_id=c.id) }}" class="card">
+    <label class="field" for="n-body" style="margin-top:0;">Add a note</label>
+    <textarea id="n-body" name="body" rows="3" maxlength="{{ limits.NOTE_MAX }}"></textarea>
+    <p class="fine-line">What the applicant said or did, in their words where you can. Never anything from the “never write” list above.</p>
+    <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save note</button></div>
+  </form>
+  {% for note in notes %}
+  <div class="card" id="n{{ note.id }}"><p class="pp-text">{{ note.body }}</p><p class="card-meta">{{ stamp(note.by, note.at) }}</p></div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="sec" id="history">
+  <details class="card tool">
+    <summary class="row"><span class="lead-ico">{{ icon('history') }}</span><span class="row-main"><span class="row-title">History</span><span class="row-meta">Every step, who took it and when.</span></span>{{ icon('chev', 'chev') }}</summary>
+    <div class="tool-body pp-scroll">
+      <table class="plain">
+        {% for e in history %}
+        <tr><td class="nowrap">{{ e.at|pp_when }}</td><td class="who">{{ 'The applicant' if e.by == 'applicant' else e.by }}</td>
+          <td>{% if e.kind == 'stage' %}{{ stage_labels.get(e.from_stage, e.from_stage) }} to {{ stage_labels.get(e.to_stage, e.to_stage) }}{% if e.detail %} ({{ e.detail }}){% endif %}{% else %}{{ e.kind|replace('_', ' ')|capitalize }}{% if e.detail %}: {{ e.detail }}{% endif %}{% endif %}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </details>
+</section>
+{% endblock %}

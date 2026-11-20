@@ -1,0 +1,15 @@
+{% extends "people/base.html" %}
+{% from "people/_ui.html" import crumbs, stamp %}
+{% from "people/hiring/_bits.html" import hiring_styles %}
+{% block title %}Kept copy{% endblock %}
+{% block head %}{{ hiring_styles() }}{% endblock %}
+{% block content %}
+{{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), ('Postings', url_for('people.hiring_postings')), (posting.title, url_for('people.hiring_posting', posting_id=posting.id)), ('Kept copy', none)]) }}
+<section class="hero compact">
+  <p class="eyebrow">People · Hiring · kept copy</p>
+  <h1 class="headline">{{ posting.title }}</h1>
+  <p class="triage">The posting and its blank application form exactly as they stood when it was <b>{{ copy.reason }}</b>. {{ stamp(copy.taken_by, copy.taken_at) }}</p>
+</section>
+<p class="callout" style="margin-top:22px;">{{ icon('lock') }}<span>Kept for the three-year record. A kept copy is never changed or deleted.{% if copy.ai_statement %} This version carried the AI statement.{% endif %}</span></p>
+<div class="card"><pre class="hr-copy">{{ copy.body }}</pre></div>
+{% endblock %}
