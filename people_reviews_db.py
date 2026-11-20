@@ -1038,23 +1038,17 @@ def nav_counts(kind: str, leader_id, name) -> dict:
     """Counts for the Team Hub menu and the People home page. The Operator:
     on_hold, past_due, drafts (their own to write). A leader: drafts (the
     reviews they are assigned) and mine (their own review waiting on them)."""
-    today = _today()
-    open_draft = ("FROM rv_reviews r JOIN rv_cycles c ON c.id = r.cycle_id "
-                  "WHERE c.status='open' AND r.status='draft' ")
+    if kind != "operator":
+        return {"drafts": sum(1 for r in reviews_for_reviewer(leader_id, name) if r["editable"]),
+                "mine": sum(1 for r in reviews_for_leader(leader_id, name) if waiting_for_leader(r))}
+    open_cycle = "FROM rv_reviews r JOIN rv_cycles c ON c.id = r.cycle_id WHERE c.status='open' "
     with closing(people_db.connect()) as conn:
-        if kind == "operator":
-            return {
-                "on_hold": conn.execute(
-                    "SELECT COUNT(*) FROM rv_reviews r JOIN rv_cycles c ON c.id = r.cycle_id "
-                    "WHERE c.status='open' AND r.status='on_hold'").fetchone()[0],
-                "past_due": conn.execute("SELECT COUNT(*) " + open_draft + "AND c.due_date < ?",
-                                         (today,)).fetchone()[0],
-                "drafts": conn.execute("SELECT COUNT(*) " + open_draft
-                                       + "AND r.reviewer_leader_id IS NULL").fetchone()[0],
-            }
-    drafts = sum(1 for r in reviews_for_reviewer(leader_id, name) if r["editable"])
-    mine = sum(1 for r in reviews_for_leader(leader_id, name) if waiting_for_leader(r))
-    return {"drafts": drafts, "mine": mine}
+        def count(where: str, *args) -> int:
+            return conn.execute("SELECT COUNT(*) " + open_cycle + where, args).fetchone()[0]
+
+        return {"on_hold": count("AND r.status='on_hold'"),
+                "past_due": count("AND r.status='draft' AND c.due_date < ?", _today()),
+                "drafts": count("AND r.status='draft' AND r.reviewer_leader_id IS NULL")}
 
 
 # ---------------------------------------------------------------------------

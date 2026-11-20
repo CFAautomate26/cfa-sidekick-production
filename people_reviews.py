@@ -131,7 +131,7 @@ def home():
                       and r["status"] in ("draft", "final")],
             past_due=sum(1 for r in open_reviews if r["editable"] and r["due_date"] < today),
             assigned=[], has_model=bool(people_db.active_model()),
-            n_people=len(rdb.subjects()), default_start=today, reviewer_label=_reviewer_label)
+            n_people=len(rdb.subjects()), reviewer_label=_reviewer_label)
     reviews = rdb.reviews_for_reviewer(who.leader_id, who.name)
     return render_template(
         "people/reviews/home.html", today=today, cycles=[], held=[], concerns=[],
@@ -165,16 +165,15 @@ def leaders():
             people_db.same_person(c["id"], c["name"], row["reviewer_leader_id"], row["reviewer_name"])
             for c in choices))
     return render_template(
-        "people/reviews/leaders.html", rows=rows, choices=choices,
-        team=[l for l in team if l["active"]], unlinked=[l for l in team if l["active"] and l["id"] not in linked],
+        "people/reviews/leaders.html", rows=rows, choices=choices, team=team,
+        unlinked=[l for l in team if l["active"] and l["id"] not in linked],
         titles=rdb.TITLE_SUGGESTIONS, caps=rdb.CAPS)
 
 
 def _subject_fields() -> dict:
     """What an add or edit form asked for. Names always come from the
     leader's own Team Hub row, never from the form."""
-    team = shift_db.leaders()
-    leader = _leader_by_id(_form_id("leader"), team)
+    leader = _leader_by_id(_form_id("leader"), shift_db.leaders(include_inactive=True))
     reviewer = _leader_by_id(_form_id("reviewer"), _reviewer_choices())
     typed = " ".join((request.form.get("display_name") or "").split())
     return {
@@ -200,10 +199,9 @@ def leader_add():
               "someone else." if added else "Every Team Hub leader is already on the list.")
         return redirect(url_for("people.reviews_leaders"))
     fields = _subject_fields()
-    if fields.pop("reviewer_missing") or fields.pop("leader_missing"):
+    if fields.pop("reviewer_missing") | fields.pop("leader_missing"):
         flash("That leader or reviewer isn't available any more. Check the lists and try again.")
         return redirect(url_for("people.reviews_leaders"))
-    fields.pop("leader_missing", None)
     name = fields.pop("display_name")
     subject_id, problem = rdb.add_subject(name, people.actor(), **fields)
     if problem:
@@ -215,10 +213,9 @@ def leader_add():
 
 def leader_edit(subject_id: int):
     fields = _subject_fields()
-    if fields.pop("reviewer_missing") or fields.pop("leader_missing"):
+    if fields.pop("reviewer_missing") | fields.pop("leader_missing"):
         flash("That leader or reviewer isn't available any more. Check the lists and try again.")
         return redirect(url_for("people.reviews_leaders") + f"#p-{subject_id}")
-    fields.pop("leader_missing", None)
     problem = rdb.update_subject(subject_id, people.actor(),
                                  active=request.form.get("active") == "1", **fields)
     flash(problem or "Saved.")
@@ -396,8 +393,11 @@ def _ai_state(review: dict, model: dict, rated: dict) -> dict:
         own = {key for key, r in rated.items() if r["level"] or r["not_enough"]}
         drafted = output.get("dimensions") or {}
         state["panels"] = {key: drafted[key] for key in own if isinstance(drafted.get(key), dict)}
-        state["checks"] = output.get("human_checks") or []
         state["all_rated"] = all(d["key"] in own for d in model["dimensions"])
+        # Checks that quote the draft's own wording wait with that wording;
+        # the rest are warnings, and show at once.
+        waiting = [] if state["all_rated"] else (output.get("draft_checks") or [])
+        state["checks"] = [line for line in output.get("human_checks") or [] if line not in waiting]
         if state["all_rated"]:
             state["strengths"] = output.get("strengths") or []
             state["growth"] = output.get("growth_areas") or []
@@ -857,12 +857,14 @@ _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 
 def _names_to_remove(found: dict) -> tuple[list[str], list[str]]:
-    """(the leader's own names, everyone else on the Team Hub roster and
-    leader list). Used only to take names out of the copy that is sent."""
+    """(the leader's own names, everyone else on the Team Hub roster, the
+    leader list and the list of leaders under review). Used only to take
+    names out of the copy that is sent."""
     own = [n for n in (found["display_name"], found["leader_name"]) if n]
     mine = {n.casefold() for n in own}
     everyone = {m["name"] for m in shift_db.roster(include_inactive=True)}
     everyone |= {l["name"] for l in shift_db.leaders(include_inactive=True)}
+    everyone |= {p["display_name"] for p in rdb.subjects(include_inactive=True)}
     return own, sorted(n for n in everyone if n and n.casefold() not in mine)
 
 
@@ -959,6 +961,7 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
         given = {d.get("key"): d for d in given if isinstance(d, dict)}
     given = given if isinstance(given, dict) else {}
     checks: list[str] = []
+    draft_checks: list[str] = []        # the checks that quote the draft's summary wording
     dimensions = {}
     for dim in payload["dimensions"]:
         entry = given.get(dim["key"]) if isinstance(given.get(dim["key"]), dict) else {}
@@ -994,7 +997,7 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
             if not cited:
                 continue                         # nothing behind it: dropped
             text, flagged = _screen(_clip(item.get("text"), 400))
-            checks.extend(_check_line(s, f) for s, f in flagged)
+            draft_checks.extend(_check_line(s, f) for s, f in flagged)
             if text:
                 out.append({"text": text, "cited": cited})
         return out[:3]
@@ -1003,9 +1006,11 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
     questions = []
     for value in raw.get("coaching_questions") if isinstance(raw.get("coaching_questions"), list) else []:
         text, flagged = _screen(_clip(value, 240))
-        checks.extend(_check_line(s, f) for s, f in flagged)
+        draft_checks.extend(_check_line(s, f) for s, f in flagged)
         if text and len(questions) < 5:
             questions.append(text)
+    draft_checks = list(dict.fromkeys(draft_checks))[:6]
+    checks.extend(draft_checks)
     for value in raw.get("human_checks") if isinstance(raw.get("human_checks"), list) else []:
         line = _clip(value, 300)
         if not line:
@@ -1023,7 +1028,8 @@ def _ai_validate(raw: dict, payload: dict) -> dict:
                       + ", ".join(t.lower() for t in touched)
                       + ". Make sure nothing personal or protected counts in this review.")
     return {"dimensions": dimensions, "strengths": strengths, "growth_areas": growth,
-            "coaching_questions": questions, "human_checks": list(dict.fromkeys(checks))[:12]}
+            "coaching_questions": questions, "human_checks": list(dict.fromkeys(checks))[:12],
+            "draft_checks": draft_checks}
 
 
 people_ai.register_kind(AI_KIND, _ai_build, _ai_validate)

@@ -303,6 +303,7 @@ def test_comments_that_may_raise_a_concern_flag_the_operator_and_never_stop_the_
     assert "The leader&#39;s comments may raise a concern that needs follow-up" in comments
     assert "This tool does not decide discipline, pay, hours, demotion or dismissal" in comments
     assert "I felt harassed on closes" in comments
+    assert "about you or another senior leader, or the leader is under 18, stop and call a lawyer first" in comments
     assert "Comments to follow up" in page(op, "/shift/reviews")
     # the flag is the Operator's: the reviewer sees the comments without it
     html = page(kit.open_as(world, "rae"), url(made))
@@ -360,7 +361,7 @@ def test_the_reflection_is_asked_for_written_and_sent(world, monkeypatch):
     kit.fake_ai(monkeypatch, draft_reply)
     people_db.set_setting("ai_reviews", "1", "Operator")
     body = main(page(lena, mine(made)))
-    assert "An AI tool is also given it, with names taken out" in body
+    assert "An AI tool is also given it, with your name and team members' names taken out" in body
     assert "The AI does not decide anything. A person does." in body
     assert "If the store switches on" not in body
 

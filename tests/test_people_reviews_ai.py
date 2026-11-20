@@ -243,6 +243,7 @@ def test_invented_citations_are_dropped_and_uncited_levels_are_nulled():
     empty = people_reviews._ai_validate({"dimensions": "nonsense", "strengths": 5}, payload())
     assert all(d["suggested_level"] is None and d["cited"] == [] for d in empty["dimensions"].values())
     assert empty["strengths"] == [] and empty["coaching_questions"] == [] and empty["human_checks"] == []
+    assert empty["draft_checks"] == []
     listed = people_reviews._ai_validate({"dimensions": [{"key": "reliable", "cited": [11, 12],
                                                           "suggested_level": 2, "evidence_summary": "Fine."}]},
                                          payload())
@@ -284,7 +285,12 @@ def test_flagged_sentences_move_to_the_human_checks():
     assert not any("terminate" in line for line in checks)           # a consequence is never passed on
     assert any("does not suggest discipline or dismissal" in line for line in checks)
     assert all(len(line) <= 400 for line in checks) and len(checks) <= 12
-    text = json.dumps({k: v for k, v in out.items() if k != "human_checks"}
+    # the checks that quote the draft's summary wording are marked, so the page can hold them back
+    assert out["draft_checks"] == [
+        "Check this wording (Personality labels, Origin and language): A good culture fit.",
+        "Check this wording (Consequence words): Should be given a final warning.",
+        "Check this wording (Pregnancy and family): Is your family okay?"]
+    text = json.dumps({k: v for k, v in out.items() if k not in ("human_checks", "draft_checks")}
                       | {"dimensions": {k: {**v, "checks": []} for k, v in out["dimensions"].items()}})
     for gone in ("lazy", "depressed", "culture fit", "final warning", "family"):
         assert gone not in text, gone
@@ -305,6 +311,7 @@ def test_checks_are_shown_and_a_withheld_level_says_so(world, monkeypatch):
         out = draft_reply(system, user)
         out["dimensions"]["reliable"]["evidence_summary"] = "Opened on time. Often away on sick days."
         out["human_checks"] = ["Human check needed: marked change in pattern; confirm context before rating."]
+        out["strengths"].append({"text": "Has a great attitude on closes.", "cited": out["dimensions"]["reliable"]["cited"]})
         return out
 
     kit.fake_ai(monkeypatch, reply)
@@ -314,12 +321,17 @@ def test_checks_are_shown_and_a_withheld_level_says_so(world, monkeypatch):
     rae = kit.open_as(world, "rae")
     html = post(rae, url(made, "/ai"))
     assert "Human check needed" in html and "marked change in pattern" in html      # shown straight away
+    assert "great attitude" not in html              # wording from the draft waits for her own ratings
     html = post(rae, url(made, "/rate"), {"dimension_key": "reliable", "level": "3"})
     panel = html[html.index('id="ai-reliable"'):html.index('id="d-guest-care"')]
     assert "Suggested level:</strong> none (see the checks below)" in panel
     assert "Check this wording (" in panel and "Often away on sick days." in panel
     assert "No level is suggested here" in panel
     assert rdb.ratings(made["review"])["reliable"]["ai_level"] is None
+    assert "great attitude" not in html
+    post(rae, url(made, "/rate"), {"dimension_key": "guest-care", "level": "not_enough"})
+    html = post(rae, url(made, "/rate"), {"dimension_key": "teamwork", "level": "not_enough"})
+    assert "Check this wording (Personality labels): Has a great attitude on closes." in html
 
 
 # --- while it runs, and when it fails -----------------------------------------------------

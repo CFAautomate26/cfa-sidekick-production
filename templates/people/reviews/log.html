@@ -27,6 +27,7 @@
   <label class="field" for="o-body">What did you see or hear?</label>
   <textarea id="o-body" name="body" maxlength="{{ caps.observation }}" required>{{ draft.body or '' }}</textarea>
   <p class="fine-line">Tap the microphone on your keyboard to talk instead of type. Say what happened and what it meant for guests, the team or the store.</p>
+  <p class="fine-line">Notes that count toward a review are shown to {{ subject.display_name }} with that review, as what it is based on. Write each one as something you would say to them.</p>
   <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save note</button></div>
 </form>
 {% else %}

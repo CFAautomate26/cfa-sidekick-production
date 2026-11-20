@@ -149,6 +149,25 @@ def test_a_link_that_no_longer_matches_is_flagged_for_the_operator(world):
     assert page(op, "/shift/reviews/leaders").count("Reviewer needs re-linking") == 2
 
 
+def test_a_sign_in_that_was_switched_off_stays_linked_but_is_not_offered_to_others(world):
+    ids = world["ids"]
+    subject = rk.add_subject(world, "lena", "rae")
+    shift_db.set_leader_active(ids["lena"], False)
+    op = kit.open_as(world, "operator")
+    html = page(op, "/shift/reviews/leaders")
+    assert "Needs re-linking" not in html                      # the id and name still match
+    assert html.count(f'<option value="{ids["lena"]}"') == 1   # only on her own form, already chosen
+    assert f'<option value="{ids["lena"]}" selected>Lena</option>' in html
+    post(op, f"/shift/reviews/leaders/{subject}/edit", {
+        "leader": ids["lena"], "display_name": "Lena", "title": "Supervisor", "reviewer": ids["rae"],
+        "active": "1"})
+    row = rdb.get_subject(subject)
+    assert (row["leader_id"], row["leader_name"], row["title"]) == (ids["lena"], "Lena", "Supervisor")
+    # the helper adds active sign-ins only
+    post(op, "/shift/reviews/leaders/add", {"everyone": "1"})
+    assert [r["display_name"] for r in rdb.subjects()] == ["Ada", "Hari", "Lena", "Rae"]
+
+
 # --- the observation log ----------------------------------------------------------------
 
 def test_a_reviewer_writes_and_tends_the_log(world):
@@ -157,6 +176,7 @@ def test_a_reviewer_writes_and_tends_the_log(world):
     log = f"/shift/reviews/leaders/{subject}"
     html = page(rae, log)
     assert "Tap the microphone on your keyboard to talk instead of type." in html
+    assert "Notes that count toward a review are shown to Lena with that review" in html
     assert "What to write, and what never to write" in html
     assert f'value="{shift_db.today_local()}"' in html and "No notes yet." in html
     assert 'value="reliable"' in html and "Not tied to one standard" in html

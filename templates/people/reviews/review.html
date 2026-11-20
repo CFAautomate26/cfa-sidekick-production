@@ -74,7 +74,7 @@
   <div id="leader-comments">
     <p class="subhead">The leader's comments</p>
     {% if concern %}
-    <p class="callout warm" role="status">{{ icon('alert') }}<span><strong>{{ concern }}.</strong> Read them, and talk with the leader. If they raise harassment, safety or how they were treated, it goes into the store's complaint process, not this review.</span></p>
+    <p class="callout warm" role="status">{{ icon('alert') }}<span><strong>{{ concern }}.</strong> Read them, and talk with the leader. If they raise harassment, safety or how they were treated, it goes into the store's complaint process, not this review. If they are about you or another senior leader, or the leader is under 18, stop and call a lawyer first: the store's escalation matrix says so.</span></p>
     {{ escalation('review') }}
     {% endif %}
     {% if review.ack_comment %}<p class="rv-said">{{ review.ack_comment }}</p>{% else %}<p class="rv-quiet">No comments were added.</p>{% endif %}
@@ -98,6 +98,10 @@
 </details>
 {% endif %}
 
+{% if review.editable and review.ask_reflection and linked and not reflection %}
+<p class="rv-quiet" id="reflection">{{ review.display_name }} has been asked for a reflection and has not sent one yet. You can wait for it, or carry on.</p>
+{% endif %}
+
 {% if ai.on %}
 <div class="card" id="ai">
   <span class="card-title">AI draft</span>
@@ -106,13 +110,13 @@
   {% elif ai.status == 'failed' %}
   <p class="callout tan" role="status" style="margin-top:10px;">{{ icon('alert') }}<span>The AI draft didn't finish{{ ' in time' if ai.job.error == 'timed out' }}. Your notes and ratings are untouched, and the review does not need a draft. You can try again.</span></p>
   {% elif ai.status == 'done' %}
-  <p class="card-meta">Asked for by {{ stamp(ai.job.requested_by, ai.job.requested_at) }}. The draft for a standard appears under it once your own rating for that standard is saved. It is a second read of the same notes, with names taken out. It is not a decision.</p>
+  <p class="card-meta">Asked for by {{ stamp(ai.job.requested_by, ai.job.requested_at) }}. The draft for a standard appears under it once your own rating for that standard is saved. It is a second read of the same notes, with the leader's name and team members' names taken out. It is not a decision.</p>
   {% if ai.checks %}
   <p class="subhead">Human check needed</p>
   <ul class="rv-flag">{% for line in ai.checks %}<li>{{ line }}</li>{% endfor %}</ul>
   {% endif %}
   {% else %}
-  <p class="card-meta">An AI tool can read the notes for this period, with names taken out, and prepare a draft for you to check. It never sees your ratings. Rate each standard yourself first: the draft for a standard appears only after your own rating is saved.</p>
+  <p class="card-meta">An AI tool can read the notes for this period, with the leader's name and team members' names taken out, and prepare a draft for you to check. Leave guests' names out of your notes. It never sees your ratings. Rate each standard yourself first: the draft for a standard appears only after your own rating is saved.</p>
   {% endif %}
   {% if review.editable and ai.status != 'running' %}
   <form method="post" action="{{ url_for('people.reviews_ai', review_id=review.id) }}" class="btnrow no-print">
