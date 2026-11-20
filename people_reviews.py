@@ -173,6 +173,10 @@ def leaders():
         row["reviewer_ok"] = (row["reviewer_leader_id"] is None or any(
             people_db.same_person(c["id"], c["name"], row["reviewer_leader_id"], row["reviewer_name"])
             for c in choices))
+        # A two-letter name ("Jo") can only be told from an ordinary word by its capital.
+        row["short_name"] = next((part for name in (row["display_name"], row["leader_name"] or "")
+                                  for part in name.replace("-", " ").split()
+                                  if len(part) == 2 and part.isalpha()), "")
     return render_template(
         "people/reviews/leaders.html", rows=rows, choices=choices, team=team,
         unlinked=[l for l in team if l["active"] and l["id"] not in linked],
@@ -689,7 +693,9 @@ def ai_draft(review_id: int):
 def _for_the_leader(found: dict, model: dict) -> dict:
     """The review as the leader reads it, built field by field so that
     nothing else can ride along: no AI output, no draft state, no "before
-    you finish" answers, no calibration history."""
+    you finish" answers, and of calibration only the plain fact that the
+    Operator set a level (so the page never says the reviewer chose a level
+    they did not choose)."""
     rated = rdb.ratings(found["id"])
     by_key, loose = _evidence_by_standard(found, model)
 
@@ -708,6 +714,8 @@ def _for_the_leader(found: dict, model: dict) -> dict:
                 "level": level, "level_name": model["levels"][level - 1] if level else "",
                 "anchor": dim["anchors"][level - 1] if level else "",
                 "not_enough": bool(row.get("not_enough")), "comment": row.get("comment") or "",
+                # only that the Operator set it: never the reason or the level before
+                "set_by_operator": bool(row.get("cal_at")),
                 "evidence": notes(by_key[dim["key"]])})
         groups.append({"name": group["name"], "dimensions": dims})
     return {
@@ -861,9 +869,12 @@ def calibration_change(cycle_id: int):
     if problem:
         flash(problem)
     elif people_ai.language_check(hub_text.clean(reason)):
-        flash("Level changed. Read your reason again: it uses wording that is best kept out of reviews.")
+        flash("Level changed. Read your reason again: it uses wording that is best kept out of reviews. "
+              "The reviewer's comment for that standard was written for the level before: read it "
+              "before you share the review.")
     else:
-        flash("Level changed. The reason is kept with the review.")
+        flash("Level changed. The reason is kept with the review. The reviewer's comment for that "
+              "standard was written for the level before: read it before you share the review.")
     return back
 
 

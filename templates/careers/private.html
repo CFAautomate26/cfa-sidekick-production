@@ -36,6 +36,8 @@
   <p class="cr-status">We have your application for {{ mine.title }}, received {{ mine.created_at|pp_day }}.</p>
   {% if mine.decision == 'made' %}
   <p class="cr-status">A hiring decision has been made for this posting.</p>
+  {% elif mine.decision == 'closed' %}
+  <p class="cr-status">We will not be moving forward with your application.</p>
   {% elif mine.decision == 'pending' %}
   <p class="cr-status">A hiring decision has not yet been made for this posting.</p>
   {% endif %}

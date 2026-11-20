@@ -98,8 +98,7 @@ def test_the_ai_statement_appears_only_when_ai_assist_is_on_for_the_posting(worl
     posting_id = live_with_ai(monkeypatch, title="Kitchen team")  # switched on while it was a draft
     statement = ("We use artificial intelligence (AI) to help assess applications for this position. "
                  "The AI tool compares your written answers with the job-related criteria in this posting "
-                 "and suggests a score. A member of our leadership team reads every application and makes "
-                 "every decision.")
+                 "and suggests a score. A member of our leadership team makes every decision.")
     posting = text(public.get("/careers/kitchen-team"))
     assert statement in posting
     assert posting.index("This posting is for an existing vacancy.") < posting.index(statement) \
@@ -388,6 +387,7 @@ def test_status_wording_follows_the_notice_and_never_shows_what_leaders_wrote(wo
     hdb.add_note(app_id, "Private leader note.", "Hari")
     hdb.move_stage(app_id, "new", "interview", "Hari")
     hdb.add_interview(app_id, "2026-11-01", "", "phone", "Hari", "Hari")
+    hdb.set_interview_outcome(hdb.interviews(app_id)[0]["id"], app_id, "attended", "Hari")
     hdb.log_notice(app_id, "no-decision-yet", "email", "Internal wording of the notice.", "2026-11-01", "Hari")
     page = text(public.get(f"/careers/a/{token}"))
     assert "A hiring decision has not yet been made for this posting." in page

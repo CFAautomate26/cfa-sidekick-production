@@ -574,12 +574,12 @@ def test_c7_a_wage_change_that_breaks_a_live_posting_is_said_at_once(world):
     posting_id = live(pay_min="16.90", student_rate="1")
     fine = live(title="Kitchen team", pay_min="19.00", pay_max="21.00")
     operator, hari = kit.open_as(world, "operator"), kit.open_as(world, "hari")
-    assert people_hiring.extra_counts("operator", None, "Operator") == {"attention": 0}
+    assert people_hiring.extra_counts("operator", None, "Operator")["attention"] == 0
     operator.post("/shift/people/settings", data={"min_wage_general": "18.40", "min_wage_student": "17.35"})
     said = " ".join(flashed(operator))
     assert "1 live posting no longer passes the publish check after this change: “Team member”." in said
     assert "Kitchen team" not in said
-    assert people_hiring.extra_counts("leader", world["ids"]["hari"], "Hari") == {"attention": 1}
+    assert people_hiring.extra_counts("leader", world["ids"]["hari"], "Hari")["attention"] == 1
     assert people_hiring.extra_counts("leader", world["ids"]["lena"], "Lena") == {}
     for client in (operator, hari):
         home = page(client, "/shift/people")
@@ -736,3 +736,422 @@ def test_c9_answers_given_another_way_are_entered_and_scored_like_any_others(wor
     hari.post(f"/shift/hiring/candidates/{app_id}/answers", data={f"q_{first}": "Changed."})
     assert len(table("hr_answers")) == 2 and "Changed." not in [a["body"] for a in table("hr_answers")]
     assert f'name="q_{first}"' not in text(public.get(f"/careers/a/{token}"))
+
+
+# --- F6: the lock is kept on the server, so a copied cookie stops working ----------------------
+
+def copied_cookie(client) -> str:
+    return client.get_cookie("session").value
+
+
+def with_cookie(value: str):
+    thief = cfa_app.app.test_client()
+    thief.set_cookie("session", value)
+    return thief
+
+
+def test_f6_a_cookie_copied_while_unlocked_is_refused_after_lock_now(world):
+    operator = kit.open_as(world, "operator")
+    assert operator.get("/shift/people/backup").status_code == 200
+    taken = copied_cookie(operator)
+    assert with_cookie(taken).get("/shift/people/backup").status_code == 200     # it works while unlocked
+    operator.post("/shift/people/lock")
+    resp = with_cookie(taken).get("/shift/people/backup")
+    assert resp.status_code == 302 and "/shift/people/unlock" in resp.headers["Location"]
+    assert with_cookie(taken).post("/shift/people/backup").status_code == 302    # and no download
+
+
+@pytest.mark.parametrize("path, form", [("/shift/logout", {}), ("/hub/logout", {}),
+                                        ("/shift/login", {"name": "Lena", "pin": "1111"})])
+def test_f6_signing_out_or_in_as_someone_else_closes_the_lock_for_a_copied_cookie(world, path, form):
+    operator = kit.open_as(world, "operator")
+    taken = copied_cookie(operator)
+    operator.post(path, data=form)
+    resp = with_cookie(taken).get("/shift/people/backup")
+    assert resp.status_code == 302 and "/shift/people/unlock" in resp.headers["Location"]
+    with people_db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM unlocks").fetchone()[0] == 0
+
+
+def test_f6_the_pin_is_asked_for_again_after_eight_hours_however_busy(world, monkeypatch):
+    clock(monkeypatch, "2026-11-20 08:00")
+    hari = kit.open_as(world, "hari")
+    minutes = 25                                                       # a tap every 25 minutes, all day
+    while minutes < 8 * 60:
+        clock(monkeypatch, f"2026-11-20 {8 + minutes // 60:02d}:{minutes % 60:02d}")
+        assert hari.get("/shift/people").status_code == 200, minutes
+        minutes += 25
+    clock(monkeypatch, f"2026-11-20 {8 + minutes // 60:02d}:{minutes % 60:02d}")   # 16:20: past eight hours
+    assert hari.get("/shift/people").status_code == 302
+    assert people.UNLOCK_MAX_HOURS == 8
+    assert "8 hours after you last entered it" in hari.get("/shift/people/unlock").data.decode()
+
+
+def test_f6_the_lock_table_holds_no_cookie_value_and_is_not_in_the_backup(world):
+    operator = kit.open_as(world, "operator")
+    with operator.session_transaction() as sess:
+        unlock_id = sess["people_unlock_id"]
+    with people_db.connect() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM unlocks")]
+    assert len(rows) == 1 and rows[0]["identity"] == "op" and unlock_id not in json.dumps(rows)
+    assert "unlocks" not in json.loads(people_db.export_json("Operator"))["tables"]
+    # someone else's unlock id on this sign-in opens nothing, and is thrown away
+    lena = kit.open_as(world, "lena")
+    with lena.session_transaction() as sess:
+        sess["people_unlock_id"] = unlock_id
+        sess["people_unlock_for"] = f"l:{world['ids']['lena']}"
+    assert lena.get("/shift/people").status_code == 302
+    assert operator.get("/shift/people").status_code == 302            # removed for everyone holding it
+
+
+# --- F7: nobody on the sign-in page can shut a leader out of People ----------------------------
+
+def test_f7_wrong_pins_at_sign_in_do_not_hold_the_people_lock(world):
+    operator = cfa_app.app.test_client()
+    kit.sign_in(operator, "operator")
+    stranger = cfa_app.app.test_client()
+    for _ in range(6):
+        stranger.post("/shift/login", data={"name": "Operator", "pin": "0000"})
+    assert stranger.post("/shift/login", data={"name": "Operator", "pin": "9999"}).status_code == 401
+    kit.unlock(operator, "operator")                                   # the right PIN still opens People
+    assert operator.get("/shift/people").status_code == 200
+    # a name typed at sign-in can never be made to look like the lock's own count
+    for _ in range(6):
+        stranger.post("/shift/login", data={"name": "op", "pin": "0000"})
+        stranger.post("/shift/login", data={"name": "people-unlock:op", "pin": "0000"})
+    operator.post("/shift/people/lock")
+    kit.unlock(operator, "operator")
+
+
+# --- F9: no page title carries a person's name -------------------------------------------------
+
+def test_f9_page_titles_never_name_an_applicant_or_a_leader(world, monkeypatch):
+    made = rk.shared_review(world)
+    posting_id = live()
+    app_id = applied(posting_id, first_name="Jordan", last_name="Quillfeather")
+    operator, lena = kit.open_as(world, "operator"), kit.open_as(world, "lena")
+    draft_review = rk.one_review(world, "ada", None, name="Second cycle")
+    pages = {operator: [f"/shift/hiring/candidates/{app_id}", f"/shift/hiring/candidates/{app_id}/contact",
+                        f"/shift/reviews/review/{made['review']}", f"/shift/reviews/review/{made['review']}/print",
+                        f"/shift/reviews/review/{draft_review['review']}",
+                        f"/shift/reviews/review/{draft_review['review']}/finalise",
+                        f"/shift/reviews/leaders/{made['subject']}", "/shift/hiring/", "/shift/reviews"],
+             lena: [f"/shift/reviews/mine/{made['review']}", f"/shift/reviews/review/{made['review']}/print"]}
+    seen = []
+    for client, paths in pages.items():
+        for path in paths:
+            title = re.search(r"<title>(.*?)</title>", page(client, path), re.S).group(1)
+            seen.append(title)
+            for name in ("Jordan", "Quillfeather", "Lena", "Ada"):
+                assert name not in title, (path, title)
+    assert {"Candidate · Team Hub", "Contact and offer checks · Team Hub", "Leader review · Team Hub",
+            "Finish review · Team Hub", "Observation log · Team Hub", "Review print view · Team Hub"} <= set(seen)
+
+
+# --- F11: an error on a careers page never puts a private link in the log ----------------------
+
+def test_f11_a_failing_private_page_is_answered_without_logging_its_address(world, public, monkeypatch, capsys, caplog):
+    live()
+    token = re.search(r"[0-9a-f]{32}", send(public).headers["Location"]).group(0)
+
+    def broken(_token):
+        raise RuntimeError(f"database is locked while reading {_token}")
+
+    monkeypatch.setattr(hdb, "application_by_token", broken)
+    monkeypatch.setitem(cfa_app.app.config, "PROPAGATE_EXCEPTIONS", False)     # as on the live server
+    with caplog.at_level("DEBUG"):
+        resp = public.get(f"/careers/a/{token}")
+    assert resp.status_code == 500 and "Something went wrong on our side" in text(resp)
+    assert resp.headers["Cache-Control"] == "private, no-store" and "Set-Cookie" not in resp.headers
+    printed = capsys.readouterr()
+    logged = printed.out + printed.err + caplog.text
+    assert token not in logged and "/careers/a/" not in logged and "database is locked" not in logged
+    assert "ERROR: People careers page failed: RuntimeError" in printed.out
+
+
+# --- F13: People needs a real session key in production ----------------------------------------
+
+def test_f13_people_does_not_load_in_production_on_a_derived_session_key():
+    strong = "k" * 40
+    assert people.session_key_problem({"ENV": "test"}) is None
+    assert people.session_key_problem({"ENV": "production", "FLASK_SECRET_KEY": strong}) is None
+    assert people.session_key_problem({"FLASK_SECRET_KEY": f"  {strong} "}) is None
+    for environ in ({}, {"ENV": "production"}, {"ENV": "Production", "FLASK_SECRET_KEY": " "},
+                    {"ENV": "live", "SCHEDULE_SECRET": "s", "SHIFT_ADMIN_PIN": "9999"},
+                    {"ENV": "production", "FLASK_SECRET_KEY": "short"}):
+        problem = people.session_key_problem(environ)
+        assert problem and "FLASK_SECRET_KEY" in problem and "NOT loaded" in problem, environ
+    source = open("app.py", encoding="utf-8").read()
+    block = source[source.index("from people import"):source.index('print("People registered at /shift/people")')]
+    assert "session_key_problem(os.environ)" in block
+    assert block.index("session_key_problem(os.environ)") < block.index("app.register_blueprint(people_bp)")
+    # and the sign-in cookie is marked for HTTPS only, except where ENV says this is not the live store
+    assert 'app.config["SESSION_COOKIE_SECURE"]' in source
+    assert cfa_app.app.config["SESSION_COOKIE_SECURE"] is False        # ENV is "test" here
+    assert "people" in cfa_app.app.blueprints
+
+
+# --- C10: the three-year copy of a decision notice ---------------------------------------------
+
+def notice_world(monkeypatch):
+    clock(monkeypatch, "2026-09-01 10:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    hdb.add_interview(app_id, "2026-09-01", "", "phone", "Hari", "Hari")
+    hdb.set_interview_outcome(hdb.interviews(app_id)[0]["id"], app_id, "attended", "Hari")
+    hdb.move_stage(app_id, "new", "not-selected", "Hari", reason="Position filled")
+    clock(monkeypatch, "2026-09-03 10:00")
+    assert hdb.log_notice(app_id, "not-moving-forward", "email", "We will not be moving forward.",
+                          "2026-09-03", "Hari") is None
+    clock(monkeypatch, "2028-09-10 10:00")                            # 24 months on: details removed
+    assert hdb.purge_all("Operator") == (1, 0)
+    return app_id
+
+
+def test_c10_a_notice_is_kept_through_its_third_anniversary_and_the_run_reports_what_it_removed(world, monkeypatch):
+    app_id = notice_world(monkeypatch)
+    operator = kit.open_as(world, "operator")
+    clock(monkeypatch, "2029-09-03 10:00")                            # three years to the day
+    operator = kit.open_as(world, "operator")
+    operator.post("/shift/hiring/retention/purge", data={"confirm": "1"})
+    assert "Nothing was due to be removed." in flashed(operator)
+    assert hdb.notices(app_id)[0]["said"] == "We will not be moving forward."
+    clock(monkeypatch, "2029-09-04 10:00")
+    operator = kit.open_as(world, "operator")
+    operator.post("/shift/hiring/retention/purge", data={"confirm": "1"})
+    assert "Removed the wording of 1 decision notice more than three years old." in flashed(operator)
+    assert (hdb.notices(app_id)[0]["said"], hdb.notices(app_id)[0]["given_to"]) == ("", "")
+    details = [r["detail"] for r in people_db.audit_feed() if r["action"] == "applications purged"]
+    assert details[0] == "0 applications, 1 old notices" and "0 applications" in details
+
+
+def test_c10_a_hold_keeps_the_wording_of_a_notice_even_after_the_details_are_gone(world, monkeypatch):
+    app_id = notice_world(monkeypatch)
+    hari = kit.open_as(world, "hari")
+    contact = page(hari, f"/shift/hiring/candidates/{app_id}/contact")
+    assert "Their details have been removed." in contact and "Hold: do not delete" in contact
+    hari.post(f"/shift/hiring/candidates/{app_id}/hold", data={"on": "1"})
+    assert hdb.candidate(app_id)["hold"] == 1
+    clock(monkeypatch, "2030-01-01 10:00")
+    assert hdb.purge_all("Operator") == (0, 0)
+    assert hdb.notices(app_id)[0]["said"] == "We will not be moving forward."
+    hdb.set_hold(app_id, False, "Operator")
+    assert hdb.purge_all("Operator") == (0, 1)
+
+
+# --- C11: someone told "not yet" is not forgotten ----------------------------------------------
+
+def test_c11_an_applicant_told_no_decision_yet_stays_listed_until_they_are_told_the_decision(world, monkeypatch):
+    clock(monkeypatch, "2026-09-01 10:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    hdb.move_stage(app_id, "new", "interview", "Hari")
+    hdb.add_interview(app_id, "2026-09-01", "", "phone", "Hari", "Hari")
+    hdb.set_interview_outcome(hdb.interviews(app_id)[0]["id"], app_id, "attended", "Hari")
+    assert hdb.log_notice(app_id, "no-decision-yet", "email", "No decision yet.", "2026-09-01", "Hari") is None
+    board = hdb.notice_board()
+    assert board["owed"] == [] and [(f["application_id"], f["decided"]) for f in board["follow_up"]] == [
+        (app_id, False)]
+    assert hdb.notices_to_follow_up() == 0                            # nothing to tell them yet
+    clock(monkeypatch, "2027-03-01 10:00")                            # months later it is still on the list
+    hari = kit.open_as(world, "hari")
+    html = page(hari, "/shift/hiring/notices")
+    assert "Told “not yet”: follow up when decided" in html and "Waiting on a decision" in html
+    assert "Whether the law requires that second notice is not settled, so we send one." in html
+    hdb.move_stage(app_id, "interview", "not-selected", "Hari", reason="Position filled")
+    assert hdb.notices_to_follow_up() == 1
+    assert people_hiring.extra_counts("leader", world["ids"]["hari"], "Hari")["notices_follow_up"] == 1
+    assert "Decided: tell them" in page(hari, "/shift/hiring/notices")
+    assert "1 person was told “no decision yet”, and a decision has since been made." in page(hari, "/shift/hiring/")
+    assert "1 to tell" in page(hari, "/shift/more")
+    assert hdb.log_notice(app_id, "not-moving-forward", "email", "We will not be moving forward.",
+                          "2027-03-01", "Hari") is None
+    assert hdb.notice_board()["follow_up"] == [] and hdb.notices_to_follow_up() == 0
+    assert "follow up when decided" not in page(hari, "/shift/hiring/notices")
+
+
+# --- C12: interviews that were held stay on the record -----------------------------------------
+
+def test_c12_an_interview_held_before_the_decision_was_recorded_can_still_be_logged(world, monkeypatch):
+    clock(monkeypatch, "2026-10-01 10:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    hdb.move_stage(app_id, "new", "not-selected", "Hari", reason="Position filled")
+    hari = kit.open_as(world, "hari")
+    assert "One that was held and never logged." in page(hari, f"/shift/hiring/candidates/{app_id}")
+    hari.post(f"/shift/hiring/candidates/{app_id}/interview", data={"on_date": "2026-10-02", "mode": "phone"})
+    assert any("only an interview that has already been held" in m for m in flashed(hari))
+    hari.post(f"/shift/hiring/candidates/{app_id}/interview", data={"on_date": "2026-09-28", "mode": "phone"})
+    interview = hdb.interviews(app_id)[0]
+    hari.post(f"/shift/hiring/candidates/{app_id}/interviews/{interview['id']}/outcome", data={"outcome": "attended"})
+    assert [c["deadline"] for c in hdb.clocks_for(app_id)] == ["2026-11-12"]
+    assert [o["application_id"] for o in hdb.notice_board()["owed"]] == [app_id]
+
+
+def test_c12_an_attended_interview_is_not_quietly_changed_while_its_notice_is_owed(world, monkeypatch):
+    clock(monkeypatch, "2026-09-01 10:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    hdb.add_interview(app_id, "2026-09-01", "", "phone", "Hari", "Hari")
+    interview = hdb.interviews(app_id)[0]["id"]
+    assert hdb.set_interview_outcome(interview, app_id, "attended", "Hari") is None
+    hari, operator = kit.open_as(world, "hari"), kit.open_as(world, "operator")
+    url = f"/shift/hiring/candidates/{app_id}/interviews/{interview}/outcome"
+    assert 'name="not_held"' in page(hari, f"/shift/hiring/candidates/{app_id}")
+    hari.post(url, data={"outcome": "cancelled"})
+    assert any("owed a decision notice by October 16, 2026" in m and "Tick the box" in m for m in flashed(hari))
+    assert hdb.interviews(app_id)[0]["outcome"] == "attended" and len(hdb.notice_board()["owed"]) == 1
+    clock(monkeypatch, "2026-10-20 10:00")                            # the notice is overdue now
+    hari = kit.open_as(world, "hari")
+    hari.post(url, data={"outcome": "cancelled", "not_held": "1"})
+    assert hdb.NOTICE_OVERDUE_OPERATOR in flashed(hari)
+    assert hdb.interviews(app_id)[0]["outcome"] == "attended" and len(hdb.notice_board()["owed"]) == 1
+    operator = kit.open_as(world, "operator")
+    operator.post(url, data={"outcome": "cancelled"})                  # the Operator needs the tick too
+    assert hdb.interviews(app_id)[0]["outcome"] == "attended"
+    operator.post(url, data={"outcome": "cancelled", "not_held": "1"})
+    assert hdb.interviews(app_id)[0]["outcome"] == "cancelled" and hdb.notice_board()["owed"] == []
+    # once the applicant has been told, there is no notice to lose and no tick is asked for
+    other = applied(posting_id, 2)
+    hdb.add_interview(other, "2026-10-19", "", "phone", "Hari", "Hari")
+    second = hdb.interviews(other)[0]["id"]
+    hdb.set_interview_outcome(second, other, "attended", "Hari")
+    hdb.log_notice(other, "no-decision-yet", "email", "Not yet.", "2026-10-20", "Hari")
+    assert hdb.set_interview_outcome(second, other, "rescheduled", "Hari") is None
+
+
+# --- C13: a level the Operator set is not presented as the reviewer's choice -------------------
+
+def test_c13_a_calibrated_level_says_who_set_it_and_nothing_more(world):
+    made = rk.one_review(world)
+    rdb.save_rating(made["review"], "reliable", 2, False, "Late handover on the 5th.", "Rae")
+    rdb.save_rating(made["review"], "guest-care", 3, False, "Seen on shift.", "Rae")
+    rdb.save_rating(made["review"], "teamwork", 3, False, "", "Rae")
+    assert rk.finalise(made["review"]) == "final"
+    operator = kit.open_as(world, "operator")
+    html = post(operator, f"/shift/reviews/calibration/{made['cycle']}/change",
+                {"review_id": made["review"], "dimension_key": "reliable", "level": "3",
+                 "reason": "Evened out across reviewers after reading every review."})
+    assert "was written for the level before: read it before you share the review." in html
+    assert rdb.share(made["review"], "Operator")
+    mine = page(kit.open_as(world, "lena"), f"/shift/reviews/mine/{made['review']}")
+    assert "the level your reviewer chose" not in mine and "the level chosen for it" in mine
+    reliable = mine[mine.index('id="d-reliable"'):mine.index('id="d-guest-care"')]
+    assert "This level was set by the Operator after reading all the reviews together." in reliable
+    assert "Your reviewer's comment below was written before that." in reliable
+    rest = mine[mine.index('id="d-guest-care"'):]
+    assert "set by the Operator" not in rest
+    for hidden in ("Evened out across reviewers", "calibration", "Developing"):   # no reason, no earlier level
+        assert hidden not in mine, hidden
+    printed = page(kit.open_as(world, "lena"), f"/shift/reviews/review/{made['review']}/print")
+    assert "This level was set by the Operator" in printed and "Evened out" not in printed
+
+
+# --- C14: the minimum wage figures are dated -----------------------------------------------------
+
+def test_c14_the_wage_figures_show_when_they_were_checked_and_ask_again_after_october_first(world, monkeypatch):
+    clock(monkeypatch, "2026-11-20 10:00")
+    assert people_db.wages_to_check() == []                            # the shipped figures are this year's
+    operator = kit.open_as(world, "operator")
+    html = page(operator, "/shift/people/settings")
+    card = html[html.index('id="wages"'):html.index('id="lock"')]
+    assert card.count("Not confirmed here yet.") == 2 and card.count("Still correct today") == 2
+    assert "Check these figures on ontario.ca" not in card
+    clock(monkeypatch, "2027-10-01 10:00")                            # the rates change today
+    assert people_db.wages_to_check() == ["min_wage_general", "min_wage_student"]
+    operator = kit.open_as(world, "operator")
+    assert "Check these figures on ontario.ca." in page(operator, "/shift/people/settings")
+    assert "Check the minimum wage figures." in page(operator, "/shift/people")
+    posting_id = draft()
+    assert "were last confirmed before the most recent October 1" in page(
+        operator, f"/shift/hiring/postings/{posting_id}")
+    assert "Check the minimum wage figures." not in page(kit.open_as(world, "hari"), "/shift/people")
+    # one is confirmed as it stands, the other is changed: both count as checked
+    operator.post("/shift/people/settings/confirm", data={"key": "min_wage_student"})
+    assert "Confirmed as correct today." in flashed(operator)
+    assert people_db.wages_to_check() == ["min_wage_general"]
+    operator.post("/shift/people/settings", data={"min_wage_general": "18.40"})
+    assert people_db.wages_to_check() == []
+    html = page(operator, "/shift/people/settings")
+    assert html.count("Last confirmed by Operator") == 2 and "Check the minimum wage" not in page(operator, "/shift/people")
+    assert [(r["action"], r["detail"]) for r in people_db.audit_feed()
+            if r["action"] == "setting confirmed"] == [("setting confirmed", "min_wage_student = 16.90")]
+    operator.post("/shift/people/settings/confirm", data={"key": "lock_minutes"})
+    assert "That figure can't be confirmed here." in flashed(operator)
+    assert not people_db.confirm_setting("ai_hiring", "Operator")
+
+
+def test_c14_lowering_a_wage_figure_needs_a_tick(world):
+    operator = kit.open_as(world, "operator")
+    operator.post("/shift/people/settings", data={"min_wage_general": "7.95", "min_wage_student": "16.90",
+                                                   "quick_link_days": "9"})
+    said = flashed(operator)
+    assert people.WAGE_LOWER_NEEDS_TICK in said and "Everything else was saved." in said
+    assert people_db.get_setting("min_wage_general") == "17.95" and people_db.get_setting("quick_link_days") == "9"
+    assert 'name="confirm_lower"' in page(operator, "/shift/people/settings")
+    operator.post("/shift/people/settings", data={"min_wage_general": "17.60", "confirm_lower": "1"})
+    assert people_db.get_setting("min_wage_general") == "17.60"
+    operator.post("/shift/people/settings", data={"min_wage_general": "18.10"})   # raising needs no tick
+    assert people_db.get_setting("min_wage_general") == "18.10"
+
+
+# --- C15: a rate below the general minimum is never printed bare -------------------------------
+
+def test_c15_the_student_rate_is_labelled_on_the_list_and_on_the_form(world, public):
+    live(pay_min="16.90", student_rate="1")
+    live(title="Kitchen team")
+    listing = text(public.get("/careers/"))
+    assert "Part-time · $16.90 (student rate) to $19.50 an hour" in listing
+    assert "Part-time · $17.95 to $19.50 an hour" in listing            # no label where there is no student rate
+    form = text(public.get("/careers/team-member/apply"))
+    assert "$16.90 (student rate) to $19.50 an hour" in form
+    assert "(student rate)" not in text(public.get("/careers/kitchen-team/apply"))
+    posting = text(public.get("/careers/team-member"))
+    assert "The lower rate is Ontario&#39;s student minimum wage" in posting      # the full sentence is here
+
+
+# --- C16: "a hiring decision has been made" only where that is known ---------------------------
+
+def test_c16_someone_never_interviewed_is_told_only_about_their_own_application(world, public):
+    posting_id = live()
+    token = re.search(r"[0-9a-f]{32}", send(public).headers["Location"]).group(0)
+    app_id = table("hr_applications")[0]["id"]
+    first = hdb.get_posting(posting_id)["criteria"][0]["id"]
+    hdb.save_answers(app_id, {first: "I opened the stand every Saturday."})
+    assert hdb.log_notice(app_id, "not-moving-forward", "email", "We will not be moving forward.",
+                          shift_db.now_local().date().isoformat(), "Hari") is None
+    status = text(public.get(f"/careers/a/{token}"))
+    assert "We will not be moving forward with your application." in status
+    assert "A hiring decision has been made for this posting." not in status
+    assert hdb.get_posting(posting_id)["status"] == "open"            # the posting is still open
+
+
+# --- C17: the tool says only what it does ------------------------------------------------------
+
+def test_c17_the_ai_statement_and_the_notices_page_promise_only_what_is_built(world, monkeypatch):
+    assert hdb.AI_STATEMENT.endswith("A member of our leadership team makes every decision.")
+    assert "reads every application" not in hdb.AI_STATEMENT
+    # the legal reference quotes the statement exactly as the tool prints it
+    reference = " ".join(open("docs/legal-counsel/hiring-and-leader-reviews.md", encoding="utf-8").read().split())
+    assert hdb.AI_STATEMENT in reference
+    assert "reads every application and makes every decision" not in reference
+    # the 30-day aim the Notices page talks about is marked on the list
+    clock(monkeypatch, "2026-09-01 10:00")
+    posting_id = live()
+    app_id = applied(posting_id)
+    hdb.add_interview(app_id, "2026-09-01", "", "phone", "Hari", "Hari")
+    hdb.set_interview_outcome(hdb.interviews(app_id)[0]["id"], app_id, "attended", "Hari")
+    clock(monkeypatch, "2026-10-01 10:00")                            # day 30
+    assert hdb.notice_board()["owed"][0]["past_aim"] is False
+    clock(monkeypatch, "2026-10-02 10:00")                            # day 31
+    assert hdb.notice_board()["owed"][0]["past_aim"] is True
+    html = page(kit.open_as(world, "hari"), "/shift/hiring/notices")
+    assert "we aim to tell everyone within 30 days (the list marks anyone past that)" in html
+    assert "Past our 30-day aim" in html
+
+
+def test_f8_the_leaders_page_says_when_a_name_is_too_short_to_spot_without_its_capital(world):
+    rk.add_subject(world, "lena", "rae", display_name="Jo S.")
+    rk.add_subject(world, "ada", None)
+    html = page(kit.open_as(world, "operator"), "/shift/reviews/leaders")
+    assert html.count("A short name:") == 1 and "“Jo” is taken out only where it is written with its capital" in html

@@ -13,7 +13,7 @@
 
 <div class="card">
   <span class="card-title">How to read this</span>
-  <p class="card-meta">A review is a starting point for a conversation, not a final word. Each standard shows the level your reviewer chose, what that level looks like, and the notes it is based on. Read it, talk it through with {{ 'the Operator' if r.reviewer == 'The Operator' else r.reviewer }}, and add your own comments at the bottom.</p>
+  <p class="card-meta">A review is a starting point for a conversation, not a final word. Each standard shows the level chosen for it, what that level looks like, and the notes it is based on. Read it, talk it through with {{ 'the Operator' if r.reviewer == 'The Operator' else r.reviewer }}, and add your own comments at the bottom.</p>
   <p class="card-meta">Reading your review and talking it through counts as paid time. Need it in another format, such as large print? Ask the Operator.</p>
   <div class="btnrow no-print"><a class="btn btn-secondary sm" href="{{ url_for('people.reviews_print', review_id=r.id) }}">{{ icon('file') }}Print view</a></div>
 </div>

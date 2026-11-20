@@ -20,6 +20,9 @@
 <p class="callout warm" style="margin-top:12px;">{{ icon('clock') }}<span><strong>{{ retention_due }} application{{ ' is' if retention_due == 1 else 's are' }} past the time we told the applicant we would keep {{ 'it' if retention_due == 1 else 'them' }}.</strong> Nothing is removed automatically. <a class="textlink" href="{{ retention_url }}">Open Retention</a></span></p>
 {% endif %}
 
+{% if wages_to_check %}
+<p class="callout tan" style="margin-top:12px;">{{ icon('clock') }}<span><strong>Check the minimum wage figures.</strong> Ontario's minimum wage usually changes on October 1, and the figures postings are checked against were last confirmed before the most recent one. <a class="textlink" href="{{ url_for('people.settings') }}#wages">Open Settings</a></span></p>
+{% endif %}
 {% if hiring_url and counts.attention %}
 <p class="callout warm" style="margin-top:12px;">{{ icon('alert') }}<span><strong>{{ counts.attention }} live posting{{ ' no longer passes' if counts.attention == 1 else 's no longer pass' }} the publish check.</strong> {{ 'It is' if counts.attention == 1 else 'They are' }} still public and still taking applications. <a class="textlink" href="{{ hiring_url }}">Open Hiring to fix or close {{ 'it' if counts.attention == 1 else 'them' }}</a></span></p>
 {% endif %}

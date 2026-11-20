@@ -4,7 +4,7 @@
 {% extends "people/base.html" %}
 {% from "people/_ui.html" import crumbs, guidance, escalation, empty, stamp, ai_label %}
 {% from "people/hiring/_bits.html" import hiring_styles, level_picker, stage_badge %}
-{% block title %}{{ c.name }}{% endblock %}
+{% block title %}Candidate{% endblock %}
 {% block head %}{{ hiring_styles() }}
 {% if ai.status in ('queued', 'working') %}<meta http-equiv="refresh" content="6">{% endif %}
 {% endblock %}
@@ -177,6 +177,9 @@
         {% for key in ('attended', 'no-show', 'cancelled', 'rescheduled') %}<option value="{{ key }}"{{ ' selected' if talk.outcome == key }}>{{ outcome_labels[key] }}</option>{% endfor %}
       </select>
       <button class="btn btn-secondary sm" type="submit">Record</button>
+      {% if talk.outcome == 'attended' %}
+      <label class="checkline"><input type="checkbox" name="not_held" value="1"><span>This interview was not held after all. (Changing it takes the 45-day decision notice for it off the list.)</span></label>
+      {% endif %}
     </form>
     {% endif %}
     {% if talk.outcome == 'attended' and not c.purged %}
@@ -209,9 +212,10 @@
   {{ empty('No interviews logged.') }}
   {% endfor %}
 
-  {% if not c.purged and c.stage in ('new', 'screening', 'interview', 'offer') %}
+  {% if not c.purged %}
+  {% set still_open = c.stage in ('new', 'screening', 'interview', 'offer') %}
   <details class="card tool" id="add-interview">
-    <summary class="row"><span class="lead-ico">{{ icon('plus') }}</span><span class="row-main"><span class="row-title">Add an interview</span><span class="row-meta">Planned, or one that already happened.</span></span>{{ icon('chev', 'chev') }}</summary>
+    <summary class="row"><span class="lead-ico">{{ icon('plus') }}</span><span class="row-main"><span class="row-title">Add an interview</span><span class="row-meta">{{ 'Planned, or one that already happened.' if still_open else 'One that was held and never logged. It still starts the 45-day clock.' }}</span></span>{{ icon('chev', 'chev') }}</summary>
     <div class="tool-body">
       <form method="post" action="{{ url_for('people.hiring_interview', application_id=c.id) }}">
         <div class="hr-two">

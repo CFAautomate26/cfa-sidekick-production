@@ -42,6 +42,11 @@ else:
           "using a random session key; shift-app logins reset every deploy.")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# The live site is only ever served over HTTPS, so the sign-in cookie is
+# never sent over a plain connection. Set ENV to dev (or test, local) to
+# run on a plain local address.
+app.config["SESSION_COOKIE_SECURE"] = (os.getenv("ENV") or "production").strip().lower() not in (
+    "test", "testing", "dev", "development", "local")
 
 # The shift leading app must never be able to take down the GroupMe/Slack
 # webhooks: register it fault-isolated.
@@ -82,18 +87,24 @@ if shift_db is not None:
 if shift_db is not None:
     try:
         import people_db
-        from people import load_features, people_bp
+        from people import load_features, people_bp, session_key_problem
 
-        people_db.init_db()
-        load_features()         # no-op unless a feature was imported ahead of people.py
-        app.register_blueprint(people_bp)
-        try:
-            from careers import careers_bp
+        # People holds records about named people behind the session
+        # cookie, so it needs a dedicated signing key in production.
+        _people_blocked = session_key_problem(os.environ)
+        if _people_blocked:
+            print(f"WARNING: {_people_blocked}")
+        else:
+            people_db.init_db()
+            load_features()     # no-op unless a feature was imported ahead of people.py
+            app.register_blueprint(people_bp)
+            try:
+                from careers import careers_bp
 
-            app.register_blueprint(careers_bp)
-        except Exception as e:  # the public careers pages can't take People down
-            print(f"WARNING: careers pages failed to load, People unaffected: {e!r}")
-        print("People registered at /shift/people")
+                app.register_blueprint(careers_bp)
+            except Exception as e:  # the public careers pages can't take People down
+                print(f"WARNING: careers pages failed to load, People unaffected: {e!r}")
+            print("People registered at /shift/people")
     except Exception as e:  # pragma: no cover - defensive boot guard
         print(f"WARNING: People failed to load, /shift, /hub and bots unaffected: {e!r}")
 

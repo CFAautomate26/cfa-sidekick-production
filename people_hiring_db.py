@@ -217,6 +217,7 @@ ENTERED_FOR_APPLICANT = "entered for the applicant"
 
 NOTICE_DAYS = 45                 # days after the last interview to tell the applicant
 NOTICE_SOON_DAYS = 7
+NOTICE_AIM_DAYS = 30             # our own aim, well inside the law's 45
 NOTICE_KEEP_MONTHS = 36          # a decision notice is kept three years from the day given
 DUPLICATE_DAYS = 30
 SMALL_NUMBER = 5                 # below this many cases a percentage or median is not shown
@@ -344,8 +345,7 @@ class _Refused(Exception):
 AI_STATEMENT = (
     "We use artificial intelligence (AI) to help assess applications for this position. "
     "The AI tool compares your written answers with the job-related criteria in this posting "
-    "and suggests a score. A member of our leadership team reads every application and makes "
-    "every decision.")
+    "and suggests a score. A member of our leadership team makes every decision.")
 AGE_LINE = ("Ontario law sets a minimum age of 14 to work in a restaurant's serving areas "
             "and 15 in its kitchen.")
 STUDENT_MINIMUM_LINE = (
@@ -391,6 +391,15 @@ def pay_line(posting: dict) -> str:
     if low == high:
         return f"{money(posting['pay_min'])} an hour"
     return f"{money(posting['pay_min'])} to {money(posting['pay_max'])} an hour"
+
+
+def pay_label(posting: dict, conf: dict) -> str:
+    """The pay range for a list or a heading, where the full student-rate
+    sentence is not printed beside it: '$16.90 (student rate) to $19.50 an
+    hour'. A figure below the general minimum wage is never shown bare."""
+    if not student_line(posting, conf) or _cents(posting.get("pay_min")) == _cents(posting.get("pay_max")):
+        return pay_line(posting)
+    return f"{money(posting['pay_min'])} (student rate) to {money(posting['pay_max'])} an hour"
 
 
 def student_line(posting: dict, conf: dict) -> str:
@@ -485,7 +494,8 @@ def public_view(posting: dict, conf: dict | None = None) -> dict:
         "status": posting["status"],
         "employer": conf["employer_name"],
         "type_label": EMPLOYMENT_TYPES.get(posting["employment_type"], ""),
-        "pay": pay_line(posting), "student_line": student_line(posting, conf),
+        "pay": pay_line(posting), "pay_short": pay_label(posting, conf),
+        "student_line": student_line(posting, conf),
         "description": posting["description"],
         "criteria": [{"name": c["name"], "definition": c["definition"]} for c in criteria],
         "questions": [{"id": c["id"], "name": c["name"], "question": c["question"]}
@@ -1271,7 +1281,9 @@ def application_by_token(token: str) -> dict | None:
     """What an applicant's private page needs, and nothing a leader wrote:
     the posting's title, when the application was received, the quick
     questions while they can still be answered, and the plain status once a
-    decision notice has been logged. None for an unknown link."""
+    decision notice has been logged ("decision": None, "pending", "made",
+    or "closed" for someone never interviewed who was told they are not
+    moving forward). None for an unknown link."""
     token = str(token or "")
     if not re.fullmatch(r"[0-9a-f]{32}", token):
         return None
@@ -1288,12 +1300,19 @@ def application_by_token(token: str) -> dict | None:
                      for c in _criteria(conn, row["posting_id"]) if c["question"]]
         notice = conn.execute("SELECT kind FROM hr_notices WHERE application_id=? "
                               "ORDER BY given_on DESC, id DESC LIMIT 1", (row["id"],)).fetchone()
+        met = conn.execute("SELECT 1 FROM hr_interviews WHERE application_id=? AND outcome='attended' "
+                           "LIMIT 1", (row["id"],)).fetchone() is not None
         conf = _settings(conn)
     out["questions"] = questions
     out["can_answer"] = bool(questions and not row["answered_at"] and row["stage"] in ACTIVE_STAGES
                              and row["answers_until"] >= _stamp())
+    # "A hiring decision has been made for this posting" is said only to
+    # someone who was interviewed or offered the job, as in the message a
+    # leader sends: for anyone else all this page knows is that their own
+    # application is not moving forward.
     out["decision"] = (None if not notice else
-                       "pending" if notice["kind"] == "no-decision-yet" else "made")
+                       "pending" if notice["kind"] == "no-decision-yet" else
+                       "made" if notice["kind"] == "offer" or met else "closed")
     out["contact"] = contact_line(conf)
     out["employer"] = conf["employer_name"]
     del out["stage"], out["purged_at"]
@@ -1724,8 +1743,13 @@ def add_interview(application_id: int, on_date: str, at_time: str, mode: str, in
     with closing(people_db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
         row = _open_application(conn, application_id)
-        if not row or row["stage"] not in ACTIVE_STAGES:
-            return "Interviews can only be added while the application is still open."
+        if not row:
+            return "That application isn't there any more."
+        if row["stage"] not in ACTIVE_STAGES and day > today:
+            # Decided already: an interview that was really held can still
+            # be put on record (it starts the 45-day clock), a new one can't.
+            return ("This application has been decided, so only an interview that has already "
+                    "been held can be added.")
         conn.execute(
             "INSERT INTO hr_interviews (application_id, on_date, at_time, mode, interviewer, "
             "created_at, created_by) VALUES (?,?,?,?,?,?,?)",
@@ -1742,10 +1766,40 @@ def interviews(application_id: int) -> list[dict]:
             (application_id,))]
 
 
-def set_interview_outcome(interview_id: int, application_id: int, outcome: str, by: str) -> str | None:
+NOTICE_TAKEN_OFF = ("This interview is marked attended, so the applicant is owed a decision notice by "
+                    "{deadline}. Changing it takes that notice off the list. Tick the box to say the "
+                    "interview was not held, then record it again.")
+NOTICE_OVERDUE_OPERATOR = ("The decision notice for this interview is overdue, so only the Operator "
+                           "can change what happened to it.")
+
+
+def _notice_lost(conn, application_id: int, on_date: str) -> dict | None:
+    """The decision notice still owed that would come off the list if the
+    attended interview on `on_date` stopped counting, or None."""
+    held = [r["on_date"] for r in conn.execute(
+        "SELECT on_date FROM hr_interviews WHERE application_id=? AND outcome='attended'",
+        (application_id,))]
+    given = [r["given_on"] for r in conn.execute(
+        "SELECT given_on FROM hr_notices WHERE application_id=?", (application_id,))]
+    without = list(held)
+    if on_date in without:
+        without.remove(on_date)
+    still = {(c["interviewed"], c["deadline"]) for c in notice_obligations(without, given)
+             if c["status"] in ("due", "overdue")}
+    for clock in notice_obligations(held, given):
+        if clock["status"] in ("due", "overdue") and (clock["interviewed"], clock["deadline"]) not in still:
+            return clock
+    return None
+
+
+def set_interview_outcome(interview_id: int, application_id: int, outcome: str, by: str,
+                          confirmed: bool = False, operator: bool = False) -> str | None:
     """Record what happened to an interview. An attended interview starts
     the 45-day clock for a decision notice, so it cannot be dated in the
-    future, and it cannot be un-attended once a scorecard is in."""
+    future, and it cannot be un-attended once a scorecard is in. Changing
+    an attended interview to anything else while its notice is still owed
+    needs `confirmed` (a tick that it was not held), and once that notice
+    is overdue only the Operator may do it."""
     if outcome not in INTERVIEW_OUTCOMES or outcome == "scheduled":
         return "Choose what happened."
     with closing(people_db.connect()) as conn, conn:
@@ -1763,6 +1817,13 @@ def set_interview_outcome(interview_id: int, application_id: int, outcome: str, 
         if row["outcome"] == "attended" and conn.execute(
                 "SELECT 1 FROM hr_scores WHERE interview_id=? AND submitted=1", (interview_id,)).fetchone():
             return "A scorecard has been submitted for that interview, so it stays as attended."
+        if row["outcome"] == "attended":
+            lost = _notice_lost(conn, application_id, row["on_date"])
+            if lost and lost["status"] == "overdue" and not operator:
+                return NOTICE_OVERDUE_OPERATOR
+            if lost and not confirmed:
+                day = _as_date(lost["deadline"])
+                return NOTICE_TAKEN_OFF.format(deadline=f"{day:%B} {day.day}, {day.year}")
         now = _stamp()
         conn.execute("UPDATE hr_interviews SET outcome=?, outcome_at=?, outcome_by=? WHERE id=? AND outcome=?",
                      (outcome, now, _line(by, 80), interview_id, row["outcome"]))
@@ -1887,17 +1948,52 @@ def _obligations(conn, where: str = "", params: tuple = ()) -> list[dict]:
 def notice_board() -> dict:
     """The notices page: "owed" (every interviewed applicant with no notice
     since their last interview, soonest deadline first, each with
-    "overdue" and "days_left") and "log" (notices given, newest first)."""
+    "overdue", "past_aim" and "days_left"), "follow_up" (told "no decision
+    yet" and not told anything since) and "log" (notices given, newest
+    first)."""
     with closing(people_db.connect()) as conn:
         owed = [o for o in _obligations(conn) if o["status"] in ("due", "overdue")]
         log = [dict(r) for r in conn.execute(
             "SELECT n.*, p.title AS posting_title FROM hr_notices n "
             "JOIN hr_applications a ON a.id=n.application_id JOIN hr_postings p ON p.id=a.posting_id "
             "ORDER BY n.given_on DESC, n.id DESC LIMIT 300")]
+        waiting = _told_not_yet(conn, {o["application_id"] for o in owed})
     owed.sort(key=lambda o: (o["deadline"], o["application_id"]))
     for o in owed:
         o["overdue"] = o["status"] == "overdue"
-    return {"owed": owed, "log": log}
+        # past our own 30-day aim, though still inside the law's 45 days
+        o["past_aim"] = not o["overdue"] and o["days_left"] < NOTICE_DAYS - NOTICE_AIM_DAYS
+    return {"owed": owed, "log": log, "follow_up": waiting}
+
+
+FOLLOW_UP_STAGES = ("offer", "hired", "not-selected")     # a decision has been made about them
+
+
+def _told_not_yet(conn, skip: set = frozenset()) -> list[dict]:
+    """Applicants whose latest notice says "no decision yet": they were
+    promised word when there is one, so they stay listed until an offer or
+    a not-moving-forward notice is logged. "decided" marks the ones whose
+    application has since been decided. Anyone in `skip` is already owed a
+    notice for a later interview."""
+    out = []
+    for r in conn.execute(
+            "SELECT a.id, a.first_name, a.last_name, a.stage, p.title, n.given_on FROM hr_applications a "
+            "JOIN hr_postings p ON p.id=a.posting_id JOIN hr_notices n ON n.id = (SELECT id FROM hr_notices "
+            "WHERE application_id=a.id ORDER BY given_on DESC, id DESC LIMIT 1) "
+            "WHERE a.purged_at IS NULL AND n.kind='no-decision-yet' ORDER BY n.given_on, a.id"):
+        if r["id"] not in skip:
+            out.append({"application_id": r["id"], "name": _name(r), "posting_title": r["title"],
+                        "told_on": r["given_on"], "stage": r["stage"],
+                        "decided": r["stage"] in FOLLOW_UP_STAGES})
+    return out
+
+
+def notices_to_follow_up() -> int:
+    """How many people told "no decision yet" now have a decision waiting
+    to be passed on."""
+    with closing(people_db.connect()) as conn:
+        owed = {o["application_id"] for o in _obligations(conn) if o["status"] in ("due", "overdue")}
+        return sum(1 for item in _told_not_yet(conn, owed) if item["decided"])
 
 
 def clocks_for(application_id: int) -> list[dict]:
@@ -2160,14 +2256,22 @@ def retention() -> dict:
 
 def purge(by: str) -> int:
     """Remove the personal details of every application that is due (see
+    purge_all). Returns how many applications were purged."""
+    return purge_all(by)[0]
+
+
+def purge_all(by: str) -> tuple[int, int]:
+    """Remove the personal details of every application that is due (see
     retention()). For each: the name becomes "Removed"; the email, phone,
     duplicate-check key, private link, yes/no answers, availability,
     referrer, experience, written answers, leaders' notes, score notes and
     any AI copies of the answers are blanked or deleted. The row, its stage
-    history and its levels stay, and so does every decision notice given
-    less than three years ago (older ones lose their wording and the name).
+    history and its levels stay, and so does every decision notice until
+    three full years after the day it was given (after that the wording
+    and the name go, in this same run, unless the application is on hold).
     Hired applicants, applications on hold, postings and the kept copies of
-    postings are never touched. Returns how many were purged."""
+    postings are never touched. Returns (applications purged, notices whose
+    wording was removed)."""
     today = _today()
     now = _stamp()
     with closing(people_db.connect()) as conn, conn:
@@ -2191,11 +2295,16 @@ def purge(by: str) -> int:
             posting_id = conn.execute("SELECT posting_id FROM hr_applications WHERE id=?",
                                       (application_id,)).fetchone()[0]
             _event(conn, application_id, posting_id, by, "purged", at=now)
+        # A notice is kept for three years after the day it was given: the
+        # whole of its third anniversary is still inside that, so only a
+        # notice given before this day three years ago goes. A record on
+        # hold is never removed, and that covers its notices.
         cutoff = _add_months(today, -NOTICE_KEEP_MONTHS).isoformat()
-        conn.execute(
-            "UPDATE hr_notices SET said='', given_to='' WHERE given_on <= ? AND application_id IN "
-            "(SELECT id FROM hr_applications WHERE purged_at IS NOT NULL)", (cutoff,))
-    return len(due)
+        notices = conn.execute(
+            "UPDATE hr_notices SET said='', given_to='' WHERE given_on < ? AND (said != '' OR given_to != '') "
+            "AND application_id IN (SELECT id FROM hr_applications WHERE purged_at IS NOT NULL AND hold=0)",
+            (cutoff,)).rowcount
+    return len(due), notices
 
 
 def records_export() -> str:

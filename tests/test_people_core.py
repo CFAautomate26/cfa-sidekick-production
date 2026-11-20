@@ -97,6 +97,10 @@ def test_a_store_that_was_never_set_up_is_made_on_the_first_people_page(world, t
     for extra in (str(fresh) + "-wal", str(fresh) + "-shm"):
         if os.path.exists(extra):
             os.unlink(extra)
+    # the store comes back empty, so the lock (which is kept in it) asks for the PIN again: never an error
+    resp = lena.get("/shift/people")
+    assert resp.status_code == 302 and "/shift/people/unlock" in resp.headers["Location"]
+    kit.unlock(lena, "lena")
     assert lena.get("/shift/people").status_code == 200
 
 
@@ -490,7 +494,11 @@ def test_pages_stay_locked_until_the_pin_is_entered_again(world, who):
     lock_page = page(client, UNLOCK + "?next=/shift/people/standards")
     assert "Enter your PIN to open People pages" in lock_page
     assert "These pages hold private information about people, so they lock after 30 minutes." in lock_page
-    assert lock_page.count('type="password"') == 1
+    # one box for the PIN: not a password box and not called "pin", so a browser that saved the
+    # sign-in PIN does not fill it in; the digits are hidden by the page's own style instead
+    assert lock_page.count('type="password"') == 0 and 'name="pin"' not in lock_page
+    assert lock_page.count('name="unlock_code"') == 1 and 'autocomplete="one-time-code"' in lock_page
+    assert "-webkit-text-security: disc" in lock_page and 'class="pp-pin"' in lock_page
     assert 'name="next" value="/shift/people/standards"' in lock_page
     resp = client.post(UNLOCK, data={"pin": world["pins"][who], "next": "/shift/people/standards"})
     assert resp.status_code == 302 and resp.headers["Location"] == "/shift/people/standards"
@@ -501,22 +509,27 @@ def test_pages_stay_locked_until_the_pin_is_entered_again(world, who):
     assert [r["who"] for r in people_db.audit_feed() if r["action"] == "unlocked"] == [kit.NAMES[who]]
 
 
-def test_a_wrong_pin_stays_locked_and_counts_toward_the_sign_in_lockout(world, capsys):
+def test_a_wrong_pin_stays_locked_and_five_of_them_hold_the_lock(world, capsys):
     client = world["client"]
     kit.sign_in(client, "lena")
+    mine = f"l:{world['ids']['lena']}"
     for attempt in range(5):
-        resp = client.post(UNLOCK, data={"pin": "0000", "next": "/shift/people/standards"})
+        resp = client.post(UNLOCK, data={"unlock_code": "0000", "next": "/shift/people/standards"})
         assert resp.status_code == 302
         assert resp.headers["Location"] == UNLOCK + "?next=/shift/people/standards"
         assert flashed(client)[-1] == "Wrong PIN."
         assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
-    assert len(shift_app._pin_fails["lena"]) == 5
-    # locked out now: even the right PIN is refused, here and at sign-in
-    resp = client.post(UNLOCK, data={"pin": "1111"})
-    assert flashed(client)[-1] == "Too many wrong PINs. Try again in 10 minutes."
-    assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
+    assert len(people._unlock_fails[mine]) == 5
+    # held now: even the right PIN is refused at the lock, under either field name
+    for field in ("unlock_code", "pin"):
+        client.post(UNLOCK, data={field: "1111"})
+        assert flashed(client)[-1] == "Too many wrong PINs. Try again in 10 minutes."
+        assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
+    # the lock keeps its own count: it is not the sign-in lockout, in either direction
+    assert "lena" not in shift_app._pin_fails
     other = cfa_app.app.test_client()
-    assert other.post("/shift/login", data={"name": "Lena", "pin": "1111"}).status_code == 401
+    assert other.post("/shift/login", data={"name": "Lena", "pin": "1111"}).status_code == 302
+    assert [r["who"] for r in people_db.audit_feed() if r["action"] == "lock held after wrong PINs"] == ["Lena"]
     wrong = [r for r in people_db.audit_feed() if r["action"] == "wrong PIN at the lock"]
     assert len(wrong) == 5 and {r["who"] for r in wrong} == {"Lena"}
     assert "0000" not in json.dumps(people_db.audit_feed())           # never the PIN itself
@@ -527,14 +540,15 @@ def test_a_wrong_pin_stays_locked_and_counts_toward_the_sign_in_lockout(world, c
 def test_the_right_pin_clears_earlier_misses_and_an_empty_one_is_not_a_miss(world):
     client = world["client"]
     kit.sign_in(client, "rae")
+    mine = f"l:{world['ids']['rae']}"
     client.post(UNLOCK, data={"pin": ""})
     assert flashed(client)[-1] == "Enter your PIN."
-    assert "rae" not in shift_app._pin_fails
+    assert mine not in people._unlock_fails
     client.post(UNLOCK, data={"pin": "1"})
     client.post(UNLOCK, data={"pin": "22"})
-    assert len(shift_app._pin_fails["rae"]) == 2
+    assert len(people._unlock_fails[mine]) == 2
     kit.unlock(client, "rae")
-    assert "rae" not in shift_app._pin_fails
+    assert mine not in people._unlock_fails and "rae" not in shift_app._pin_fails
 
 
 def test_only_your_own_pin_opens_the_lock(world, monkeypatch):
@@ -659,7 +673,7 @@ def test_another_site_cannot_open_the_lock_either(world):
     kit.sign_in(client, "operator")
     client.post(UNLOCK, data={"pin": "9999"}, headers={"Origin": "https://evil.example"})
     assert client.get("/shift/people").headers["Location"].startswith(UNLOCK)
-    assert "operator" not in shift_app._pin_fails
+    assert "operator" not in shift_app._pin_fails and "op" not in people._unlock_fails
 
 
 # --- who gets what ------------------------------------------------------------

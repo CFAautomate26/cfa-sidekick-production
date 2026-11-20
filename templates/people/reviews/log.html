@@ -1,7 +1,7 @@
 {% extends "people/base.html" %}
 {% from "people/_ui.html" import crumbs, guidance, empty, stamp %}
 {% from "people/reviews/_parts.html" import rv_styles, status_badge %}
-{% block title %}{{ subject.display_name }} · observations{% endblock %}
+{% block title %}Observation log{% endblock %}
 {% block head %}{{ rv_styles() }}{% endblock %}
 {% block content %}
 {{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), (subject.display_name, none)]) }}

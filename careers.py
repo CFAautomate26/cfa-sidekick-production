@@ -16,7 +16,9 @@ salted hash of it is held, and only while the limit needs it. The address
 is the one the hosting platform's proxy reports, never one the visitor
 can type (client_address).
 
-Nothing here prints a name, a contact detail, an answer or a link.
+Nothing here prints a name, a contact detail, an answer or a link, and an
+error on these pages is answered here so that the server's error log
+never carries the address of an applicant's private link.
 """
 
 import hashlib
@@ -27,7 +29,7 @@ import threading
 from urllib.parse import urlparse
 
 from flask import Blueprint, abort, redirect, render_template, request, url_for
-from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 import hub_text
 import people_db
@@ -197,6 +199,21 @@ def _wrong_method(e):
     return _not_found()
 
 
+@careers_bp.errorhandler(Exception)
+def _went_wrong(e):
+    """Anything a careers page raises ends here, so the server's own error
+    log never writes the address that was asked for: an applicant's private
+    link is in that address. Only the kind of error is printed."""
+    if isinstance(e, HTTPException):
+        if e.code and e.code < 500:
+            return _message(e.code, "Please try again",
+                            "That didn't work. Go back to the posting and try once more.")
+    else:
+        people_db.report_fault("careers page", e)
+    return _message(500, "Something went wrong on our side",
+                    "Please try again in a few minutes. If you were sending a form, send it again.")
+
+
 @careers_bp.context_processor
 def _globals():
     try:
@@ -220,7 +237,8 @@ def _open_posting(slug: str) -> dict:
 
 @careers_bp.route("/")
 def index():
-    postings = [{"slug": p["slug"], "title": p["title"], "pay": hdb.pay_line(p),
+    conf = hdb.settings()
+    postings = [{"slug": p["slug"], "title": p["title"], "pay": hdb.pay_label(p, conf),
                  "type_label": hdb.EMPLOYMENT_TYPES.get(p["employment_type"], "")}
                 for p in hdb.open_postings()]
     return render_template("careers/index.html", postings=postings)

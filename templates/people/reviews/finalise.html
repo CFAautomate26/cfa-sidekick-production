@@ -2,7 +2,7 @@
 {% from "people/_ui.html" import crumbs %}
 {% from "people/reviews/_parts.html" import rv_styles %}
 {% set back = url_for('people.reviews_review', review_id=review.id) %}
-{% block title %}Finish · {{ review.display_name }}{% endblock %}
+{% block title %}Finish review{% endblock %}
 {% block head %}{{ rv_styles() }}{% endblock %}
 {% block content %}
 {{ crumbs([('People', url_for('people.home')), ('Leader reviews', url_for('people.reviews_home')), (review.display_name, back), ('Finish', none)]) }}

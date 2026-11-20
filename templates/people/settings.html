@@ -30,8 +30,27 @@
   <input id="f-{{ key }}" name="{{ key }}" type="{{ 'text' if kind == 'number' else kind }}"{% if kind == 'number' %} inputmode="numeric"{% endif %} value="{{ settings[key].value }}" maxlength="120" aria-describedby="h-{{ key }}">
   <p class="fine-line" id="h-{{ key }}">{{ hint }}</p>
   {% endfor %}
+  {% if group_key == 'hiring' %}
+  <label class="checkline"><input type="checkbox" name="confirm_lower" value="1"><span>I am lowering a minimum wage figure, and I have checked it on ontario.ca.</span></label>
+  {% endif %}
   <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save</button></div>
 </form>
+{% if group_key == 'hiring' %}
+<div class="card" id="wages">
+  <span class="card-title">When the minimum wage figures were last checked</span>
+  {% if wages_to_check %}
+  <p class="callout tan">{{ icon('clock') }}<span><strong>Check {{ 'this figure' if wages_to_check|length == 1 else 'these figures' }} on ontario.ca.</strong> Ontario's minimum wage usually changes on October 1, and {{ 'it was' if wages_to_check|length == 1 else 'they were' }} last confirmed before the most recent one. A posting is checked against whatever is saved here.</span></p>
+  {% endif %}
+  {% for key in wage_keys %}
+  <div class="pp-switch">
+    <span><strong>{{ fields[key][0] }}: ${{ settings[key].value }}</strong><br>
+      {% if settings[key].updated_at %}{{ stamp('Last confirmed by ' ~ settings[key].updated_by, settings[key].updated_at) }}{% else %}Not confirmed here yet. It is the rate that took effect on {{ wages_as_of|pp_day }}.{% endif %}</span>
+    <form method="post" action="{{ url_for('people.settings_confirm') }}"><input type="hidden" name="key" value="{{ key }}">
+      <button class="btn btn-secondary sm" type="submit">Still correct today</button></form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 {% endfor %}
 
 {% if not ai_ready %}

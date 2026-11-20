@@ -17,6 +17,9 @@
 {% elif counts.notices_due %}
 <p class="callout tan" style="margin-top:16px;">{{ icon('clock') }}<span><strong>{{ counts.notices_due }} decision notice{{ ' is' if counts.notices_due == 1 else 's are' }} due within a week.</strong> <a class="textlink" href="{{ url_for('people.hiring_notices') }}">See who</a></span></p>
 {% endif %}
+{% if follow_up %}
+<p class="callout tan" style="margin-top:12px;">{{ icon('clock') }}<span><strong>{{ follow_up }} {{ 'person was' if follow_up == 1 else 'people were' }} told “no decision yet”, and a decision has since been made.</strong> Tell {{ 'them' }} and log it. <a class="textlink" href="{{ url_for('people.hiring_notices') }}#follow-up">See who</a></span></p>
+{% endif %}
 {% for a in attention %}
 <p class="callout warm" style="margin-top:12px;">{{ icon('alert') }}<span><strong>“{{ a.title }}” is live but no longer passes the publish check.</strong> {{ a.problems|join(' ') }} <a class="textlink" href="{{ url_for('people.hiring_posting', posting_id=a.id) }}#check">Fix the posting</a></span></p>
 {% endfor %}

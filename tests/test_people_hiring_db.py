@@ -291,7 +291,9 @@ def test_the_ai_statement_is_shown_only_while_ai_assist_is_on(world, monkeypatch
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     view = hdb.public_view(hdb.get_posting(posting_id))
     assert view["ai_statement"].startswith("We use artificial intelligence (AI) to help assess applications")
-    assert "A member of our leadership team reads every application and makes every decision." in view["ai_statement"]
+    # it promises what the tool enforces (a person makes every decision) and nothing it does not
+    assert view["ai_statement"].endswith("A member of our leadership team makes every decision.")
+    assert "reads every application" not in view["ai_statement"]
     assert any("may be sent to an AI service" in line and "may process them outside Canada" in line
                and "Your name and contact details are not sent with them." in line for line in view["privacy"])
     text = hdb.document_text(view)
@@ -532,7 +534,16 @@ def test_status_on_the_private_page_follows_the_latest_notice(world, monkeypatch
     clock(monkeypatch, "2026-11-09 09:00")
     assert hdb.log_notice(app_id, "not-moving-forward", "phone", "We will not be moving forward.",
                           "2026-11-08", "Hari") is None
+    # never interviewed: told only that their own application is not moving forward
+    assert hdb.application_by_token(token)["decision"] == "closed"
+    # "a hiring decision has been made" is for someone who was interviewed, or offered the job
+    assert hdb.add_interview(app_id, "2026-11-05", "", "phone", "Hari", "Hari") is None
+    assert hdb.set_interview_outcome(hdb.interviews(app_id)[0]["id"], app_id, "attended", "Hari") is None
     assert hdb.application_by_token(token)["decision"] == "made"
+    other = hdb.apply(posting_id, person(2))
+    assert hdb.log_notice(other["id"], "offer", "phone", "We would like to offer you the job.",
+                          "2026-11-09", "Hari") is None
+    assert hdb.application_by_token(other["token"])["decision"] == "made"
 
 
 # --- stages -----------------------------------------------------------------------
@@ -672,9 +683,13 @@ def test_interviews_are_logged_with_a_date_and_an_outcome(world, monkeypatch):
         "That interview isn't there any more.")
     kinds = [(e["kind"], e["detail"]) for e in table("hr_events")][1:]
     assert kinds == [("interview", "video"), ("outcome", "no-show"), ("outcome", "attended")]
-    # no interviews once the application is decided
+    # once the application is decided no new interview can be planned, but one that was really
+    # held and never logged still goes on record (it starts its own 45-day clock)
     hdb.move_stage(app_id, "new", "withdrawn", "Hari")
-    assert "still open" in hdb.add_interview(app_id, "2026-11-12", "", "phone", "Hari", "Hari")
+    assert "only an interview that has already been held" in hdb.add_interview(
+        app_id, "2026-11-13", "", "phone", "Hari", "Hari")
+    assert hdb.add_interview(app_id, "2026-11-11", "", "phone", "Hari", "Hari") is None
+    assert len(hdb.interviews(app_id)) == 2
 
 
 def test_scorecards_stay_hidden_until_you_submit_your_own(world, monkeypatch):
@@ -966,9 +981,13 @@ def test_the_purge_removes_personal_details_and_keeps_the_record(world, monkeypa
     for private in ("jordan1@example.com", "519-555-0142", "Alex Doe", "showed up", "Polite on the phone"):
         assert private not in everything, private
 
-    # a later run blanks the words of a notice once it is three years old
+    # a later run blanks the words of a notice once it is more than three years old: the whole of
+    # the third anniversary of the day it was given is still inside the three years
     clock(monkeypatch, "2027-01-10 09:00")
-    assert hdb.purge("Operator") == 0
+    assert hdb.purge_all("Operator") == (0, 0)
+    assert {n["given_on"]: n["given_to"] for n in hdb.notices(gone)}["2024-01-10"] == "Jordan1 Sample"
+    clock(monkeypatch, "2027-01-11 09:00")
+    assert hdb.purge_all("Operator") == (0, 1) and hdb.purge_all("Operator") == (0, 0)
     kept = {n["given_on"]: (n["said"], n["given_to"]) for n in hdb.notices(gone)}
     assert kept["2024-01-10"] == ("", "") and kept["2024-03-01"][1] == "Jordan1 Sample"
     assert len(hdb.notices(gone)) == 2                                 # the rows themselves stay

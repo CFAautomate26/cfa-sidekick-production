@@ -122,8 +122,14 @@ def _lock_minutes() -> int:
         return int(people_db.SETTINGS["lock_minutes"])
 
 
+UNLOCK_MAX_HOURS = 8             # the PIN is asked for again this long after it was entered, whatever happens
+
+
 def _unlocked(who: Viewer) -> bool:
-    """The PIN was entered again, by this same sign-in, recently enough."""
+    """The PIN was entered again, by this same sign-in, recently enough,
+    and the server still holds that unlock. The cookie alone is never
+    enough: "Lock now" and signing out remove the server's record, so a
+    copy of the cookie taken while People was open stops working too."""
     stamp = session.get("people_unlock_at")
     if stamp is None or session.get("people_unlock_for") != _identity(who):
         return False
@@ -131,7 +137,25 @@ def _unlocked(who: Viewer) -> bool:
         idle = _now() - int(stamp)
     except (TypeError, ValueError):
         return False
-    return -60 <= idle <= _lock_minutes() * 60
+    limit = _lock_minutes() * 60
+    if not -60 <= idle <= limit:
+        return False
+    return people_db.unlock_valid(session.get("people_unlock_id"), _identity(who), _now(), limit,
+                                  UNLOCK_MAX_HOURS * 3600)
+
+
+@people_bp.before_app_request
+def _lock_when_signing_out_or_in():
+    """Signing out of Team Hub (or signing in as someone else) closes the
+    People lock on the server, for this browser and for any copy of its
+    cookie. Runs for every request, so it must never raise."""
+    try:
+        if request.method == "POST" and request.endpoint in ("shift.logout", "hub.logout",
+                                                             "shift.login", "hub.login"):
+            people_db.unlock_close(session.get("people_unlock_id"))
+    except Exception:
+        pass
+    return None
 
 
 def _cross_site() -> bool:
@@ -261,6 +285,7 @@ def _globals():
         "people_features": frozenset(FEATURES),
         "people_unlocked": bool(getattr(g, "people_unlocked", False)),
         "people_lock_minutes": _lock_minutes() if who else 0,
+        "people_lock_hours": UNLOCK_MAX_HOURS,
         "people_at_risk": bool(shift_app.DATA_AT_RISK
                                and not os.getenv("PEOPLE_DB_PATH", "").strip()),
     }
@@ -282,6 +307,39 @@ def _safe_next(raw: str | None) -> str:
     return ""
 
 
+# Wrong PINs at the lock are counted here, apart from wrong PINs at sign-in.
+# Only someone already signed in can add to this count, and it is kept
+# against that sign-in ("op" or "l:<leader id>"), so nobody on the public
+# sign-in page can shut a leader out of People by guessing at their name.
+UNLOCK_MAX_MISSES = 5
+UNLOCK_HOLD_SECONDS = 600
+_unlock_fails: dict[str, list[int]] = {}
+
+
+def _recent_misses(identity: str) -> list[int]:
+    now = _now()
+    return [t for t in _unlock_fails.get(identity, []) if 0 <= now - t < UNLOCK_HOLD_SECONDS]
+
+
+def _unlock_held(identity: str) -> bool:
+    misses = _recent_misses(identity)
+    if misses:
+        _unlock_fails[identity] = misses
+    else:
+        _unlock_fails.pop(identity, None)
+    return len(misses) >= UNLOCK_MAX_MISSES
+
+
+def _unlock_miss(identity: str) -> bool:
+    """Count one wrong PIN. True when this one starts a hold."""
+    if len(_unlock_fails) > 500:                 # bounded: forget whoever has nothing recent
+        for key in [k for k in _unlock_fails if not _recent_misses(k)]:
+            _unlock_fails.pop(key, None)
+    misses = _recent_misses(identity) + [_now()]
+    _unlock_fails[identity] = misses
+    return len(misses) == UNLOCK_MAX_MISSES
+
+
 @people_bp.route("/people/unlock", methods=["GET", "POST"])
 def unlock():
     who = viewer()
@@ -291,13 +349,16 @@ def unlock():
             return redirect(target or url_for("people.home"))
         return render_template("people/unlock.html", next_url=target)
     again = url_for("people.unlock", next=target or None)
-    pin = (request.form.get("pin") or "").strip()
+    # The box is not called "pin" and is not a password box, so a browser
+    # that saved the sign-in PIN does not fill it in for whoever holds the phone.
+    pin = (request.form.get("unlock_code") or request.form.get("pin") or "").strip()
     if not pin:
         flash("Enter your PIN.")
         return redirect(again)
-    # The same throttle as sign-in, keyed by the sign-in name: checked
-    # before the PIN is, a miss is counted, a hit clears it.
-    if shift_app._locked_out(who.name):
+    # Five wrong PINs hold the lock for ten minutes: checked before the
+    # PIN is, a miss is counted, a hit clears it.
+    identity = _identity(who)
+    if _unlock_held(identity):
         flash("Too many wrong PINs. Try again in 10 minutes.")
         return redirect(again)
     if who.is_operator:
@@ -307,19 +368,24 @@ def unlock():
         leader = shift_db.verify_leader(who.name, pin) if who.leader_id else None
         ok = bool(leader) and leader["id"] == who.leader_id
     if not ok:
-        shift_app._record_fail(who.name)
+        held = _unlock_miss(identity)
         people_db.audit(who.name, "wrong PIN at the lock")
+        if held:
+            people_db.audit(who.name, "lock held after wrong PINs")
         flash("Wrong PIN.")
         return redirect(again)
-    shift_app._clear_fails(who.name)
+    _unlock_fails.pop(identity, None)
+    people_db.unlock_close(session.get("people_unlock_id"))
     session["people_unlock_at"] = _now()
-    session["people_unlock_for"] = _identity(who)
+    session["people_unlock_for"] = identity
+    session["people_unlock_id"] = people_db.unlock_open(identity, _now(), UNLOCK_MAX_HOURS * 3600)
     people_db.audit(who.name, "unlocked")
     return redirect(target or url_for("people.home"))
 
 
 @people_bp.route("/people/lock", methods=["POST"])
 def lock():
+    people_db.unlock_close(session.pop("people_unlock_id", None))
     session.pop("people_unlock_at", None)
     session.pop("people_unlock_for", None)
     flash("People pages are locked.")
@@ -383,6 +449,7 @@ _BADGES = (                     # first one with a count wins; red = someone is 
     ("on_hold", "{n} on hold", "b-red"),
     ("new", "{n} new", "b-red"),
     ("notices_due", "{n} notice{s} due", "b-tan"),
+    ("notices_follow_up", "{n} to tell", "b-tan"),
     ("past_due", "{n} past due", "b-tan"),
     ("drafts", "{n} to finish", "b-tan"),
 )
@@ -450,7 +517,8 @@ def home():
                   if not who.is_operator and (counts.get("mine") or counts.get("mine_all"))
                   else None),
         has_model=bool(people_db.active_model()) if who.caps else True,
-        ai_ready=people_ai.available())
+        ai_ready=people_ai.available(),
+        wages_to_check=people_db.wages_to_check() if who.is_operator else [])
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +666,17 @@ def _contact_left_empty(form) -> bool:
                                                     or after["hiring_contact_phone"])
 
 
+WAGE_LOWER_NEEDS_TICK = ("To lower a minimum wage figure, tick the box under it. A lower figure "
+                         "lets a posting with lower pay go live, so check it on ontario.ca first.")
+
+
+def _lowers_wage(key: str, typed: str) -> bool:
+    try:
+        return float(" ".join(typed.split())) < float(people_db.get_setting(key))
+    except ValueError:
+        return False                              # not a number: refused by the store as usual
+
+
 def _postings_to_fix() -> list[dict]:
     """Live postings that no longer pass the publish check (a wage floor
     went up, the contact changed): [{"id", "title", "problems"}]."""
@@ -637,12 +716,17 @@ def settings():
         for key in people_db.SETTINGS:
             if key not in request.form or (keep_contact and key in _CONTACT_KEYS):
                 continue
+            if key in people_db.WAGE_SETTINGS and request.form.get("confirm_lower") != "1" \
+                    and _lowers_wage(key, request.form.get(key, "")):
+                refused.append(WAGE_LOWER_NEEDS_TICK)
+                continue
             if people_db.set_setting(key, request.form.get(key, ""), actor()):
                 saved += 1
             elif key in SETTING_FIELDS:
                 refused.append(SETTING_FIELDS[key][2])
             else:
                 refused.append("That switch couldn't be changed.")
+        refused = list(dict.fromkeys(refused))
         for problem in refused:
             flash(problem)
         if not refused:
@@ -660,7 +744,20 @@ def settings():
         return redirect(url_for("people.settings"))
     return render_template("people/settings.html", settings=people_db.settings_all(),
                            groups=SETTING_GROUPS, fields=SETTING_FIELDS,
-                           ai_ready=people_ai.available(), address_check=_address_check())
+                           ai_ready=people_ai.available(), address_check=_address_check(),
+                           wage_keys=people_db.WAGE_SETTINGS, wages_to_check=people_db.wages_to_check(),
+                           wages_as_of=people_db.WAGES_AS_OF)
+
+
+@people_bp.route("/people/settings/confirm", methods=["POST"])
+@requires("operator")
+def settings_confirm():
+    """"Still correct today": restamp a minimum wage figure without changing it."""
+    if people_db.confirm_setting(request.form.get("key", ""), actor()):
+        flash("Confirmed as correct today.")
+    else:
+        flash("That figure can't be confirmed here.")
+    return redirect(url_for("people.settings") + "#hiring")
 
 
 # ---------------------------------------------------------------------------
@@ -800,6 +897,34 @@ def backup():
     last = next((r for r in people_db.audit_feed(limit=1000) if r["action"] == "backup downloaded"),
                 None)
     return render_template("people/backup.html", last=last)
+
+
+# ---------------------------------------------------------------------------
+# What People needs from the server before it may load
+# ---------------------------------------------------------------------------
+
+# The values of ENV that mean "not the live store". Anything else, and no
+# value at all, is treated as production.
+NOT_PRODUCTION = ("test", "testing", "dev", "development", "local")
+
+
+def session_key_problem(environ) -> str | None:
+    """Why People must not be registered on this server, or None. The gate
+    and the PIN lock both rest on the key that signs the session cookie.
+    Without FLASK_SECRET_KEY the app derives that key from SCHEDULE_SECRET
+    and the Operator's PIN: SCHEDULE_SECRET travels in the address of the
+    scheduled calls and the PIN is a few digits, so someone who learned the
+    first could work out the second and sign their own Operator session.
+    That is not good enough for records about people, so in production
+    People loads only with a dedicated key. app.py asks before it registers
+    the blueprint (`environ` is os.environ)."""
+    if (environ.get("ENV") or "production").strip().lower() in NOT_PRODUCTION:
+        return None
+    if len((environ.get("FLASK_SECRET_KEY") or "").strip()) >= 32:
+        return None
+    return ("People is NOT loaded: set FLASK_SECRET_KEY on the server to a long random value "
+            "(32 characters or more) and redeploy. Everyone signs in again once. "
+            "/shift, /hub and the bots are unaffected.")
 
 
 # ---------------------------------------------------------------------------

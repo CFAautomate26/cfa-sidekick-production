@@ -10,6 +10,8 @@
 <html lang="en">
 <head>
 {{ head_tags(url_for('shift.manifest')) }}
+{# Titles never carry a person's name: they stay in the browser's history
+   and tab list after the lock and after sign-out. #}
 <title>{% block title %}{% endblock %}{% if self.title() %} · {% endif %}Team Hub</title>
 {% include "shared/cfa_style.html" %}
 {% include "hub/_style.html" %}

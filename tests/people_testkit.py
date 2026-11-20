@@ -13,6 +13,7 @@ import json
 import app as cfa_app
 import hub
 import hub_db
+import people
 import people_db
 import shift_app
 import shift_db
@@ -44,6 +45,7 @@ def make_world(monkeypatch, tmp_path, bare: bool = False) -> dict:
     people_db.init_db()
     shift_app._pin_fails.clear()
     hub._fails.clear()
+    people._unlock_fails.clear()
     monkeypatch.setattr(shift_app, "SHIFT_ADMIN_PIN", PINS["operator"])
     cfa_app.app.config["TESTING"] = True
     for who, role in (("lena", "lead"), ("ada", "admin"), ("hari", "lead"), ("rae", "lead")):

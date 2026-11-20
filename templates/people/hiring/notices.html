@@ -12,7 +12,7 @@
   <p class="triage"><b>{{ board.owed|length }}</b> owed · <b>{{ overdue }}</b> overdue</p>
 </section>
 {{ hiring_nav(tabs) }}
-<p class="callout" style="margin-top:16px;">{{ icon('info') }}<span>Ontario law: anyone we interview for a posted job must be told whether a hiring decision has been made within {{ days }} days of their last interview. Telling them “no decision yet” counts. Our own practice goes a little further: we also tell people who withdrew after an interview, and we aim to tell everyone within 30 days.</span></p>
+<p class="callout" style="margin-top:16px;">{{ icon('info') }}<span>Ontario law: anyone we interview for a posted job must be told whether a hiring decision has been made within {{ days }} days of their last interview. Telling them “no decision yet” counts. Our own practice goes a little further: we also tell people who withdrew after an interview, we aim to tell everyone within {{ aim }} days (the list marks anyone past that), and someone told “not yet” is told again once there is a decision. Whether the law requires that second notice is not settled, so we send one.</span></p>
 
 <section class="sec" id="owed">
   <div class="sec-head"><h2>Still to be told</h2></div>
@@ -24,7 +24,7 @@
       <tr id="o{{ o.application_id }}"{% if o.overdue %} class="hr-late"{% endif %}>
         <td class="who"><a href="{{ url_for('people.hiring_contact', application_id=o.application_id) }}#messages">{{ o.name }}</a></td>
         <td>{{ o.posting_title }}</td><td class="nowrap">{{ o.interviewed|pp_day }}</td><td class="nowrap">{{ o.deadline|pp_day }}</td>
-        <td class="nowrap">{% if o.overdue %}<span class="badge b-red">Overdue by {{ -o.days_left }} day{{ '' if o.days_left == -1 else 's' }}</span>{% elif o.days_left <= soon %}<span class="badge b-tan">{{ o.days_left }} day{{ '' if o.days_left == 1 else 's' }} left</span>{% else %}<span class="badge">{{ o.days_left }} days left</span>{% endif %}</td>
+        <td class="nowrap">{% if o.overdue %}<span class="badge b-red">Overdue by {{ -o.days_left }} day{{ '' if o.days_left == -1 else 's' }}</span>{% elif o.days_left <= soon %}<span class="badge b-tan">{{ o.days_left }} day{{ '' if o.days_left == 1 else 's' }} left</span>{% else %}<span class="badge">{{ o.days_left }} days left</span>{% endif %}{% if o.past_aim %} <span class="badge b-tan">Past our {{ aim }}-day aim</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </table>
@@ -33,6 +33,25 @@
   {{ empty('Everyone we have interviewed has been told where things stand.') }}
   {% endif %}
 </section>
+
+{% if board.follow_up %}
+<section class="sec" id="follow-up">
+  <div class="sec-head"><h2>Told “not yet”: follow up when decided</h2></div>
+  <p class="sec-note">Each of these people was told no decision had been made, and that we would contact them when it had. They stay here until an offer or a not-moving-forward notice is logged for them.</p>
+  <div class="card pp-scroll">
+    <table class="plain">
+      <thead><tr><th>Applicant</th><th>Posting</th><th>Told “not yet”</th><th>Where they are now</th><th></th></tr></thead>
+      {% for f in board.follow_up %}
+      <tr id="f{{ f.application_id }}">
+        <td class="who"><a href="{{ url_for('people.hiring_contact', application_id=f.application_id) }}#messages">{{ f.name }}</a></td>
+        <td>{{ f.posting_title }}</td><td class="nowrap">{{ f.told_on|pp_day }}</td><td>{{ stage_labels[f.stage] }}</td>
+        <td class="nowrap">{% if f.decided %}<span class="badge b-red">Decided: tell them</span>{% else %}<span class="badge">Waiting on a decision</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</section>
+{% endif %}
 
 <section class="sec" id="log">
   <div class="sec-head"><h2>Notices given</h2></div>

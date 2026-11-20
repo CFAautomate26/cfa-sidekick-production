@@ -214,7 +214,7 @@ GroupMe and Slack bots keep running untouched.
 | --- | --- | --- |
 | `SHIFT_ADMIN_PIN` | **Yes** | Master PIN for the **Operator** login. Until it's set, `/shift` shows a "not configured" page. |
 | `SHIFT_DB_PATH` | **Strongly recommended** | Where the SQLite database lives. Point it at a persistent disk (see below) or data is wiped on every deploy. |
-| `FLASK_SECRET_KEY` | Recommended | Signs session cookies. If unset, a stable key is derived from the `SCHEDULE_SECRET` + `SHIFT_ADMIN_PIN` env vars (sessions survive deploys); if none of the three is set, a random per-boot key is used and logins reset each deploy. Generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`. |
+| `FLASK_SECRET_KEY` | Recommended; **required for People** | Signs session cookies. If unset, a stable key is derived from the `SCHEDULE_SECRET` + `SHIFT_ADMIN_PIN` env vars (sessions survive deploys); if none of the three is set, a random per-boot key is used and logins reset each deploy. The People section (leader reviews and hiring) does not load on the live server without it: see [people.md](people.md). Generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`. |
 | `SHIFT_TZ` | No | Store timezone; defaults to `America/Toronto`. |
 | `SHIFT_NOTIFY_SLACK_CHANNEL` | For completion pings | Slack channel ID the to-do completion pings post to. The CFA Sidekick Slack bot (`SLACK_BOT_TOKEN`) must be invited to it. Empty (default) disables the pings. Production: `C0C51833JAH` (#sidekick-alerts). |
 | `SHIFT_NOTIFY_SLACK_MENTION` | No | Slack user ID to @-mention in each ping so it triggers a phone notification. Production: `U05R80802EB` (the Operator). |

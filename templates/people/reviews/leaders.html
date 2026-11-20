@@ -60,6 +60,9 @@
   {% if s.link == 'stale' %}
   <p class="callout warm" style="margin-top:10px;">{{ icon('alert') }}<span>This leader's link no longer matches a Team Hub sign-in (a sign-in was renamed, removed or renumbered), so they can't open their review. Choose their sign-in again below and save.</span></p>
   {% endif %}
+  {% if s.short_name %}
+  <p class="rv-quiet" style="margin-top:10px;">A short name: before a note goes to the AI tool, “{{ s.short_name }}” is taken out only where it is written with its capital letter. Write the name that way in notes about this leader.</p>
+  {% endif %}
   {% if not s.reviewer_ok %}
   <p class="callout warm" style="margin-top:10px;">{{ icon('alert') }}<span>The reviewer on record no longer matches a sign-in with Leader reviews access, so only you can open this leader's notes and reviews. Choose a reviewer again below and save.</span></p>
   {% endif %}

@@ -945,7 +945,9 @@ def test_the_retention_page_and_the_purge(world, monkeypatch):
     assert "This applicant's details were removed on Nov 20." in gone and "farm stand" not in gone
     assert "Jordan1" not in gone and 'name="level_' not in gone and "Add a note" not in gone
     contact = shown(page(operator, f"/shift/hiring/candidates/{old}/contact"))
-    assert EMAIL not in contact and "mailto:" not in contact and "Hold: do not delete" not in contact
+    assert EMAIL not in contact and "mailto:" not in contact
+    # a hold can still be put on after the details are gone: it keeps the notices' wording
+    assert "Their details have been removed." in contact and "Hold: do not delete" in contact
     post(operator, "/shift/hiring/retention/purge", confirm="1")
     assert "Nothing was due to be removed." in flashed(operator)
 

@@ -4,7 +4,7 @@
 {% extends "people/base.html" %}
 {% from "people/_ui.html" import crumbs, empty, stamp %}
 {% from "people/hiring/_bits.html" import hiring_styles, stage_badge %}
-{% block title %}{{ c.name }}: contact and offer checks{% endblock %}
+{% block title %}Contact and offer checks{% endblock %}
 {% block head %}{{ hiring_styles() }}{% endblock %}
 {% block content %}
 {{ crumbs([('People', url_for('people.home')), ('Hiring', url_for('people.hiring_home')), (c.name, url_for('people.hiring_candidate', application_id=c.id)), ('Contact and offer checks', none)]) }}
@@ -195,12 +195,13 @@
 </section>
 {% endif %}
 
+{% endif %}
 {# ---------- the record ---------- #}
 <section class="sec" id="records">
   <div class="sec-head"><h2>This record</h2></div>
   <div class="card">
-    <p class="card-meta" style="margin-top:0;">{% if c.hold %}<span class="badge b-navy">On hold: do not delete</span>{% else %}If they are not hired, their details are due to be removed {{ c.keep_months }} months after the decision, which is what they were told when they applied.{% endif %}</p>
-    <p class="card-meta">Put a hold on if you know of a complaint, a claim or a lawyer's letter about this application. A record on hold is never removed. Tell the Operator at once: the store's escalation matrix applies.</p>
+    <p class="card-meta" style="margin-top:0;">{% if c.hold %}<span class="badge b-navy">On hold: do not delete</span>{% elif c.purged %}Their details have been removed. The decision notices above lose their wording once they are more than three years old, unless a hold is on.{% else %}If they are not hired, their details are due to be removed {{ c.keep_months }} months after the decision, which is what they were told when they applied.{% endif %}</p>
+    <p class="card-meta">Put a hold on if you know of a complaint, a claim or a lawyer's letter about this application. A record on hold is never removed, and neither is the wording of its decision notices. Tell the Operator at once: the store's escalation matrix applies.</p>
     {% if not c.hold %}
     <form method="post" action="{{ url_for('people.hiring_hold', application_id=c.id) }}" class="btnrow"><input type="hidden" name="on" value="1"><button class="btn btn-secondary sm" type="submit">Hold: do not delete</button></form>
     {% elif viewer.is_operator %}
@@ -210,5 +211,4 @@
     {% endif %}
   </div>
 </section>
-{% endif %}
 {% endblock %}

@@ -91,6 +91,14 @@ CREATE TABLE IF NOT EXISTS ai_jobs (
   input_json TEXT, raw_output TEXT, output_json TEXT, error TEXT, system_text TEXT);
 
 CREATE INDEX IF NOT EXISTS idx_people_ai_jobs_target ON ai_jobs (kind, target_id, id);
+
+-- Local housekeeping for the PIN lock: which browsers have People pages
+-- open right now. The browser holds a random id; only a hash of it is
+-- here, with "op" or "l:<leader id>" and two clock stamps. Never exported.
+-- No personal content.
+CREATE TABLE IF NOT EXISTS unlocks (
+  id_hash TEXT PRIMARY KEY, identity TEXT NOT NULL, created_at INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL);
 """
 
 
@@ -145,6 +153,13 @@ def _line(value, cap: int) -> str:
     return " ".join(hub_text.clean(str(value or "")).split())[:cap]
 
 
+def report_fault(where: str, error: BaseException) -> None:
+    """One fixed line in the server log for a page that failed: where (a
+    label of ours) and the kind of error. Never the error's own message,
+    the address that was asked for, or anything a person typed."""
+    print(f"ERROR: People {_line(where, 40)} failed: {type(error).__name__}")
+
+
 def same_person(leader_id, name, other_id, other_name) -> bool:
     """True only when the leader id AND the sign-in name both match. Every
     People access check that ties a row to a person uses this pair, so a
@@ -157,6 +172,57 @@ def same_person(leader_id, name, other_id, other_name) -> bool:
     except (TypeError, ValueError):
         return False
     return str(name).casefold() == str(other_name).casefold()
+
+
+# ---------------------------------------------------------------------------
+# The PIN lock, kept on the server
+# ---------------------------------------------------------------------------
+
+def _unlock_hash(unlock_id: str) -> str:
+    return hashlib.sha256(("people-unlock:" + str(unlock_id or "")).encode()).hexdigest()
+
+
+def unlock_open(identity: str, now: int, max_seconds: int) -> str:
+    """Record that this sign-in entered its PIN again, and return the
+    random id its browser keeps. Rows too old to count are cleared out."""
+    unlock_id = secrets.token_hex(16)
+    with closing(connect()) as conn, conn:
+        conn.execute("DELETE FROM unlocks WHERE created_at < ?", (int(now) - int(max_seconds),))
+        conn.execute("INSERT INTO unlocks (id_hash, identity, created_at, last_seen) VALUES (?,?,?,?)",
+                     (_unlock_hash(unlock_id), str(identity)[:40], int(now), int(now)))
+    return unlock_id
+
+
+def unlock_valid(unlock_id, identity: str, now: int, idle_seconds: int, max_seconds: int) -> bool:
+    """Is this browser's unlock still good: it exists here (it was not
+    locked or signed out, from this browser or any copy of its cookie), it
+    belongs to this same sign-in, it was used recently enough, and the PIN
+    was entered within the longest time allowed. A good one is stamped as
+    just used. One that belongs to a different sign-in is removed."""
+    if not unlock_id or not isinstance(unlock_id, str):
+        return False
+    key = _unlock_hash(unlock_id)
+    with closing(connect()) as conn:
+        row = conn.execute("SELECT identity, created_at, last_seen FROM unlocks WHERE id_hash=?",
+                           (key,)).fetchone()
+        if not row:
+            return False
+        good = (row["identity"] == identity
+                and -60 <= now - row["last_seen"] <= idle_seconds
+                and -60 <= now - row["created_at"] <= max_seconds)
+        with conn:
+            if not good:
+                conn.execute("DELETE FROM unlocks WHERE id_hash=?", (key,))
+            elif now - row["last_seen"] >= 30:      # not a write on every tap
+                conn.execute("UPDATE unlocks SET last_seen=? WHERE id_hash=?", (int(now), key))
+    return good
+
+
+def unlock_close(unlock_id) -> None:
+    """Lock now, or sign out: the unlock is gone for every copy of it."""
+    if unlock_id and isinstance(unlock_id, str):
+        with closing(connect()) as conn, conn:
+            conn.execute("DELETE FROM unlocks WHERE id_hash=?", (_unlock_hash(unlock_id),))
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +346,40 @@ def settings_all() -> dict[str, dict]:
             for key, default in SETTINGS.items()}
 
 
+WAGE_SETTINGS = ("min_wage_general", "min_wage_student")
+# The day the two wage figures above were last true as shipped: Ontario's
+# rates for 1 October 2026. A store that has never confirmed them is
+# treated as having confirmed them on this day.
+WAGES_AS_OF = "2026-10-01"
+
+
+def confirm_setting(key: str, by: str) -> bool:
+    """Stamp a wage figure as checked today without changing it ("Still
+    correct today"). Only the two minimum wage figures can be confirmed."""
+    if key not in WAGE_SETTINGS:
+        return False
+    with closing(connect()) as conn, conn:
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        value = row["value"] if row else SETTINGS[key]
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at, updated_by) VALUES (?,?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+            (key, value, shift_db.now_stamp(), _line(by, 80)))
+        _audit(conn, by, "setting confirmed", "setting", None, f"{key} = {value}")
+    return True
+
+
+def wages_to_check() -> list[str]:
+    """The wage figures last confirmed before the most recent 1 October,
+    the day Ontario's minimum wage usually changes. Empty when both have
+    been looked at since."""
+    today = shift_db.now_local().date()
+    october = f"{today.year if (today.month, today.day) >= (10, 1) else today.year - 1}-10-01"
+    saved = settings_all()
+    return [key for key in WAGE_SETTINGS
+            if ((saved[key]["updated_at"] or "")[:10] or WAGES_AS_OF) < october]
+
+
 def set_setting(key: str, value: str, by: str) -> bool:
     """Save one setting. False when the key is unknown or the value isn't
     acceptable for it; nothing is written then."""
@@ -393,15 +493,17 @@ def token_hash(token: str) -> str:
 # ---------------------------------------------------------------------------
 
 def export_json(by: str) -> str:
-    """Every People table except meta, as one JSON document. It holds
-    private information about people: Operator-only, and logged."""
+    """Every People table except the two that are local housekeeping (meta
+    and unlocks: the link pepper and who has the lock open right now), as
+    one JSON document. It holds private information about people:
+    Operator-only, and logged."""
     with closing(connect()) as conn:
         with conn:
             _audit(conn, by, "backup downloaded")
         conn.execute("BEGIN")                        # one consistent snapshot
         names = [r["name"] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
-            "AND name != 'meta' ORDER BY name")]
+            "AND name NOT IN ('meta', 'unlocks') ORDER BY name")]
         tables = {name: [dict(r) for r in conn.execute(f'SELECT * FROM "{name}"')]
                   for name in names}
         conn.commit()

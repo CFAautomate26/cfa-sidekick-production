@@ -88,9 +88,11 @@ Canada.
   `python -m pytest tests/`). Setup guide:
   [docs/shift-leading-app.md](docs/shift-leading-app.md). Env vars:
   `SHIFT_ADMIN_PIN` (Operator master login), `SHIFT_DB_PATH`,
-  `FLASK_SECRET_KEY` (optional; falls back to a key derived from the
+  `FLASK_SECRET_KEY` (falls back to a key derived from the
   `SCHEDULE_SECRET`/`SHIFT_ADMIN_PIN` env vars, or a random per-boot key if
-  neither is set), `SHIFT_TZ` (default America/Toronto),
+  neither is set; **People does not load on the live server without it**,
+  and the session cookie is HTTPS-only unless `ENV` is test/dev/local),
+  `SHIFT_TZ` (default America/Toronto),
   `SHIFT_NOTIFY_SLACK_CHANNEL` + `SHIFT_NOTIFY_SLACK_MENTION` (to-do
   completion pings to a private Slack channel via `SLACK_BOT_TOKEN`;
   empty channel disables), `SHIFT_NOTIFY_EMAIL` (opt-in email copy via
@@ -153,7 +155,10 @@ Canada.
   sees their own review once shared (`/shift/reviews/mine`); team members
   are sent back to `/hub/`. **The lock**: every People page needs the PIN
   again (`/shift/people/unlock`) and re-locks after `lock_minutes` idle
-  (setting, default 30, 5–120). **Our standards**: one four-level model
+  (setting, default 30, 5–120) and 8 hours after the PIN at most; the
+  unlock is a row in the People store (`unlocks`, never exported), closed
+  by Lock now and by signing out, so a copied cookie stops working; wrong
+  PINs at the lock have their own count, apart from sign-in. **Our standards**: one four-level model
   shared by reviews and hiring, loaded by the Operator from a JSON file and
   versioned (this repo is public and must never hold the store's wording;
   `PEOPLE_EXAMPLE_MODEL` is a neutral example). **Reviews**: observation
@@ -163,20 +168,30 @@ Canada.
   share → the leader confirms receipt (never agreement) → print view; no
   overall score, ranking or comparison. **Hiring**: postings with a publish
   check (pay range, vacancy statement, accommodation notice with a named
-  contact, minimum-wage settings) that only the Operator publishes, an
+  contact, dated minimum-wage settings, no question that asks about a
+  prohibited ground) that only the Operator publishes, an
   exact kept copy of each posting and blank form, a two-step application on
-  a private link (HMAC hash kept, never the token), a pipeline moved only
+  a private link (HMAC hash kept, never the token; a repeat of the same
+  email or phone is kept and flagged for a leader, never refused, so the
+  form cannot be used to learn who applied; per-address limits count the
+  hop the platform's proxy added, `PEOPLE_PROXY_HOPS`), a pipeline moved only
   by a person's tap, per-criterion scoring (no total), interview
   scorecards, the 45-day decision-notice tracker, copy-ready messages that
   open the leader's own mail/text app (the tool sends nothing), metrics,
   and a manual Operator purge on `/shift/hiring/retention` (nothing is
   deleted automatically; "Hold: do not delete" exempts). **AI rules**
   (`people_ai.py`): off by default; needs `OPENAI_API_KEY` plus the
-  `ai_reviews` / `ai_hiring` setting (hiring also per posting, which then
-  prints the AI statement, and only for applicants who applied while it
-  showed); input is de-identified and stored exactly as sent; output is a
-  labelled draft or suggested level shown only after the person saved their
-  own, validated by code, never copied into a record, never a decision. It
+  `ai_reviews` / `ai_hiring` setting (hiring also per posting, switched on
+  only while the posting is a draft so it prints the AI statement from the
+  day it goes live; a posting that has been public without the statement
+  never uses AI; and only for applicants who applied while it showed);
+  input is de-identified, leaves out any note or answer worded about
+  health, leave or another protected ground, and is stored exactly as
+  sent; output is a labelled draft or suggested level shown only after the
+  person saved their own, validated by code (of the AI's own "human check"
+  lines only fixed sentences are ever shown; a review draft is not shown
+  once its notes have changed), never copied into a record, never a
+  decision. It
   is never sent Team Hub activity, and People code never reads the 1:1 or
   goals tables (test-pinned). Registered fault-isolated after the Hub; the
   menu rows come from the guarded `teamhub_nav._people_rows`. No scripts;
@@ -184,12 +199,14 @@ Canada.
   tests `tests/test_people_*.py` + `tests/test_careers.py` (kit
   `tests/people_testkit.py`, first-run walk `tests/people_walk.py`,
   who-may-open-what `tests/test_people_roles.py`, privacy
-  `tests/test_people_privacy.py`). Guide: [docs/people.md](docs/people.md);
+  `tests/test_people_privacy.py`, one test per review finding
+  `tests/test_people_findings.py`). Guide: [docs/people.md](docs/people.md);
   legal reference:
   [docs/legal-counsel/hiring-and-leader-reviews.md](docs/legal-counsel/hiring-and-leader-reviews.md)
   (the escalation matrix applies to anything a review or a hiring decision
-  leads to). Env vars: `PEOPLE_DB_PATH`, `PEOPLE_AI_MODEL` (optional),
-  `OPENAI_API_KEY`.
+  leads to). Env vars: `FLASK_SECRET_KEY` (required on the live server),
+  `PEOPLE_DB_PATH`, `PEOPLE_AI_MODEL` (optional), `PEOPLE_PROXY_HOPS`
+  (optional, default 1), `OPENAI_API_KEY`.
 - `slack_coverage.py` — Slack Events API blueprint (`POST /slack/events`)
   that auto-responds in-thread in the #shift-coverage Slack channel:
   validates `🔄 COVERAGE REQUEST` template posts, nags un-released shifts

@@ -84,7 +84,10 @@
   {% elif d.not_enough %}
   <p class="subhead">Level</p>
   <p><span class="badge">Not enough to rate yet</span></p>
-  <p class="rv-quiet">Your reviewer did not see enough in this period to choose a level. That is not a mark against you.</p>
+  <p class="rv-quiet">{{ 'There was not enough in this period to choose a level.' if d.set_by_operator else 'Your reviewer did not see enough in this period to choose a level.' }} That is not a mark against you.</p>
+  {% endif %}
+  {% if d.set_by_operator %}
+  <p class="rv-quiet">This level was set by the Operator after reading all the reviews together.{% if d.comment %} Your reviewer's comment below was written before that.{% endif %}</p>
   {% endif %}
   {% if d.comment %}
   <p class="subhead">Your reviewer's comment</p>

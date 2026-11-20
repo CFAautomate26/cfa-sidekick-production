@@ -4,7 +4,7 @@
 <section class="hero compact">
   <p class="eyebrow">Step 1 of 2 · about a minute</p>
   <h1 class="headline">Apply: {{ view.title }}</h1>
-  <p class="triage">{{ view.type_label }} · {{ view.pay }} · <a class="textlink" href="{{ url_for('careers.posting', slug=view.slug) }}">Read the posting</a></p>
+  <p class="triage">{{ view.type_label }} · {{ view.pay_short }} · <a class="textlink" href="{{ url_for('careers.posting', slug=view.slug) }}">Read the posting</a></p>
 </section>
 
 <p class="callout" style="margin-top:22px;">{{ icon('info') }}<span>{{ view.accommodation }}</span></p>

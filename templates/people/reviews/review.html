@@ -2,7 +2,7 @@
 {% from "people/_ui.html" import crumbs, guidance, escalation, level_pills, stamp, ai_label %}
 {% from "people/reviews/_parts.html" import rv_styles, status_badge, note_list %}
 {% set drafting = ai.status == 'running' %}
-{% block title %}{{ review.display_name }} · review{% endblock %}
+{% block title %}Leader review{% endblock %}
 {% block head %}{{ rv_styles() }}
 {% if drafting %}<meta http-equiv="refresh" content="5; url={{ url_for('people.reviews_review', review_id=review.id) }}#ai">{% endif %}
 {% endblock %}

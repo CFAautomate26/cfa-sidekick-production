@@ -54,10 +54,11 @@ def nav_counts(kind, leader_id, name) -> dict:
 def extra_counts(kind, leader_id, name) -> dict:
     """More for the badge and the People home page, for the same people:
     attention (live postings that no longer pass the publish check, for
-    example after a wage floor went up in Settings)."""
+    example after a wage floor went up in Settings) and notices_follow_up
+    (told "no decision yet", and a decision has since been made)."""
     if kind != "operator" and "hiring" not in people_db.capabilities(leader_id, name):
         return {}
-    return {"attention": len(hdb.needs_attention())}
+    return {"attention": len(hdb.needs_attention()), "notices_follow_up": hdb.notices_to_follow_up()}
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +406,7 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
     def hiring_home():
         return render_template("people/hiring/pipeline.html", tabs=_tabs("pipeline"),
                                postings=hdb.pipeline(), counts=hdb.counts(),
+                               follow_up=hdb.notices_to_follow_up(),
                                stage_labels=hdb.STAGE_LABELS, active_stages=hdb.ACTIVE_STAGES,
                                stages=hdb.STAGES, attention=hdb.needs_attention(),
                                drafts=sum(1 for p in hdb.postings() if p["status"] == "draft"))
@@ -456,6 +458,7 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             flags=hdb.wording_flags(posting), copies=hdb.snapshots(posting_id),
             standards=[d for d in (model["dimensions"] if model else []) if d["key"] not in used],
             has_model=bool(model), ai_setting=people_db.setting_on("ai_hiring"), limits=hdb,
+            wages_to_check=people_db.wages_to_check() if posting["status"] != "closed" else [],
             public_url=url_for("careers.posting", slug=posting["slug"], _external=True)
             if "careers" in current_app.blueprints else "")
 
@@ -720,7 +723,8 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
     @hiring
     def hiring_outcome(application_id, interview_id):
         outcome = request.form.get("outcome", "")
-        problem = hdb.set_interview_outcome(interview_id, application_id, outcome, people.actor())
+        problem = hdb.set_interview_outcome(interview_id, application_id, outcome, people.actor(),
+                                            confirmed=_ticked("not_held"), operator=people.can("operator"))
         if problem:
             flash(problem)
         else:
@@ -917,7 +921,8 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
         board = hdb.notice_board()
         return render_template("people/hiring/notices.html", tabs=_tabs("notices"), board=board,
                                notice_kinds=hdb.NOTICE_KINDS, days=hdb.NOTICE_DAYS,
-                               soon=hdb.NOTICE_SOON_DAYS)
+                               soon=hdb.NOTICE_SOON_DAYS, aim=hdb.NOTICE_AIM_DAYS,
+                               stage_labels=hdb.STAGE_LABELS)
 
     @bp.route("/hiring/metrics")
     @hiring
@@ -944,8 +949,13 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
         if not _ticked("confirm"):
             flash("Tick the box to remove these applicants' details. It can't be undone.")
             return redirect(url_for("people.hiring_retention"))
-        count = hdb.purge(people.actor())
-        _log("applications purged", "", None, f"{count} applications")
-        flash(f"Removed the personal details of {count} application{'' if count == 1 else 's'}."
-              if count else "Nothing was due to be removed.")
+        count, notices = hdb.purge_all(people.actor())
+        _log("applications purged", "", None, f"{count} applications" + (f", {notices} old notices" if notices else ""))
+        said = []
+        if count:
+            said.append(f"Removed the personal details of {count} application{'' if count == 1 else 's'}.")
+        if notices:
+            said.append(f"Removed the wording of {notices} decision notice{'' if notices == 1 else 's'} "
+                        "more than three years old.")
+        flash(" ".join(said) or "Nothing was due to be removed.")
         return redirect(url_for("people.hiring_retention"))

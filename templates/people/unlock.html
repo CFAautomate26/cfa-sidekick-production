@@ -1,5 +1,12 @@
 {% extends "people/base.html" %}
 {% block title %}Enter your PIN{% endblock %}
+{% block head %}
+<style>
+/* The PIN box is a plain text box on purpose (see below), so the digits
+   are hidden here instead. */
+.pp-pin { -webkit-text-security: disc; text-security: disc; letter-spacing: 0.2em; }
+</style>
+{% endblock %}
 {% block content %}
 <section class="hero compact">
   <p class="eyebrow">People · signed in as {{ viewer.name }}</p>
@@ -9,10 +16,12 @@
 
 <form method="post" action="{{ url_for('people.unlock') }}" class="card narrow" autocomplete="off" style="margin-top:22px;">
   {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-  <label class="field" for="pin">Your PIN</label>
-  <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="32" required autofocus>
+  <label class="field" for="unlock-code">Your PIN</label>
+  {# Not a password box and not named "pin": a browser that saved the
+     sign-in PIN must not fill it in for whoever is holding the device. #}
+  <input id="unlock-code" class="pp-pin" name="unlock_code" type="text" inputmode="numeric" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="32" required autofocus>
   <div class="btnrow"><button class="btn btn-primary" type="submit">Open People pages</button></div>
 </form>
 
-<p class="callout" style="margin-top:12px;">{{ icon('lock') }}<span>These pages hold private information about people, so they lock after {{ people_lock_minutes }} minutes. It is the same PIN you sign in with.</span></p>
+<p class="callout" style="margin-top:12px;">{{ icon('lock') }}<span>These pages hold private information about people, so they lock after {{ people_lock_minutes }} minutes. It is the same PIN you sign in with. They ask for it again {{ people_lock_hours }} hours after you last entered it, however busy you have been. On a phone or computer that other people use, don't let the browser save your PIN.</span></p>
 {% endblock %}

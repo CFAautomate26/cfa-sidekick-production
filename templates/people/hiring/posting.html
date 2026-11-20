@@ -33,6 +33,9 @@
   {% else %}
   <p class="callout">{{ icon('checkcircle') }}<span><strong>The publish check passes.</strong> Pay, a vacancy statement, the accommodation notice and a named contact are all here.</span></p>
   {% endif %}
+  {% if wages_to_check %}
+  <p class="callout tan">{{ icon('clock') }}<span><strong>The minimum wage figures this check uses were last confirmed before the most recent October 1</strong>, the day Ontario's rates usually change. {% if viewer.is_operator %}<a class="textlink" href="{{ url_for('people.settings') }}#wages">Check and confirm them in People settings</a> before you rely on this check.{% else %}Ask the Operator to check them in People settings.{% endif %}</span></p>
+  {% endif %}
   {% if flags %}
   <div class="callout tan">{{ icon('info') }}<span><strong>Words to read again.</strong> They don't block the posting, but a person has to decide they are about the job.
     <ul class="pp-problems">{% for flag in flags %}<li><strong>“{{ flag.term }}”</strong>: {{ flag.advice }}</li>{% endfor %}</ul></span></div>

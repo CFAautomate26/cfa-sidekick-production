@@ -50,20 +50,43 @@ confirmed a review, so they can always read it again.
 People pages hold private information about people, so being signed in to
 Team Hub is not enough: the first People page asks for **your PIN again**
 (the same PIN you sign in with). It then stays open while you use it and
-locks itself after **30 minutes without a tap**. Change the minutes under
-Settings → The lock (5 to 120). **Lock now** is at the bottom of every
-People page: tap it before you hand the phone or the office computer to
-someone else.
+locks itself after **30 minutes without a tap**, and in any case **8 hours
+after you entered the PIN**. Change the minutes under Settings → The lock
+(5 to 120). **Lock now** is at the bottom of every People page: tap it
+before you hand the phone or the office computer to someone else.
 
-Two things to know:
+Things to know:
 
-- Wrong PINs here count toward the same lockout as wrong PINs at sign-in.
+- The lock is kept on the server, not only in the browser. **Lock now**,
+  signing out of Team Hub, and signing in as someone else all close it at
+  once, including for any copy of the browser's sign-in cookie.
+- **Five wrong PINs hold the lock for ten minutes.** That count belongs to
+  the lock and to your own sign-in: wrong PINs typed at the sign-in page,
+  by you or by anyone else, never hold your People lock, and wrong PINs
+  here do not lock your sign-in. The activity log notes each wrong PIN and
+  each hold.
+- The PIN box is deliberately not a password box, so a browser that saved
+  your sign-in PIN does not fill it in for whoever is holding the phone.
+  **On a phone or computer other people use, don't let the browser save
+  your PIN.** This was not tried on the store's own devices when it was
+  built: open People on each and check the box stays empty.
 - If the lock closes while a form is open, that form is **not saved**. You
   are asked for your PIN and brought back to the page to do it again. Save
   as you go on a long review.
+- Page titles never carry an applicant's or a leader's name, so the
+  browser's history and tab list do not show who a page was about.
 
 ## First-time setup, in order
 
+0. **Set `FLASK_SECRET_KEY` on the server first** (Render → Environment),
+   to a long random value: `python3 -c "import secrets;
+   print(secrets.token_hex(32))"`. **On the live server People does not
+   load without it**: no People row appears in the menu, and the server log
+   says "People is NOT loaded". The sign-in and the PIN lock both rest on
+   the key that signs the sign-in cookie, and the key the app falls back to
+   is worked out from `SCHEDULE_SECRET` and the Operator's PIN, which is
+   not strong enough for records about people. Everyone signs in again
+   once after it is set. `/shift`, `/hub` and the bots are unaffected.
 1. **Check the disk.** People keeps its records in `people.db`, beside the
    Team Hub database on the Render persistent disk. If `SHIFT_DB_PATH` is
    not set, a red banner on People pages says records will not survive a
@@ -77,7 +100,13 @@ Two things to know:
 5. **Settings.** Set the **hiring contact** (a name, plus an email or a
    phone number): no posting can go live without one, because the
    accommodation notice needs a named person. Check the two **minimum wage**
-   figures against ontario.ca. Leave both AI switches **off** for now.
+   figures against ontario.ca and tap **Still correct today** under each
+   (or change it): Settings shows when each was last confirmed, and after
+   every 1 October it asks you to look again, on Settings, on the People
+   home page and on each posting. Lowering a figure needs a tick. Leave
+   both AI switches **off** for now. Before the first posting goes live,
+   open *For whoever set up the server* at the bottom of Settings and check
+   the address it shows is your own (see *The careers pages*).
 6. **Leader reviews → Leaders.** *Add every leader* puts every active
    Team Hub leader under review with you as the reviewer. Then set each
    one's title, area of ownership and reviewer.
@@ -223,7 +252,11 @@ lawyer's read before it is used toward any consequence.
   Below it: how each reviewer spread their levels, as questions to ask and
   not verdicts, and where the team as a whole sits on each standard. You
   can change a level on a **finalised, not yet shared** review. It needs a
-  reason, and the reviewer's own level and your reason are kept.
+  reason, and the reviewer's own level and your reason are kept. The
+  reviewer's comment for that standard was written for the level before,
+  so read it before you share: the leader's copy says "This level was set
+  by the Operator after reading all the reviews together" under that
+  standard, with no reason and no earlier level.
 - **Process health** shows how well the process itself is being run:
   finished and on time, the spread of levels, how many notes sit behind a
   rating, how often a saved level matched the AI suggestion, actions done
@@ -238,7 +271,8 @@ lawyer's read before it is used toward any consequence.
 review**. They see the level for each standard with the store's
 description of that level, the comments, the notes it is based on,
 strengths, growth focus and next steps. They never see AI output, the
-"before you finish" answers, or that a review was ever on hold.
+"before you finish" answers, that a review was ever on hold, or why a
+level was changed in calibration.
 
 After you have talked it through, the leader confirms on their own
 sign-in: the date it was discussed, optional comments, and this wording:
@@ -346,8 +380,11 @@ Applying takes two short steps on a phone:
    a **private link** that is theirs alone. The link takes answers for 7
    days (Settings). After that, and any time later, the same link shows
    only that we have their application and, once you have logged a notice,
-   whether a hiring decision has been made. It never shows a score, a note
-   or a stage.
+   where it stands: "A hiring decision has not yet been made", "A hiring
+   decision has been made for this posting" (only for someone who was
+   interviewed or offered the job), or, for someone never interviewed, "We
+   will not be moving forward with your application". It never shows a
+   score, a note or a stage.
 
 **An application that gives the same email or phone number as an earlier
 one** to the same posting (within 30 days) is taken like any other, with
@@ -377,10 +414,17 @@ request. It should be your own (what a "what is my IP" site shows). If it
 is not, set `PEOPLE_PROXY_HOPS` (below).
 
 One limit to know: like any web address that is opened, a private link's
-address can show up in the hosting service's own request log. The page
-behind it never shows the applicant's name or contact details, a score or
-a note, and once the questions are answered it only shows the status lines
-above.
+address can show up in the hosting service's own request log. The app
+itself never writes it anywhere, including when a careers page fails (the
+log then gets one fixed line naming the kind of error and nothing else).
+The page behind the link never shows the applicant's name or contact
+details, a score or a note, and once the questions are answered it only
+shows the status lines above.
+
+Where a posting's lower pay figure is a student rate, the list of
+positions and the top of the form print it as "$16.90 (student rate) to
+$19.50 an hour"; the posting itself carries the full sentence about who
+the student rate applies to.
 
 ### The pipeline
 
@@ -417,10 +461,23 @@ record what happened. An **attended** interview does two things:
   their last interview. "No decision yet" is a valid notice, and is owed if
   that is the truth on day 45.
 
+Log **every** interview that was held. One that was held before the
+decision was recorded can still be added afterwards (a decided application
+takes a past-dated interview, never a new one). Changing an **attended**
+interview to cancelled, rescheduled or no-show while its notice is still
+owed takes that notice off the list, so it asks for a tick that the
+interview was not held, and once the notice is overdue only the Operator
+can do it.
+
 **Notices** lists everyone who is owed one, soonest deadline first, overdue
-in red; the People row in the menu shows the count. A second interview
-inside the 45 days moves the deadline; interviews further apart each start
-their own clock.
+in red; the People row in the menu shows the count. Our own aim is 30
+days, and the list marks anyone past it. A second interview inside the 45
+days moves the deadline; interviews further apart each start their own
+clock. **Someone told "no decision yet" stays on the Notices page**, under
+*Told "not yet": follow up when decided*, until an offer or a
+not-moving-forward notice is logged for them, and the Hiring page and the
+menu count say so once their application has been decided. Whether the law
+requires that second notice is not settled, so we send one.
 
 ### Messages
 
@@ -461,10 +518,13 @@ lists who is due, and the People home page reminds you when anyone is.
   experience, written answers, leaders' notes, the notes on scores, any AI
   copy of the answers and the private link.
 - **Kept:** the bare record (posting, stages, dates, levels) so the numbers
-  stay true; every decision notice until it is three years old; postings
-  and their kept copies; anyone hired.
-- **Hold: do not delete** on an applicant's Contact page exempts them. Use
-  it the day you hear of a complaint or claim. Only you can take it off.
+  stay true; every decision notice for three full years after the day it
+  was given (the same button then removes its wording and the name, and
+  says how many it removed); postings and their kept copies; anyone hired.
+- **Hold: do not delete** on an applicant's Contact page exempts them, and
+  keeps the wording of their decision notices too. It can be put on even
+  after the details have been removed. Use it the day you hear of a
+  complaint or claim. Only you can take it off.
 - An application on a closed posting that was never marked not selected,
   withdrawn or hired never becomes due. The page counts these: decide them.
 
@@ -542,6 +602,7 @@ the disk. Download it after each review cycle and after each hiring round.
 
 | Variable | What it is |
 |---|---|
+| `FLASK_SECRET_KEY` | **Required on the live server** (32 characters or more): the key that signs the sign-in cookie. Without it People does not load there. Any `ENV` other than `test`, `dev`, `development` or `local` counts as the live server, and there the sign-in cookie is also marked HTTPS-only. |
 | `PEOPLE_DB_PATH` | Where the People database lives. Leave it unset and it is `people.db` beside the Team Hub database (`SHIFT_DB_PATH`), on the persistent disk. |
 | `OPENAI_API_KEY` | The AI service key. Already set for the GroupMe bot. People uses it only while an AI switch is on. |
 | `PEOPLE_AI_MODEL` | Optional. Which of the AI provider's models to use; the default in `people_ai.py` if unset. |
@@ -578,4 +639,6 @@ on its own after the Hub, so a fault in it never takes down `/shift`,
 `/hub` or the bots. Tests: `tests/test_people_*.py` and
 `tests/test_careers.py` (`tests/test_people_roles.py` is the
 who-may-open-what table; `tests/test_people_privacy.py` walks both flows
-and checks nothing private leaves the People store).
+and checks nothing private leaves the People store;
+`tests/test_people_findings.py` has one or more tests for each thing two
+independent reviews of the finished section found, named by finding).
