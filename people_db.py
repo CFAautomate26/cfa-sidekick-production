@@ -546,7 +546,7 @@ def token_hash(token: str) -> str:
 def export_json(by: str) -> str:
     """Every People table except the three that are local housekeeping
     (meta, unlocks and pin_tries: the link pepper, who has the lock open
-    right now, and the PINs recently tried at it), as one JSON document.
+    right now, and when a PIN was tried at it, never the PIN), as one JSON document.
     It holds private information about people: Operator-only, and logged."""
     with closing(connect()) as conn:
         with conn:
