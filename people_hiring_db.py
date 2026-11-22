@@ -427,6 +427,13 @@ def accommodation_notice(conf: dict) -> str:
             "how your application is assessed.")
 
 
+# Where the records sit. The app runs on a hosting company's server, and the
+# tool cannot know which country that server is in (today it is outside
+# Canada), so the notice says what is true wherever it runs.
+STORED_WHERE = ("Our records are kept on a server that a hosting company runs for us, and they may "
+                "be stored outside Canada.")
+
+
 def privacy_notice(conf: dict, ai: bool) -> list[str]:
     """What an applicant is told before they send the form. Every sentence
     is something this tool really does (see purge() and apply())."""
@@ -436,6 +443,7 @@ def privacy_notice(conf: dict, ai: bool) -> list[str]:
         f"that follow, to assess your application for work at {conf['employer_name']}, to "
         "contact you about it, and to meet our legal record-keeping duties.",
         "It is seen only by the Operator and the leaders involved in hiring.",
+        STORED_WHERE,
     ]
     if ai:
         lines.append(

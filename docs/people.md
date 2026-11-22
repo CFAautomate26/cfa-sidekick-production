@@ -101,6 +101,12 @@ Things to know:
    Team Hub database on the Render persistent disk. If `SHIFT_DB_PATH` is
    not set, a red banner on People pages says records will not survive a
    deploy: fix that first (see [shift-leading-app.md](shift-leading-app.md)).
+   That disk is wherever the hosting service runs the app. When this was
+   written that was a region in the United States, so applicant records
+   and leader reviews are stored outside Canada whether or not AI is used.
+   The applicant privacy notice says records "may be stored outside
+   Canada", and the notice to leaders has a line for it. To keep them in
+   Canada the service would have to move to a Canadian region or host.
 2. **Open it.** ☰ → **People** → enter your PIN.
 3. **Who has access.** Tick *Hiring* and *Leader reviews* for the leaders
    who should have them. One tap each; removing a tick takes effect on

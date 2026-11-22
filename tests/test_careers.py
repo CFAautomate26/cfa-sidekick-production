@@ -179,6 +179,9 @@ def test_the_form_asks_only_what_the_job_needs(world, public):
                    "A friend or family member who works here", "Indeed or another job site",
                    "If you are under 18, you may wish to read this with a parent or guardian.",
                    "It is seen only by the Operator and the leaders involved in hiring.",
+                   # the records sit on a hosting company's server, which is outside Canada today
+                   "Our records are kept on a server that a hosting company runs for us, and they may "
+                   "be stored outside Canada.",
                    "We do not sell your information or use it for marketing.",
                    "for 24 months after the hiring decision", "for 3 years",
                    "You can ask to see, correct or withdraw your application by contacting Morgan Example"):

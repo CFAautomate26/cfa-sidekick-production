@@ -186,7 +186,8 @@ send a sentence that is not true of this store.**
 > with [reviewer or Operator], and can add your own comments, which stay
 > with the review. Time you spend on your reflection and your review is
 > paid time. Reviews are confidential to you, your reviewer and [Operator
-> name]. Time away on a protected leave or under an accommodation is not
+> name]. [They are kept on our Team Hub server, which a hosting company
+> runs for us and which may be outside Canada.] Time away on a protected leave or under an accommodation is not
 > counted against you. If anything is affecting your work that you would
 > like support or an accommodation for, please tell [name] at any time.
 > Questions about the process or how your information is handled:
@@ -291,7 +292,9 @@ verified (Part E).
 > questions that follow, to assess your application for work at
 > [Employer], to contact you about it, and to meet our legal
 > record-keeping duties. It is seen only by the Operator and the leaders
-> involved in hiring. [Only while AI is in use for the posting: Your
+> involved in hiring. Our records are kept on a server that a hosting
+> company runs for us, and they may be stored outside Canada. [Only while
+> AI is in use for the posting: Your
 > written answers to the quick questions may be sent to an AI service run
 > by an outside company, which may process them outside Canada. Your name
 > and contact details are not sent with them.] We do not sell your
@@ -525,6 +528,7 @@ waive rights. Decision-critical figures need a "verify current" check.
 | Whether written accommodation policies exist | The offer message says they do (C4). |
 | Whether any leader is under 18 | The Tier 3 flag for minors; retention. |
 | The AI provider's data terms (training on store data, retention, storage location, deletion) | Both go-live checklists; the "may process outside Canada" sentences. |
+| Which country the Team Hub server is in. When this was written the hosting service ran it in the United States, so applicant records and leader reviews are stored outside Canada whether or not AI is used | The "may be stored outside Canada" sentences in C1 and C5 (B10). If the Operator wants the records kept in Canada, the service has to be moved to a Canadian region or host first. |
 | Whether reviews will affect pay | Tier 2: merit-pay and pay-equity rules. |
 | Whether leaders are in fact paid for the time they spend on a reflection, on reading their review and in the review conversation. **The leader's pages tell them it counts as paid time**, and the tool does not record the time: the Operator has to confirm payroll does this before the first cycle | B7; a statement the tool makes that only practice can keep true. |
 | Whether the store's standards have been read for behaviour-only wording | B4. |
