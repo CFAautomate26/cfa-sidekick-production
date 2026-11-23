@@ -181,7 +181,10 @@ keyboard to talk instead of type.
   it finds a word to read again. It never blocks; it is yours to fix. It
   knows everyday words for health, family and time away ("chemo",
   "appointment", "her mom", "was away for three weeks", "missed two
-  shifts"), not only the formal ones. Under a **To work on** note that
+  shifts"), not only the formal ones, and it reads some of them in their
+  company: "a family emergency" and "was away for two weeks" are caught,
+  "helped a family find a table" and "was away from the front counter"
+  are not. Under a **To work on** note that
   reads like time away it adds: *if this was time away, do not write it as
   a note; mark the dates as time away on the review instead.*
 - It is a word list, not a reader. It misses a misspelling, another
@@ -252,7 +255,7 @@ What comes back is a second read of the notes that were sent:
   the suggested level for that standard is withheld. So is the suggested
   level for any standard whose draft relied on a note that got through but
   uses an everyday word that *may* be about health, family or time away
-  ("away", "exhausted", "left early", "hurt"): the note was sent, because
+  ("exhausted", "left early", "hurt", "missed"): the note was sent, because
   such words are usually about work, but it never grounds a level.
 - The "Human check needed" lines at the top of the draft are **fixed
   sentences written by our own code**. The AI can ask for one of four of
@@ -793,7 +796,8 @@ and checks nothing private leaves the People store;
 independent reviews of the finished section found, named by finding, and
 `tests/test_people_verify.py` does the same for the three checks that
 followed: an attack on those fixes, a compliance read, and a run in a real
-browser).
+browser; `tests/test_people_third.py` does it for the third round of the
+same three checks).
 
 **How the app is served matters to the PIN.** A four-digit PIN is only as
 strong as the limit on guesses. The lock's limit is kept in the People

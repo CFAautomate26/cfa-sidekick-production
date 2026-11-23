@@ -206,7 +206,7 @@
     {% set picked = sent.level if sent else ('not_enough' if row and row.not_enough else (row.level|string if row and row.level else '')) %}
     <div>
       <fieldset class="rv-set"{{ ' disabled' if drafting }}>
-        <legend class="subhead">Your rating</legend>
+        <legend class="subhead" id="r-{{ dim.key }}">Your rating</legend>
         {% if dim.key in needs_level %}
         <p class="callout warm" role="alert">{{ icon('alert') }}<span><strong>Not saved yet: choose a level.</strong> What you typed is still in the box below. A comment is kept with a level, or with “Not enough to rate yet”. Pick one, then save.</span></p>
         {% endif %}
@@ -216,9 +216,10 @@
         <label class="rv-choice"><input type="radio" form="rv-rate" name="level-{{ dim.key }}" value="not_enough"{{ ' checked' if picked == 'not_enough' }}><span><b>Not enough to rate yet</b><small>For when you have not seen enough this period. It is never a mark against the leader.</small></span></label>
         <label class="field" for="c-{{ dim.key }}">Comment <span class="muted">(what you saw that puts it at this level)</span></label>
         <textarea id="c-{{ dim.key }}" form="rv-rate" name="comment-{{ dim.key }}" maxlength="{{ caps.comment }}">{{ sent.comment if sent else (row.comment if row else '') }}</textarea>
-        {# The address the button posts to ends in this standard's own "#...", so a page that
-           comes straight back (a save that was refused) opens here and not at the top. #}
-        <div class="btnrow"><button class="btn btn-primary sm" type="submit" form="rv-rate" name="dimension_key" value="{{ dim.key }}" formaction="{{ rate_url }}#d-{{ dim.key }}">Save {{ dim.name }}</button>{% if is_rated %}<span class="pp-stamp">Saved by {{ stamp(row.rated_by, row.rated_at) }}</span>{% endif %}</div>
+        {# The address the button posts to ends in this rating's own "#...", so a page that
+           comes straight back (a save that was refused) opens at these boxes, with the reason
+           on screen, and not at the top of the page or of a long card. #}
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit" form="rv-rate" name="dimension_key" value="{{ dim.key }}" formaction="{{ rate_url }}#r-{{ dim.key }}">Save {{ dim.name }}</button>{% if is_rated %}<span class="pp-stamp">Saved by {{ stamp(row.rated_by, row.rated_at) }}</span>{% endif %}</div>
         <p class="fine-line">Saving here also saves any other standard on this page where you have picked a level, and your strengths and growth focus.</p>
       </fieldset>
     </div>

@@ -192,6 +192,22 @@ def test_a33_a_lock_that_could_not_be_written_is_refused_by_another_process_and_
     assert unlock_rows() == 0 and people_db.unlocks_marked_closed() == []
 
 
+def test_a33_the_unlock_is_marked_closed_before_the_store_is_asked_to_delete_it(world, monkeypatch):
+    """A busy store makes the delete wait up to 15 seconds before it fails.
+    A copy of the cookie must not work during that wait either."""
+    operator = kit.open_as(world, "operator")
+    seen, real = [], people_db.unlock_close
+
+    def watched_close(unlock_id, timeout=None):
+        seen.append((people_db.unlock_marked_closed(unlock_id), unlock_id in people._revoked, unlock_rows()))
+        return real(unlock_id, timeout)
+
+    monkeypatch.setattr(people_db, "unlock_close", watched_close)
+    assert operator.post("/shift/people/lock").status_code == 302
+    assert seen == [(True, True, 1)]              # marked and remembered while its row was still in the store
+    assert people_db.unlocks_marked_closed() == [] and people._revoked == set() and unlock_rows() == 0
+
+
 def test_a33_a_clean_lock_leaves_no_mark_and_a_new_unlock_is_not_caught_by_an_old_one(world):
     operator = kit.open_as(world, "operator")
     assert operator.post("/shift/people/lock").status_code == 302
@@ -434,9 +450,32 @@ def test_c35_everyday_wording_about_a_ground_is_now_caught_in_a_note(note, key):
     "Took the orders on the tablets in the drive-thru lane.", "Was 15 minutes late on Tuesday.",
     "Only 15 cars got through in the first half hour.", "She's off the pace at lunch.",
     "Is due for a break at two.", "The truck order is due in the morning.",
+    # the new words in the company a restaurant keeps them in
+    "Gave him a verbal counselling for being late twice.",
+    "Helped the newcomers settle in on their first shift.",
+    "Rang the remake in on comp and told the guest.",
+    "Took their tablets outside for face-to-face ordering.",
+    "Taking tablets out to the cars sped up the line.",
+    "She is due in at four for the close.",
+    "She's off at four, so she preps the handover first.",
+    "Sold only 15 and ran out before the rush.",
+    "He is 15 minutes late most Saturdays.",
+    "She was 15 short on her till.",
+    "Turned 15 tables in the first hour.",
 ])
-def test_c35_the_new_patterns_leave_the_work_alone(work):
+def test_c35_the_new_words_and_patterns_leave_the_work_alone(work):
     assert grounds(work) == [], grounds(work)
+
+
+@pytest.mark.parametrize("personal, key", [
+    ("He has been on comp since May.", "leave"), ("She forgot to take her tablets and went home.", "health"),
+    ("She is 16.", "age"), ("He just turned 15.", "age"), ("She is only 16 and cannot close.", "age"),
+    ("She's due any day now.", "family"), ("Her baby is due in the spring.", "family"),
+    ("He is a newcomer to Canada.", "origin"), ("She's off again this week.", "leave"),
+    ("He started going to counselling in the fall.", "health"),
+])
+def test_c35_and_still_catch_the_same_words_about_a_person(personal, key):
+    assert key in {k for _, k in grounds(personal)}, grounds(personal)
 
 
 @pytest.mark.parametrize("question", [
@@ -446,6 +485,24 @@ def test_c35_the_new_patterns_leave_the_work_alone(work):
     "Do you take any tablets we should know about?",
 ])
 def test_c35_a_question_that_asks_it_in_everyday_words_is_held(question):
+    assert hdb.question_hits(question), question
+
+
+@pytest.mark.parametrize("about_the_work", [
+    "How would you make a guest feel at home?", "Tell us about a time a teammate had your back.",
+    "Tell us about a time you worked with a partner on a project.",
+    "Are you comfortable taking tablets out to cars in the drive-thru?",
+    "Are you legally entitled to work in Canada?",                    # the one citizenship question the law allows
+])
+def test_c35_the_new_question_words_do_not_hold_a_question_about_the_work(about_the_work):
+    assert hdb.question_hits(about_the_work) == [], about_the_work
+
+
+@pytest.mark.parametrize("question", [
+    "Who looks after things at home when you work evenings?", "What does your partner do?",
+    "Have you worked in Canada before?",
+])
+def test_c35_and_still_hold_the_same_words_about_the_applicant(question):
     assert hdb.question_hits(question), question
 
 
@@ -537,8 +594,9 @@ def test_c38_a_comment_typed_with_no_level_comes_back_in_its_box_with_the_reason
     assert "Not saved yet" not in html[html.index('id="d-reliable"'):html.index('id="d-guest-care"')]
     stored = rdb.ratings(rid)
     assert stored["reliable"]["level"] == 3 and stored["teamwork"]["not_enough"]
-    # each Save posts to an address that ends at its own standard, so the page comes back there
-    assert f'formaction="/shift/reviews/review/{rid}/rate#d-guest-care"' in html
+    # each Save posts to an address that ends at its own rating boxes, so the page comes back there
+    assert f'formaction="/shift/reviews/review/{rid}/rate#r-guest-care"' in html
+    assert '<legend class="subhead" id="r-guest-care">Your rating</legend>' in html
     # with a level picked, the same comment saves
     assert "Saved." in post(rae, f"/shift/reviews/review/{rid}/rate", {
         "dimension_key": "guest-care", "level-guest-care": "4", "comment-guest-care": "Walked a guest to their car.",
@@ -752,6 +810,7 @@ def test_b3f5_the_candidate_pages_boxes_are_paused_while_the_page_reloads_itself
     assert 'http-equiv="refresh" content="6;' in busy
     assert busy.count('<fieldset class="hr-set" disabled>') == 4 and '<fieldset class="hr-set">' not in busy
     assert "<strong>The AI is reading the answers. Wait before you type.</strong>" in busy
+    assert "button.btn:not(:enabled) { opacity: 0.45;" in busy          # a paused button looks paused
     assert "the boxes on this page are paused until then" in busy and "check now</a>" in busy
 
 

@@ -33,6 +33,11 @@
    sentence stays as tall as its line). */
 .sec-head .more, .chip, .btnrow a.textlink, table.plain td a, a.pp-go { display: inline-flex; align-items: center;
   min-height: 44px; }
+/* A button or box that is paused looks paused (it is switched off itself, or its whole form
+   is while a page waits for the AI): the shared style has no look for that, so a paused
+   button read as ready to tap. ":not(:enabled)" is true of exactly those controls. */
+button.btn:not(:enabled) { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+textarea:not(:enabled), input:not(:enabled), select:not(:enabled) { opacity: 0.6; cursor: not-allowed; }
 /* The time box gets the look of every other box (the shared form rule lists no time type). */
 input[type=time] { width: 100%; min-height: 48px; font: inherit; font-size: 1rem; color: var(--text-strong);
   background: #fff; border: 1px solid var(--gray-400); border-radius: var(--r-lg); padding: 11px 14px;

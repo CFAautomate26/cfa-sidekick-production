@@ -799,13 +799,12 @@ NEVER_ASK = (
 QUESTION_ONLY = (
     ("age", ("grade", "years old", "student", "students")),
     ("pregnancy or family", ("single", "parents", "at home", "little one", "little ones",
-                             "a partner", "your partner")),
+                             "have a partner", "your partner")),
     ("religion", ("christmas", "easter")),
     ("citizenship or where someone is from", ("country", "canadian", "canada", "language",
                                               "grow up", "grew up")),
     ("health or disability", ("limitation", "physically able", "drugs", "do you drink", "your back",
-                              "take any tablets", "taking any tablets", "take tablets",
-                              "taking tablets")),
+                              "take any tablets", "taking any tablets")),
     ("a record of offences", ("police", "offence", "offense", "crime")),
     ("a SIN, a photo or a licence", ("tall", "weigh", "weight", "height", "postal code")),
     ("a licence or a car", ("have a car", "own a car", "your car", "your own car", "do you drive")),
@@ -832,11 +831,24 @@ GROUND_ADVICE = ("This can point at a protected ground ({category}). A posting m
 _GROUNDS = ("health", "family", "religion", "age", "origin", "gender", "leave")
 
 
+# A question-only word is not counted straight after these: "make a guest
+# feel at home" and "a teammate had your back" are about the work, and
+# "legally entitled to work in Canada" is the one citizenship question the
+# law allows. (Each entry ends in the space between the two words.)
+_QUESTION_NOT_AFTER = {
+    "at home": ("feel ", "feels ", "felt ", "feeling ", "right "),
+    "your back": ("had ", "has ", "have ", "got ", "gets ", "watch ", "watches ", "watching "),
+    "canada": ("work in ",),
+}
+
+
 def _phrase(term: str, loose: bool = False):
     """Whole words, any case, spaces or hyphens between them. loose=True
     also takes a plain plural or possessive of the last word ("health
-    conditions", "limitation's")."""
-    return re.compile(r"(?<![\w])" + r"[\s-]+".join(
+    conditions", "limitation's"), and leaves the word alone straight
+    after the few words listed for it in _QUESTION_NOT_AFTER."""
+    before = "".join(f"(?<!{re.escape(word)})" for word in _QUESTION_NOT_AFTER.get(term, ())) if loose else ""
+    return re.compile(r"(?<![\w])" + before + r"[\s-]+".join(
         re.escape(part) for part in re.split(r"[\s-]+", term))
         + (r"(?:s|es|'s)?" if loose else "") + r"(?![\w])", re.I)
 

@@ -476,7 +476,12 @@ LANGUAGE_TERMS = {
                "sprained", "infection", "contagious", "medical condition", "health condition",
                "health conditions", "light duties", "modified duties", "modified work",
                "handicap", "handicapped", "sik", "clinic", "panic attack", "panic attacks",
-               "counselling", "counseling", "dyslexia", "dyslexic", "restricted duty",
+               # going to counselling, never "a verbal counselling" (a word for a talking-to)
+               "to counselling", "in counselling", "into counselling", "counselling appointment",
+               "counselling appointments", "counselling session", "counselling sessions",
+               "to counseling", "in counseling", "into counseling", "counseling appointment",
+               "counseling appointments", "counseling session", "counseling sessions",
+               "dyslexia", "dyslexic", "restricted duty",
                "restricted duties", "bad back", "bad knee", "bad knees", "bad shoulder",
                "drinking problem",
                "malade", "maladie", "médecin", "medecin", "hôpital", "hopital"),
@@ -509,8 +514,9 @@ LANGUAGE_TERMS = {
                "immigration", "foreign", "foreigner", "nationality", "citizenship", "ethnicity",
                "ethnic", "race", "racial", "where they are from", "where he is from",
                "where she is from", "back home", "broken english", "language barrier",
-               "native speaker", "first language", "second language", "new to canada", "newcomer",
-               "newcomers", "refugee", "refugees"),
+               "native speaker", "first language", "second language", "new to canada",
+               # (a bare "newcomer" is the new team member far more often)
+               "newcomer to canada", "newcomers to canada", "refugee", "refugees"),
     "gender": ("gender", "male", "female", "man", "woman", "boy", "girl", "boys", "girls",
                "ladies", "gay", "lesbian", "bisexual", "transgender", "trans", "queer",
                "sexuality", "sexual orientation", "pronouns", "feminine", "masculine", "girly",
@@ -525,7 +531,11 @@ LANGUAGE_TERMS = {
               "called off", "called out", "off work", "off sick", "booked off", "went home",
               "sent home", "return to work", "returned to work", "coming back from",
               "came back from", "since coming back", "workers' compensation",
-              "workers compensation", "on comp", "comp claim", "injury claim", "put in a claim",
+              "workers compensation",
+              # (a bare "on comp" is also how a comped meal is rung in)
+              "off on comp", "out on comp", "back on comp", "is on comp", "was on comp",
+              "been on comp", "still on comp", "went on comp", "going on comp",
+              "comp claim", "injury claim", "put in a claim",
               "filed a claim", "made a claim", "make a claim", "a claim against"),
     "labels": ("lazy", "attitude", "bad attitude", "culture fit", "not committed", "uncommitted",
                "emotional", "aggressive", "bossy", "dramatic", "drama", "moody", "sensitive",
@@ -551,18 +561,27 @@ LANGUAGE_PATTERNS = {
         r"|\bhurt\s+(?:herself|himself|themself|themselves|myself)\b|\bhurt\s+at\s+work\b",
         r"\bcan(?:'t|not|\s+no\s+longer)\s+(?:lift|stand|walk|bend|carry|reach)\b"
         r"|\b(?:unable|not\s+able)\s+to\s+(?:lift|stand|walk|bend|carry|reach)\b",
-        # pills by another name; "on tablets" by itself is the drive-thru ordering tablets
-        r"\b(?:tak(?:e|es|ing)|took)\s+(?:(?:any|some|her|his|their|my|new)\s+)?tablets\b"
-        r"|\bon\s+(?:new|her|his|their|my)\s+tablets\b",
+        # pills by another name. One person's ("her tablets", "on new tablets"): the team's
+        # tablets ("took their tablets outside", "orders on the tablets") take the orders.
+        r"\b(?:tak(?:e|es|ing)|took)\s+(?:any|some|her|his|my|new)\s+tablets\b"
+        r"|\bon\s+(?:new|her|his|my)\s+tablets\b",
     ),
     "age": (
-        # "he's only 17 so...", "she is 16." (never "is 15 minutes late" or "only 15 cars")
-        r"\b(?:only|just|is|turned|turning|she's|he's|they're)\s+1[4-9]\b"
-        r"(?=\s*(?:[.,;!?]|$|so\b|and\b|but\b|now\b|years?\b|yrs?\b))",
+        # "he's only 17 so...", "she is 16.", "just turned 15" (never "he is 15 minutes
+        # late", "she was 15 short on her till" or "sold only 15 and ran out")
+        r"\b(?:she|he|they)(?:'s|'re|\s+is|\s+are|\s+was|\s+were)\s+(?:only\s+|just\s+|still\s+)?1[4-9]\b"
+        r"(?=\s*(?:[.,;!?]|$|so\b|and\b|but\b|now\b|years?\b|yrs?\b))"
+        r"|\b(?:turned|turning|turns)\s+1[4-9]\b(?!\s*(?:minutes?|mins?|orders?|cars?|trays?|tables?))"
+        r"|\bonly\s+1[4-9]\s+(?:years?|yrs?)\b",
     ),
     "family": (
-        r"\b(?:she(?:\s+is|'s)|they(?:\s+are|'re)|(?:the\s+|her\s+|their\s+)?baby\s+is)\s+due\s+"
-        r"(?:in|on|any\s+day|next|this|soon)\b",
+        # a baby that is due, never "she is due in at four" or "the order is due in the morning"
+        r"\b(?:the\s+|her\s+|their\s+)?baby\s+is\s+due\b"
+        r"|\bshe(?:\s+is|'s)\s+due\s+(?:in\s+(?:january|february|march|april|may|june|july|august"
+        r"|september|october|november|december|the\s+(?:spring|summer|fall|winter|new\s+year)"
+        r"|(?:a|a\s+few|two|three|four|five|six|\d+)\s+(?:weeks?|months?))"
+        r"|any\s+day|soon|next\s+(?:week|month|year|spring|summer|fall|winter)"
+        r"|this\s+(?:week|month|year|spring|summer|fall|winter))\b",
         r"(?<![\w])(?:mother|father)(?![\w])(?!'s\s+day)",                      # not Mother's Day
         r"\bexpecting\s+(?:a\s+(?:baby|child)|(?:her|their)\s+(?:first|second|third|baby|child)|twins"
         r"|in\s+(?:january|february|march|april|may|june|july|august|september|october|november"
@@ -580,8 +599,9 @@ LANGUAGE_PATTERNS = {
         r"|work)\b(?!\s+(?:checklist|checklists|check|list|task|tasks|duties|sign-?off|huddle|meeting))",
         r"\b(?:sundays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|weekends?"
         r"|days?|shifts?|weeks?)\s+off\b",
-        r"\b(?:been|is|was)\s+off\b(?!\s+(?:the|task|track|pace|by|on|target|to))",
-        r"\b(?:she|he|they)'(?:s|re)\s+off\b(?!\s+(?:the|task|track|pace|by|target|to))",
+        r"\b(?:been|is|was)\s+off\b(?!\s+(?:the|task|track|pace|by|on|target|to|at))",
+        # ("she's off at four" is when her shift ends)
+        r"\b(?:she|he|they)'(?:s|re)\s+off\b(?!\s+(?:the|task|track|pace|by|target|to|at))",
         # going over the reviewer's head is raising a concern
         r"\bwent\s+to\s+(?:the\s+operator|the\s+owner|hr|head\s+office)\s+about\b",
         r"\basked\s+about\s+(?:(?:her|his|their|the|my)\s+)?(?:pay|wages?|overtime|hours|vacation\s+pay"

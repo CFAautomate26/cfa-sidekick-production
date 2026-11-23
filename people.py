@@ -166,20 +166,24 @@ _retry_at = [0.0]
 
 def _close_unlock(unlock_id, timeout: float | None = None) -> bool:
     """Close one unlock in the store. If the store cannot be written, the
-    unlock must still not survive: it is remembered as revoked (refused by
-    _unlocked from now on, and deleted on a later request). False when the
-    delete did not go through."""
+    unlock must still not survive: it is remembered as revoked, in memory
+    and as a mark beside the store (refused by _unlocked from now on, and
+    deleted on a later request). False when the delete did not go
+    through."""
     if not unlock_id or not isinstance(unlock_id, str):
         return True
+    # Refused from this moment, before the store is even asked: a busy store
+    # makes the delete wait (up to 15 seconds) before it fails, and a copy of
+    # the cookie must not work in that time either, here or on another process.
+    if len(_revoked) < _REVOKED_MAX:
+        _revoked.add(unlock_id)
     try:
-        people_db.unlock_close(unlock_id, timeout)
+        people_db.unlock_mark_closed(unlock_id)
+    except Exception:
+        pass                                    # this process still refuses it from memory
+    try:
+        people_db.unlock_close(unlock_id, timeout)      # deletes the row, then the mark
     except Exception as e:
-        if len(_revoked) < _REVOKED_MAX:
-            _revoked.add(unlock_id)
-        try:
-            people_db.unlock_mark_closed(unlock_id)
-        except Exception:
-            pass                                # this process still refuses it from memory
         _retry_at[0] = time.monotonic()         # not again straight away: the store is busy
         people_db.report_fault("lock", e)
         return False

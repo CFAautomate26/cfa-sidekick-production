@@ -222,7 +222,8 @@ Canada.
   `tests/people_testkit.py`, first-run walk `tests/people_walk.py`,
   who-may-open-what `tests/test_people_roles.py`, privacy
   `tests/test_people_privacy.py`, one test per review finding
-  `tests/test_people_findings.py`). Guide: [docs/people.md](docs/people.md);
+  `tests/test_people_findings.py`, `tests/test_people_verify.py` and
+  `tests/test_people_third.py`). Guide: [docs/people.md](docs/people.md);
   legal reference:
   [docs/legal-counsel/hiring-and-leader-reviews.md](docs/legal-counsel/hiring-and-leader-reviews.md)
   (the escalation matrix applies to anything a review or a hiring decision
