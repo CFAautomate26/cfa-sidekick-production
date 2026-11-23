@@ -8,6 +8,7 @@ called. Everyone here is invented."""
 
 import json
 import re
+import time
 
 import pytest
 
@@ -101,6 +102,105 @@ def test_a31_the_page_says_an_answer_was_not_sent_and_shows_no_level_for_it(worl
     assert "The AI suggests <strong>level 2</strong>" not in html
     assert html.count("The AI suggests <strong>level 3</strong>") == 1
     assert people_hiring.WITHHELD_CHECK in people_ai.latest_job("hiring_score", app_id)["output"]["human_checks"]
+
+
+# --- A3-2: a private link is masked in the request log however its slashes arrive ---------------
+
+TOKEN = "c65d17c50ef960bd30b89ae66fd09400"
+
+
+@pytest.mark.parametrize("address", [
+    "/careers/a%2F" + TOKEN, "/careers%2Fa%2F" + TOKEN, "/careers%2fa%2f" + TOKEN,
+    "/careers//a/" + TOKEN, "/careers/a//" + TOKEN, '/careers/a/"' + TOKEN, "/careers/a/'" + TOKEN,
+    "/CAREERS/A/" + TOKEN, "/careers/x/../a/" + TOKEN, "/careers/a/" + TOKEN + "/more/" + TOKEN,
+    "/careers/a/" + TOKEN + "?x=1&y=" + TOKEN,
+])
+def test_a32_the_request_log_mask_holds_for_encoded_doubled_and_bent_private_links(address):
+    for line in (f'"GET {address} HTTP/1.1" 200 -',
+                 f'"\x1b[33mGET {address} HTTP/1.1\x1b[0m" 404 -',           # how a refused request is coloured
+                 f"code 400, message Bad request syntax ('GET {address}')"):
+        masked = careers.mask_addresses(line)
+        assert TOKEN not in masked and "[removed]" in masked, masked
+        assert masked.endswith(line[line.index(address) + len(address):])    # what follows the address is kept
+
+
+def test_a32_an_ordinary_careers_address_and_other_lines_are_left_alone():
+    for line in ('"GET /careers/team-member HTTP/1.1" 200 -', '"GET /careers/a-great-job/apply HTTP/1.1" 200 -',
+                 '"GET /careers/ HTTP/1.1" 200 -', '"GET /hub/?q=100%25%20off HTTP/1.1" 302 -',
+                 f'"GET /static/teamhub/{TOKEN}.png HTTP/1.1" 200 -'):
+        assert careers.mask_addresses(line) == line
+    assert careers.mask_addresses(f'"GET /careers/a/{TOKEN} HTTP/1.1" 200 -') == \
+        '"GET /careers/a/[removed] HTTP/1.1" 200 -'
+
+
+# --- A3-3: a lock that could not be written is still refused after a restart --------------------
+
+@pytest.fixture()
+def busy_store(monkeypatch):
+    """Call the returned function to make every write to the People store
+    fail until release() is called."""
+    held = []
+
+    def hold():
+        monkeypatch.setattr(people_db, "BUSY_SECONDS", 0.05)
+        conn = people_db.connect()
+        conn.execute("BEGIN IMMEDIATE")
+        held.append(conn)
+
+        def release():
+            conn.rollback()
+            conn.close()
+            held.clear()
+        return release
+
+    yield hold
+    for conn in held:
+        conn.rollback()
+        conn.close()
+
+
+def unlock_rows() -> int:
+    with people_db.connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM unlocks").fetchone()[0]
+
+
+@pytest.mark.parametrize("path", ["/shift/people/lock", "/shift/logout"])
+def test_a33_a_lock_that_could_not_be_written_is_refused_by_another_process_and_after_a_restart(
+        world, busy_store, path):
+    operator = kit.open_as(world, "operator")
+    thief = cfa_app.app.test_client()
+    thief.set_cookie("session", operator.get_cookie("session").value)
+    assert thief.get("/shift/people/backup").status_code == 200       # the copy works while People is open
+    release = busy_store()
+    assert operator.post(path).status_code == 302
+    assert unlock_rows() == 1                                         # the row could not be removed
+    marks = people_db.unlocks_marked_closed()
+    assert len(marks) == 1                                            # ...so it is marked beside the store
+    with operator.session_transaction() as sess:                      # (signing out keeps the id; Lock now drops it)
+        assert sess.get("people_unlock_id") not in marks              # a hash of the id, never the id itself
+    # A second server process, or this one after a restart, has nothing in memory.
+    people._revoked.clear()
+    release()
+    people._retry_at[0] = time.monotonic()                            # not yet time to try the delete again
+    resp = thief.get("/shift/people/backup")
+    assert resp.status_code == 302 and "/shift/people/unlock" in resp.headers["Location"]
+    assert thief.post("/shift/people/backup").status_code == 302      # and no download
+    assert unlock_rows() == 1                                         # refused by the mark, not by luck
+    # the row and its mark go on a later request, once the store can be written
+    people._retry_at[0] = 0.0
+    cfa_app.app.test_client().get("/")
+    assert unlock_rows() == 0 and people_db.unlocks_marked_closed() == []
+
+
+def test_a33_a_clean_lock_leaves_no_mark_and_a_new_unlock_is_not_caught_by_an_old_one(world):
+    operator = kit.open_as(world, "operator")
+    assert operator.post("/shift/people/lock").status_code == 302
+    assert people_db.unlocks_marked_closed() == [] and unlock_rows() == 0
+    kit.unlock(operator, "operator")
+    assert operator.get("/shift/people/backup").status_code == 200
+    assert "the mark beside the store" in open("people.py", encoding="utf-8").read()
+    guide = " ".join(open("docs/people.md", encoding="utf-8").read().split())
+    assert "A restart of the server does not bring it back" in guide
 
 
 # --- A3-4 / B3-F3 / B3-F8: a refused interview comes back on the page, never in the address -----
@@ -572,6 +672,7 @@ def test_c311_the_guide_matches_the_fixes():
     assert "Every reflection a leader has sent is listed for the Operator" in legal
     claude = " ".join(open("CLAUDE.md", encoding="utf-8").read().split())
     assert "every reflection a leader sends, waits in front of the Operator" in claude
+    assert "people.db.revoked" in claude
 
 
 # --- B3-F8: the reason a save was refused is on screen, beside the form -------------------------
@@ -695,3 +796,28 @@ def test_b3f6_a_long_standard_name_wraps_inside_its_save_button(world):
     made = rk.one_review(world)
     html = page(kit.open_as(world, "rae"), f"/shift/reviews/review/{made['review']}")
     assert ".rv-set .btn { white-space: normal; }" in html
+
+
+# --- B3-F7: the employer's name clears the logo up to the desktop width -------------------------
+
+def test_b3f7_the_careers_masthead_uses_the_phone_layout_up_to_959px(world, public):
+    live()
+    html = public.get("/careers/").data.decode()
+    assert "@media (max-width: 959px) {\n  .masthead { height: auto;" in html
+    assert "@media (max-width: 719px)" not in html
+    block = html[html.index("@media (max-width: 959px)"):]
+    block = block[:block.index("}\n}") + 3]
+    assert ".masthead .under.left" in block and "position: static" in block and "white-space: normal" in block
+    # the shared style switches to the desktop masthead at 960px, so the two meet with no gap
+    assert "@media (min-width: 960px)" in open("templates/shared/cfa_style.html", encoding="utf-8").read()
+
+
+# --- B3-F4: the warning's link lands on an open fold --------------------------------------------
+
+def test_b3f4_the_addresses_fold_is_open_when_the_warning_points_at_it(world):
+    operator = kit.open_as(world, "operator")
+    html = page(operator, "/shift/people/settings")                  # the test client's address is a private one
+    assert '<details class="card tool" id="addresses" open>' in html
+    assert "The address being counted for you is a private one" in html
+    resp = operator.get("/shift/people/settings", headers={"X-Forwarded-For": "203.0.113.9"})
+    assert '<details class="card tool" id="addresses">' in resp.data.decode()      # nothing to put right: closed

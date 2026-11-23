@@ -16,10 +16,11 @@
 <style>
 body { padding-bottom: 24px; }
 /* The employer's name. display: block, or the ellipsis never shows (the shared rule makes it a
-   flex box and the text is simply cut off). On a phone there is no room beside the logo, so it
-   sits under it on its own centred line and wraps. */
+   flex box and the text is simply cut off). Below 960px the page is centred and there is no
+   room beside the logo (a phone, a phone held sideways, a small tablet), so the name sits
+   under the logo on its own centred line and wraps. */
 .masthead .under.left { display: block; max-width: calc(50% - 60px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 719px) {
+@media (max-width: 959px) {
   .masthead { height: auto; min-height: var(--masthead-h); }
   .masthead .under.left { position: static; max-width: none; overflow: visible; white-space: normal; text-align: center;
     padding: 86px var(--gutter) 8px; line-height: 1.25; }

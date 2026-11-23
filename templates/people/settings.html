@@ -104,7 +104,9 @@
   </div>
 </div>
 {% if address_check %}
-<details class="card tool" id="addresses">
+{# Open when there is something to put right: the warning on the People and Hiring pages
+   links straight here. #}
+<details class="card tool" id="addresses"{{ ' open' if not address_check.apart }}>
   <summary class="row"><span class="row-main"><span class="row-title">For whoever set up the server: how the careers pages count visitors</span><span class="row-meta">Check this once, before the first posting goes live.</span></span>{{ icon('chev', 'chev') }}</summary>
   <div class="tool-body">
     <p class="card-meta" style="margin-top:0;">The public careers pages limit how many applications one address can send in an hour. Behind a hosting platform, a visitor's address arrives in a list that each proxy adds to at the end. Only what the platform's own proxies added can be trusted: anything further left is whatever the sender typed. The address is used for the limit only and is never stored.</p>

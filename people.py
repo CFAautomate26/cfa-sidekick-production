@@ -134,7 +134,11 @@ def _unlocked(who: Viewer) -> bool:
     stamp = session.get("people_unlock_at")
     if stamp is None or session.get("people_unlock_for") != _identity(who):
         return False
-    if session.get("people_unlock_id") in _revoked:   # locked or signed out; the store was busy
+    unlock_id = session.get("people_unlock_id")
+    # Locked or signed out at a moment the store was busy: refused all the
+    # same, by this process (memory) and by any other one or after a
+    # restart (the mark beside the store).
+    if unlock_id in _revoked or people_db.unlock_marked_closed(unlock_id):
         return False
     try:
         idle = _now() - int(stamp)
@@ -150,7 +154,10 @@ def _unlocked(who: Viewer) -> bool:
 # Unlocks that were closed (Lock now, signing out) at a moment the People
 # store could not be written. The row is still in the store, so until it
 # is gone this process refuses the unlock itself, for every copy of the
-# cookie, and tries the delete again on later requests.
+# cookie, and tries the delete again on later requests. The same fact is
+# written as a mark beside the store (people_db.unlock_mark_closed), which
+# every other server process reads and which is still there after a
+# restart: memory alone would forget it.
 _revoked: set[str] = set()
 _REVOKED_MAX = 2000
 _RETRY_EVERY = 20                # seconds between tries, so a busy store is not hammered
@@ -169,6 +176,10 @@ def _close_unlock(unlock_id, timeout: float | None = None) -> bool:
     except Exception as e:
         if len(_revoked) < _REVOKED_MAX:
             _revoked.add(unlock_id)
+        try:
+            people_db.unlock_mark_closed(unlock_id)
+        except Exception:
+            pass                                # this process still refuses it from memory
         _retry_at[0] = time.monotonic()         # not again straight away: the store is busy
         people_db.report_fault("lock", e)
         return False
@@ -178,13 +189,20 @@ def _close_unlock(unlock_id, timeout: float | None = None) -> bool:
 
 def _retry_revoked() -> None:
     """Try again to delete the unlocks that could not be closed, with a
-    short wait so a request is never held up by it."""
-    if not _revoked or time.monotonic() - _retry_at[0] < _RETRY_EVERY:
+    short wait so a request is never held up by it: the ones this process
+    remembers, then any that are marked beside the store (closed by
+    another process, or before this one was started)."""
+    if time.monotonic() - _retry_at[0] < _RETRY_EVERY:
         return
     _retry_at[0] = time.monotonic()
     for unlock_id in list(_revoked):
         if not _close_unlock(unlock_id, timeout=1):
-            break                               # still busy: leave the rest for next time
+            return                              # still busy: leave the rest for next time
+    if people_db.unlocks_marked_closed():
+        try:
+            people_db.unlocks_finish_closing(timeout=1)
+        except Exception as e:
+            people_db.report_fault("lock", e)
 
 
 @people_bp.before_app_request

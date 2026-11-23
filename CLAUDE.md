@@ -160,7 +160,10 @@ Canada.
   again (`/shift/people/unlock`) and re-locks after `lock_minutes` idle
   (setting, default 30, 5–120) and 8 hours after the PIN at most; the
   unlock is a row in the People store (`unlocks`, never exported), closed
-  by Lock now and by signing out, so a copied cookie stops working; PINs
+  by Lock now and by signing out, so a copied cookie stops working (a
+  close the store was too busy to record is also marked in the folder
+  `people.db.revoked` beside the store, so it holds in every process and
+  after a restart); PINs
   tried at the lock have their own count, apart from sign-in, kept in the
   People store (`pin_tries`, never exported) and counted before the PIN is
   checked, so five per ten minutes holds for guesses sent at once (the

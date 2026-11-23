@@ -62,7 +62,10 @@ Things to know:
   once, including for any copy of the browser's sign-in cookie. If the
   server is too busy at that moment to record it, the unlock is refused
   from then on all the same and its record is removed as soon as it can
-  be; Lock now tells you when that happened.
+  be; Lock now tells you when that happened. A restart of the server does
+  not bring it back: the lock is also written as a mark in a small folder
+  beside the People store (`people.db.revoked`, a scrambled id and nothing
+  else), which every copy of the server reads.
 - **Five wrong PINs hold the lock for ten minutes.** That count belongs to
   the lock and to your own sign-in: wrong PINs typed at the sign-in page,
   by you or by anyone else, never hold your People lock, and wrong PINs
@@ -515,7 +518,9 @@ anywhere, including when a careers page fails (the log then gets one fixed
 line naming the kind of error and nothing else), and the request line the
 built-in server writes for every visit (the app is started with `python
 app.py`) has the secret part of a private link, and the token of a
-`/scheduled` call, replaced with `[removed]`. What the app cannot reach is
+`/scheduled` call, replaced with `[removed]`, including a link that
+arrives with its slashes doubled or written as `%2F` (a mail scanner or a
+messaging app can do that). What the app cannot reach is
 a log the hosting platform keeps in front of it: **check in Render whether
 its HTTP request logs record full paths**, and if the service is ever
 started with gunicorn, leave its access log off.

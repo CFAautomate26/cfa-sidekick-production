@@ -81,7 +81,16 @@ def _now() -> float:
 # The server's own request log
 # ---------------------------------------------------------------------------
 
-_PRIVATE_LINK = re.compile(r"(/careers/a/)[^\s/?#\"']+")
+# A private link as it can reach the log: "/" may arrive as "%2F" or be
+# doubled (a mail scanner or a messaging app re-encoded the link), in any
+# letter case. Everything after "careers/a/" goes, up to the end of the
+# address: a link the server answers and one it turns away are logged alike.
+_PRIVATE_LINK = re.compile(r"(careers(?:/|%2f)+a(?:/|%2f)+)[^\s\x1b]*?(?=[\"')]*(?:[\s\x1b]|$))", re.I)
+# The secret part itself is 32 hex characters (people_db.new_token). On a
+# line about the careers pages any such run goes too, so a link bent some
+# other way ("/careers/x/../a/...") or repeated after a "?" is not logged.
+_LINK_TOKEN = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])", re.I)
+_CAREERS = re.compile(r"careers", re.I)
 _TOKEN_VALUE = re.compile(r"([?&]token=)[^\s&#\"']+")
 
 
@@ -89,7 +98,10 @@ def mask_addresses(line: str) -> str:
     """A log line with the secret part of any address taken out: the last
     part of an applicant's private link, and the token on a /scheduled
     call (which opens the Team Hub backup)."""
-    return _TOKEN_VALUE.sub(r"\1[removed]", _PRIVATE_LINK.sub(r"\1[removed]", str(line)))
+    line = _PRIVATE_LINK.sub(r"\1[removed]", str(line))
+    if _CAREERS.search(line):
+        line = _LINK_TOKEN.sub("[removed]", line)
+    return _TOKEN_VALUE.sub(r"\1[removed]", line)
 
 
 class RequestLogMask(logging.Filter):

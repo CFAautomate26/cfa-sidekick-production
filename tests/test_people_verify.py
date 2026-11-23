@@ -1026,7 +1026,9 @@ def test_vb7_the_careers_masthead_label_wraps_on_a_phone_and_can_show_an_ellipsi
     html = public.get("/careers/").data.decode()
     rules = re.findall(r"\.masthead \.under\.left \{([^}]*)\}", html)
     assert any("display: block" in rule and "text-overflow: ellipsis" in rule for rule in rules)
-    phone = html[html.index("@media (max-width: 719px)"):]
+    # (the breakpoint was 719px; the third browser run, finding B3-F7, showed the name still ran
+    # under the logo from 720 to 959px, so the phone layout now holds up to the desktop width)
+    phone = html[html.index("@media (max-width: 959px)"):]
     phone = phone[:phone.index("}\n}") + 3]
     assert ".masthead .under.left" in phone and "white-space: normal" in phone and "position: static" in phone
     assert "overflow: visible" in phone and ".masthead { height: auto" in phone

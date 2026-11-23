@@ -238,6 +238,67 @@ def unlock_close(unlock_id, timeout: float | None = None) -> None:
     if unlock_id and isinstance(unlock_id, str):
         with closing(connect(timeout)) as conn, conn:
             conn.execute("DELETE FROM unlocks WHERE id_hash=?", (_unlock_hash(unlock_id),))
+        _unmark(_unlock_hash(unlock_id))
+
+
+# A lock or sign-out at a moment the store could not be written leaves the
+# unlock's row behind. So that the unlock is refused all the same, by every
+# server process and after a restart, it is marked as closed outside the
+# database: one empty file, named by the hash of the unlock id, in a folder
+# beside the store. A mark is taken away only after its row is gone.
+
+def _marks_dir() -> str:
+    return db_path() + ".revoked"
+
+
+def _unmark(id_hash: str) -> None:
+    try:
+        os.unlink(os.path.join(_marks_dir(), id_hash))
+    except OSError:
+        pass                                    # there was no mark (the usual case)
+
+
+def unlock_mark_closed(unlock_id) -> bool:
+    """Mark an unlock as closed although its row could not be deleted.
+    Never touches the database. False if the mark could not be written."""
+    if not unlock_id or not isinstance(unlock_id, str):
+        return True
+    try:
+        os.makedirs(_marks_dir(), mode=0o700, exist_ok=True)
+        with open(os.path.join(_marks_dir(), _unlock_hash(unlock_id)), "a"):
+            pass
+    except OSError:
+        return False
+    return True
+
+
+def unlock_marked_closed(unlock_id) -> bool:
+    """Was this unlock closed at a moment its row could not be deleted?"""
+    if not unlock_id or not isinstance(unlock_id, str):
+        return False
+    return os.path.exists(os.path.join(_marks_dir(), _unlock_hash(unlock_id)))
+
+
+def unlocks_marked_closed() -> list[str]:
+    """The hashes of the unlocks still marked closed (their rows may still
+    be in the store)."""
+    try:
+        return sorted(name for name in os.listdir(_marks_dir()) if re.fullmatch(r"[0-9a-f]{64}", name))
+    except OSError:
+        return []
+
+
+def unlocks_finish_closing(timeout: float | None = None) -> int:
+    """Delete the row of every unlock that is marked closed, then take the
+    marks away. Raises if the store still cannot be written (the marks
+    stay). Returns how many were finished."""
+    marked = unlocks_marked_closed()
+    if marked:
+        with closing(connect(timeout)) as conn, conn:
+            conn.executemany("DELETE FROM unlocks WHERE id_hash=?", [(id_hash,) for id_hash in marked])
+        for id_hash in marked:
+            _unmark(id_hash)
+    return len(marked)
 
 
 def pin_try(key: str, now: int, limit: int, window: int) -> int:
