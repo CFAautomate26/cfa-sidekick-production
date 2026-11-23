@@ -212,8 +212,12 @@ filed under it, and then choose a level or **Not enough to rate yet**
 The standards are one form: **any Save button keeps every level you have
 picked and every comment beside it**, not only the standard next to the
 button, and **Save all ratings** sits under the last one. A comment with
-no level picked cannot be kept, and the page tells you which standard that
-was. Then:
+no level picked cannot be kept: the page comes straight back at that
+standard, says so beside it, and what you typed stays in its box until you
+pick a level and save. The **Save** under *Strengths and growth focus*
+belongs to the same form, so it keeps your levels and comments too. The
+other buttons on the page (Add action, Add these dates, the AI draft) do
+not: each says to save your ratings first. Then:
 
 - **Strengths** and **growth focus**, in your own words.
 - **Agreed actions.** Each needs an action, a measure, a target and a day
@@ -335,12 +339,18 @@ the review says so.
 **A reflection is read by the reviewer**, who may be the person a leader
 wants to raise something about. The reflection page tells the leader so,
 and that a concern about how they are treated, or about their reviewer,
-goes to you directly. If a reflection a leader has sent uses words about
-harassment, safety or how they were treated, it is listed for you in the
-same places, marked in red, until you tick *Followed up outside this tool*
-on the review; if the leader changes the reflection afterwards it comes
-back. (A reflection is checked by the word list only. Read reflections
-yourself when you can: the list does not catch everything.)
+goes to you directly. **Every reflection a leader sends waits for you in
+the same way** as their comments do: it is listed on the Leader reviews
+page, on the People home page and in the menu count until you tick on the
+review that you have read it and that anything it raises was followed up
+outside this tool. One that uses words about harassment, safety or how
+someone was treated is marked in red, with the escalation note. If the
+leader changes the reflection afterwards it comes back. The red mark is
+kept to wording about how a person was treated ("yelled at me", "afraid to
+close with him", "not safe"), so ordinary restaurant talk ("food safety
+scores", "a guest complaint", "uncomfortable giving feedback") no longer
+sets it off. No list can tell whether someone is raising a concern, which
+is why you are shown every one.
 
 **Print view** (finalised reviews onward) carries the same content with
 signature lines and "Leader declined to sign; copy provided on ____". Use
@@ -398,8 +408,10 @@ block, but you tick that you have read them and the wording is about the
 job.
 
 **The public address** of a posting is made from its title
-(`/careers/team-member`). While a posting is a draft the address follows
-the title, so correcting a title also corrects the address; the publish
+(`/careers/team-member`). While a posting is a draft its address is
+exactly what its title gives, so correcting a title also corrects the
+address (accented letters are written plain: "Équipier" becomes
+`equipier`; a second posting with the same title gets `-2`). The publish
 card shows the address it will go live at. Once a posting has been
 published its address never changes, because links to it are already out.
 
@@ -542,7 +554,11 @@ page.
 
 Add an interview (date, time, in person / phone / video, who led it), then
 record what happened. The time box is a time picker on a phone, and a time
-typed the way people write it ("2:30 pm", "3pm") is understood. An **attended** interview does two things:
+typed the way people write it ("2:30 pm", "3pm") is understood. A bare
+"2:30" with no am or pm is asked about and not guessed, so an invitation
+never reads 02:30. If the form is refused, the page comes straight back
+with the reason beside the form and everything you entered still in it.
+An **attended** interview does two things:
 
 - it opens a **scorecard**: the same criteria, in the same order, for every
   applicant. A submitted scorecard is final, and you see other
@@ -580,6 +596,9 @@ text messages** open your own mail or text app with the message filled in.
 told, how and on which day. For someone who was interviewed that record is
 kept for three years, as the law asks. For someone who was never
 interviewed it is removed with the rest of their details (see *Retention*).
+"Interviewed" goes by the interviews logged on the candidate page: one
+marked Attended, or one that was logged and never marked. So log every
+interview that was held.
 
 ### The offer
 
@@ -618,7 +637,12 @@ lists who is due, and the People home page reminds you when anyone is.
 - **Removed with the rest:** the wording of, and the name on, a notice
   logged for someone who was never interviewed. The three-year rule covers
   interviewed applicants, and the privacy notice tells every applicant
-  their name is removed after the stated months.
+  their name is removed after the stated months. Someone counts as
+  interviewed when an interview is on record for them that was not called
+  off: marked Attended, or logged and never marked. Only an applicant with
+  no interview logged, or with every interview marked did not show,
+  cancelled or rescheduled, loses the notice. Log every interview that was
+  held before you remove anything.
 - **Hold: do not delete** on an applicant's Contact page exempts them, and
   keeps the wording of their decision notices too. It can be put on even
   after the details have been removed. Use it the day you hear of a
@@ -641,7 +665,7 @@ under People → Settings, with a short go-live checklist above it.
 |---|---|---|
 | **Sent** | The wording of our standards; the observations that count toward the review; the leader's reflection if they sent one. | The posting's criteria and the applicant's written answers to the quick questions. |
 | **Taken out first** | The leader's name (a two-letter name such as Jo only where it is written with a capital); the names of everyone on the Team Hub roster, the leader list and the review list; email addresses and phone numbers; he/she words. | The applicant's name; the names of everyone on the roster and the leader list; email addresses and phone numbers; he/she words. |
-| **Never sent** | The leader's name, title or area; the reviewer's own ratings and comments; time-away dates; the "before you finish" answers; any note, or box of the reflection, in which the word list finds wording about health, family, age, religion, origin, gender, time away or a complaint (listed words only: what the list misses is sent, which is why reviewers are told to leave such notes out); anything from Team Hub activity (checklists, to-dos, training, read receipts, 1:1s). | Name and contact details; availability; how they heard about us; experience; the 18-or-over and work-entitlement answers; interview notes and scores; any answer that may mention health or an accommodation. |
+| **Never sent** | The leader's name, title or area; the reviewer's own ratings and comments; time-away dates; the "before you finish" answers; any note, or box of the reflection, in which the word list finds wording about health, family, age, religion, origin, gender, time away or a complaint (listed words only: what the list misses is sent, which is why reviewers are told to leave such notes out); anything from Team Hub activity (checklists, to-dos, training, read receipts, 1:1s). | Name and contact details; availability; how they heard about us; experience; the 18-or-over and work-entitlement answers; interview notes and scores; any answer in which the word list finds health wording, or a listed accommodation or leave word (listed words and phrases only: an answer that says it another way is sent). |
 
 Taking names out is done by matching the names Team Hub knows. A name it
 does not know (a guest, a nickname) can slip through, and so can a
@@ -679,7 +703,11 @@ from the answer: at least three words, two of them words that say
 something ("i was the" grounds nothing). And a suggestion is shown only
 while the criterion it was made on, and the answer, are word for word what
 was sent: change a criterion's level descriptions on a live posting and
-the page says the suggestion is no longer shown, and to ask again.
+the page says the suggestion is no longer shown, and to ask again. While
+the AI is reading, the applicant's page reloads itself every few seconds;
+a reload would wipe anything half typed, so the boxes on that page are
+paused until the answer is in (usually well under a minute) and the page
+says to wait.
 
 Every request is kept on record exactly as it was sent, with the reply,
 the model and the date: it is in the People backup. A request that has not

@@ -2,6 +2,7 @@
 {% from "people/_ui.html" import crumbs, guidance, escalation, level_pills, stamp, ai_label %}
 {% from "people/reviews/_parts.html" import rv_styles, status_badge, note_list %}
 {% set drafting = ai.status == 'running' %}
+{% set save_first = 'Save your ratings first: this button reloads the page and does not save a level or comment you have not saved yet.' %}
 {% block title %}Leader review{% endblock %}
 {% block head %}{{ rv_styles() }}
 {# The refresh address carries no "#...": a browser treats a refresh to
@@ -122,8 +123,16 @@
     <p class="fine-line">This stays on your reviews page and your People badge until you tick it. Only the tick and the date are kept, never what you found. If the leader changes the reflection afterwards, it comes back here.</p>
     <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Record the follow-up</button></div>
   </form>
+  {% elif reflection_to_read %}
+  <p class="callout tan" role="status">{{ icon('chat') }}<span><strong>{{ reflection_to_read }}.</strong> Their reviewer can read it too. If it raises harassment, safety or how they were treated, it goes into the store's complaint process, not this review. If it is about you, their reviewer or another senior leader, or the leader is under 18, stop and call a lawyer first: the store's escalation matrix says so.</span></p>
+  <form method="post" action="{{ url_for('people.reviews_concern_followed', review_id=review.id) }}" class="no-print">
+    <input type="hidden" name="what" value="reflection">
+    <label class="checkline"><input type="checkbox" name="confirm" value="1" required><span>I have read this reflection, and anything it raises was followed up outside this tool.</span></label>
+    <p class="fine-line">This stays on your reviews page and your People badge until you tick it. Only the tick and the date are kept, never what you found. If the leader changes the reflection afterwards, it comes back here.</p>
+    <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Record that I read it</button></div>
+  </form>
   {% elif viewer.is_operator and review.reflection_followed_at %}
-  <p class="rv-quiet">A concern in this reflection was recorded as followed up outside this tool by {{ stamp(review.reflection_followed_by, review.reflection_followed_at) }}.</p>
+  <p class="rv-quiet">This reflection was recorded as read, and followed up outside this tool if it needed it, by {{ stamp(review.reflection_followed_by, review.reflection_followed_at) }}.</p>
   {% endif %}
   {% for dim in model.dimensions %}{% if reflection.get(dim.key) %}
   <p class="subhead">{{ dim.name }}</p>
@@ -158,6 +167,7 @@
   <form method="post" action="{{ url_for('people.reviews_ai', review_id=review.id) }}" class="btnrow no-print">
     <button class="btn btn-secondary sm" type="submit">{{ icon('zap') }}{{ 'Try again' if ai.status == 'failed' else ('Ask for a new draft' if ai.status in ('done', 'stale') else 'Ask the AI for a draft') }}</button>
   </form>
+  <p class="fine-line no-print">{{ save_first }}</p>
   {% endif %}
 </div>
 {% endif %}
@@ -166,7 +176,8 @@
    through their form="rv-rate" attribute), so tapping any Save keeps every
    level picked and every comment typed on the page, not only the one
    beside the button. #}
-{% if review.editable %}<form id="rv-rate" method="post" action="{{ url_for('people.reviews_rate', review_id=review.id) }}"></form>{% endif %}
+{% set rate_url = url_for('people.reviews_rate', review_id=review.id) %}
+{% if review.editable %}<form id="rv-rate" method="post" action="{{ rate_url }}"></form>{% endif %}
 {% for group in model.groups %}
 <section class="sec">
   <div class="sec-head"><h2>{{ group.name }}</h2></div>
@@ -190,17 +201,25 @@
     {% endif %}
 
     {% if review.editable %}
+    {# After a refused save the boxes show what was sent (typed), not what is stored. #}
+    {% set sent = typed.get(dim.key) %}
+    {% set picked = sent.level if sent else ('not_enough' if row and row.not_enough else (row.level|string if row and row.level else '')) %}
     <div>
       <fieldset class="rv-set"{{ ' disabled' if drafting }}>
         <legend class="subhead">Your rating</legend>
+        {% if dim.key in needs_level %}
+        <p class="callout warm" role="alert">{{ icon('alert') }}<span><strong>Not saved yet: choose a level.</strong> What you typed is still in the box below. A comment is kept with a level, or with “Not enough to rate yet”. Pick one, then save.</span></p>
+        {% endif %}
         {% for name in model.levels %}
-        <label class="rv-choice"><input type="radio" form="rv-rate" name="level-{{ dim.key }}" value="{{ loop.index }}"{{ ' checked' if row and row.level == loop.index }}><span><b>{{ name }}</b></span></label>
+        <label class="rv-choice"><input type="radio" form="rv-rate" name="level-{{ dim.key }}" value="{{ loop.index }}"{{ ' checked' if picked == loop.index|string }}><span><b>{{ name }}</b></span></label>
         {% endfor %}
-        <label class="rv-choice"><input type="radio" form="rv-rate" name="level-{{ dim.key }}" value="not_enough"{{ ' checked' if row and row.not_enough }}><span><b>Not enough to rate yet</b><small>For when you have not seen enough this period. It is never a mark against the leader.</small></span></label>
+        <label class="rv-choice"><input type="radio" form="rv-rate" name="level-{{ dim.key }}" value="not_enough"{{ ' checked' if picked == 'not_enough' }}><span><b>Not enough to rate yet</b><small>For when you have not seen enough this period. It is never a mark against the leader.</small></span></label>
         <label class="field" for="c-{{ dim.key }}">Comment <span class="muted">(what you saw that puts it at this level)</span></label>
-        <textarea id="c-{{ dim.key }}" form="rv-rate" name="comment-{{ dim.key }}" maxlength="{{ caps.comment }}">{{ row.comment if row else '' }}</textarea>
-        <div class="btnrow"><button class="btn btn-primary sm" type="submit" form="rv-rate" name="dimension_key" value="{{ dim.key }}">Save {{ dim.name }}</button>{% if is_rated %}<span class="pp-stamp">Saved by {{ stamp(row.rated_by, row.rated_at) }}</span>{% endif %}</div>
-        <p class="fine-line">Saving here also saves any other standard on this page where you have picked a level.</p>
+        <textarea id="c-{{ dim.key }}" form="rv-rate" name="comment-{{ dim.key }}" maxlength="{{ caps.comment }}">{{ sent.comment if sent else (row.comment if row else '') }}</textarea>
+        {# The address the button posts to ends in this standard's own "#...", so a page that
+           comes straight back (a save that was refused) opens here and not at the top. #}
+        <div class="btnrow"><button class="btn btn-primary sm" type="submit" form="rv-rate" name="dimension_key" value="{{ dim.key }}" formaction="{{ rate_url }}#d-{{ dim.key }}">Save {{ dim.name }}</button>{% if is_rated %}<span class="pp-stamp">Saved by {{ stamp(row.rated_by, row.rated_at) }}</span>{% endif %}</div>
+        <p class="fine-line">Saving here also saves any other standard on this page where you have picked a level, and your strengths and growth focus.</p>
       </fieldset>
     </div>
     {% else %}
@@ -242,7 +261,7 @@
 {% if review.editable %}
 <div class="card no-print" id="save-all">
   <p class="card-meta" style="margin-top:0;">One tap saves every standard above where you have picked a level, with its comment.</p>
-  <div class="btnrow"><button class="btn btn-primary" type="submit" form="rv-rate" name="dimension_key" value=""{{ ' disabled' if drafting }}>Save all ratings</button></div>
+  <div class="btnrow"><button class="btn btn-primary" type="submit" formaction="{{ rate_url }}#save-all" form="rv-rate" name="dimension_key" value=""{{ ' disabled' if drafting }}>Save all ratings</button></div>
 </div>
 {% endif %}
 
@@ -259,16 +278,19 @@
 <section class="sec" id="summary">
   <div class="sec-head"><h2>Strengths and growth focus</h2></div>
   {% if review.editable %}
-  <form method="post" action="{{ url_for('people.reviews_summary', review_id=review.id) }}" class="card">
+  {# These boxes and their button belong to the ratings form above (form="rv-rate"), so
+     this Save also keeps every level picked and comment typed on the page. #}
+  <div class="card">
     <fieldset class="rv-set"{{ ' disabled' if drafting }}>
       <legend class="sr">Strengths and growth focus</legend>
       <label class="field" for="s-strengths">Strengths: what to keep doing</label>
-      <textarea id="s-strengths" name="strengths" maxlength="{{ caps.summary }}">{{ review.strengths }}</textarea>
+      <textarea id="s-strengths" form="rv-rate" name="strengths" maxlength="{{ caps.summary }}">{{ review.strengths }}</textarea>
       <label class="field" for="s-growth">Growth focus: the one or two things that would make the biggest difference</label>
-      <textarea id="s-growth" name="growth" maxlength="{{ caps.summary }}">{{ review.growth }}</textarea>
-      <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save</button></div>
+      <textarea id="s-growth" form="rv-rate" name="growth" maxlength="{{ caps.summary }}">{{ review.growth }}</textarea>
+      <div class="btnrow"><button class="btn btn-primary sm" type="submit" form="rv-rate" formaction="{{ url_for('people.reviews_summary', review_id=review.id) }}#summary">Save</button></div>
+      <p class="fine-line">Saving here also saves any standard above where you have picked a level.</p>
     </fieldset>
-  </form>
+  </div>
   {% else %}
   <div class="card">
     <p class="subhead" style="margin-top:0;">Strengths</p>
@@ -326,6 +348,7 @@
         <div><label class="field" for="a-check">Day it gets checked</label><input id="a-check" name="check_date" type="date" required></div>
       </div>
       <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add action</button></div>
+      <p class="fine-line">{{ save_first }}</p>
     </fieldset>
   </form>
   {% endif %}
@@ -349,6 +372,7 @@
           <div><label class="field" for="t-end">Last day away</label><input id="t-end" name="end" type="date"></div>
         </div>
         <div class="btnrow"><button class="btn btn-secondary sm" type="submit">Add these dates</button></div>
+        <p class="fine-line">{{ save_first }}</p>
       </fieldset>
     </form>
     {% endif %}

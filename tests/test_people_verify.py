@@ -267,7 +267,8 @@ def test_va2_a_note_that_may_be_personal_never_grounds_a_suggested_level(world):
     assert kept["reliable"]["suggested_level"] == 3
     assert kept["teamwork"]["suggested_level"] is None and kept["teamwork"]["withheld"] is True
     line = next(c for c in kept["teamwork"]["checks"] if c.startswith("No level is suggested here: a note"))
-    assert "may be about health, family or time away (“exhausted”, “away”)" in line
+    # ("away" by itself is no longer on that list: "walked away from the line" is about the work)
+    assert "may be about health, family or time away (“exhausted”)" in line
     assert "must never count in a review" in line
 
 
@@ -469,7 +470,7 @@ def test_vc2_a_concern_in_a_sent_reflection_is_put_in_front_of_the_operator(worl
     assert "Tick the box" in post(operator, follow, {"what": "reflection"})
     assert "Recorded as followed up." in post(operator, follow, {"what": "reflection", "confirm": "1"})
     assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 0, "comments": 0}
-    assert "A concern in this reflection was recorded as followed up outside this tool by" in page(
+    assert "This reflection was recorded as read, and followed up outside this tool if it needed it, by" in page(
         operator, f"/shift/reviews/review/{rid}")
     row = next(r for r in people_db.audit_feed() if r["action"] == "reflection followed up outside this tool")
     assert (row["who"], row["object_id"], row["detail"]) == ("Operator", rid, "")
@@ -488,7 +489,9 @@ def test_vc2_an_ordinary_reflection_is_not_flagged_and_the_page_gives_a_private_
            "about your reviewer, speak to the Operator directly." in form
     post(lena, f"/shift/reviews/mine/{made['review']}/reflection",
          {"r_reliable": "I was on time for every open and trained two new starters.", "send": "1"})
-    assert people_reviews.extra_counts("operator", None, "Operator") == {"concerns": 0, "comments": 0}
+    # not marked in red as a concern; it waits for the Operator as one to read (test_people_third.py)
+    assert people_reviews.extra_counts("operator", None, "Operator") == {
+        "concerns": 0, "comments": 0, "reflections": 1}
     assert "may raise a concern" not in page(kit.open_as(world, "operator"),
                                              f"/shift/reviews/review/{made['review']}")
 
@@ -1050,8 +1053,10 @@ def test_vb8_the_time_box_is_a_time_picker_and_a_refused_interview_keeps_what_wa
     assert '<details class="card tool" id="add-interview">' in html   # closed until it is needed
     resp = hari.post(f"/shift/hiring/candidates/{app_id}/interview",
                      data={"on_date": "2026-11-12", "at_time": "after lunch", "mode": "phone", "interviewer": "Hari"})
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("#add-interview")
-    html = hari.get(resp.headers["Location"].split("#")[0]).data.decode()
+    # (rewritten after the third check, finding A3-4: this used to be a redirect that carried what
+    # was typed in the address, and so into the request log; the page now comes straight back)
+    assert resp.status_code == 400 and "Location" not in resp.headers
+    html = resp.data.decode()
     assert "Enter the time like 3:30 pm or 15:30, or leave it empty." in html
     assert '<details class="card tool" id="add-interview" open>' in html
     assert 'name="on_date" type="date" required value="2026-11-12"' in html

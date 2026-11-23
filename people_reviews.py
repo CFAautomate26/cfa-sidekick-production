@@ -56,6 +56,8 @@ CONCERN_FLAG = "The leader's comments may raise a concern that needs follow-up"
 REFLECTION_FLAG = "The leader's reflection may raise a concern that needs follow-up"
 COMMENTS_TO_READ = ("The leader added comments. Read them: a word list cannot tell whether "
                     "comments need follow-up, so every comment waits here for you")
+REFLECTION_TO_READ = ("The leader sent this reflection. Read it: a word list cannot tell whether "
+                      "a reflection raises a concern, so every one waits here for you")
 
 
 # ---------------------------------------------------------------------------
@@ -125,19 +127,25 @@ def _concerns() -> list[dict]:
       Not only the ones a word list picks out: a complaint can be worded
       any way at all, so all of them wait for the Operator, and "flagged"
       only says the word list found harassment, safety or complaint words;
-    - a reflection the leader has sent in which the word list finds such
-      words ("reflection", always flagged). The reviewer reads a
-      reflection, and the reviewer may be who it is about."""
+    - every reflection a leader has sent ("reflection"), on the same
+      footing: the reviewer reads a reflection, and the reviewer may be
+      who it is about, so none of them is left to a word list either.
+      "flagged" says the list found such words in it."""
     out = [{**r, "what": "comments", "flagged": bool(people_ai.concern_terms(r["ack_comment"]))}
            for r in rdb.commented_reviews()]
-    out += [{**r, "what": "reflection", "flagged": True} for r in rdb.sent_reflections()
-            if people_ai.concern_terms(" \n".join(r["reflection"].values()))]
+    out += [{**r, "what": "reflection",
+             "flagged": bool(people_ai.concern_terms(" \n".join(r["reflection"].values())))}
+            for r in rdb.sent_reflections()]
     return out
 
 
-def _reflection_concern(found: dict) -> bool:
-    """Is this review's sent reflection waiting for the Operator's follow-up?"""
-    return any(r["id"] == found["id"] for r in _concerns() if r["what"] == "reflection")
+def _reflection_waiting(found: dict) -> str:
+    """"flagged" or "to-read" when this review's sent reflection is still
+    waiting for the Operator (in the words it has now), else ""."""
+    for r in _concerns():
+        if r["what"] == "reflection" and r["id"] == found["id"]:
+            return "flagged" if r["flagged"] else "to-read"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +484,15 @@ def _draft_is_current(job: dict, review: dict, model: dict) -> bool:
 
 
 def review(review_id: int):
+    return _review_page(review_id)
+
+
+def _review_page(review_id: int, typed: dict | None = None, needs_level=(), status: int = 200):
+    """The review form. `typed` and `needs_level` are for a save that was
+    refused: what was picked and typed for each standard ({key: {"level",
+    "comment"}}) is put back in its boxes instead of what is stored, and
+    each standard named in needs_level says so right where it is, so
+    nothing typed is lost and the reason is on screen beside it."""
     found, model = _review_to_write(review_id)
     if not found:
         return people.deny()
@@ -485,6 +502,7 @@ def review(review_id: int):
     by_key, loose = _evidence_by_standard(found, model)
     gate = rdb.gate_answers(found) if who.is_operator and found["status"] == "on_hold" else None
     found = {**found, "gate_json": None}        # the answers reach a page only through `gate`
+    waiting = _reflection_waiting(found) if who.is_operator else ""
     return render_template(
         "people/reviews/review.html", review=found, model=model, rated=rated, evidence=by_key,
         loose=loose, actions=rdb.actions(review_id), away=rdb.time_away(found),
@@ -493,9 +511,11 @@ def review(review_id: int):
         hold_text=HOLD_TEXT, gate=gate, gate_questions=rdb.GATE, release_notes=rdb.RELEASE_NOTES,
         concern=(CONCERN_FLAG if who.is_operator and people_ai.concern_terms(found["ack_comment"]) else ""),
         comments_to_read=(COMMENTS_TO_READ if who.is_operator and found["ack_comment"] else ""),
-        reflection_concern=(REFLECTION_FLAG if who.is_operator and _reflection_concern(found) else ""),
+        reflection_concern=(REFLECTION_FLAG if waiting == "flagged" else ""),
+        reflection_to_read=(REFLECTION_TO_READ if waiting == "to-read" else ""),
         kinds=rdb.OBS_KIND_LABELS, caps=rdb.CAPS, reviewer=_reviewer_label(found), today=_today(),
-        action_rule=rdb.ACTION_RULE, linked=bool(found["leader_id"]))
+        action_rule=rdb.ACTION_RULE, linked=bool(found["leader_id"]),
+        typed=typed or {}, needs_level=set(needs_level)), status
 
 
 def _locked_flash(found: dict) -> None:
@@ -520,15 +540,16 @@ def _draft_to_write(review_id: int):
     return found, model, None
 
 
-def _rate_others(review_id: int, model: dict, tapped: str) -> tuple[int, list[str]]:
-    """The review page is one form: whichever "Save" was tapped, every
-    other standard on it arrives too (level-<key>, comment-<key>). Save
-    each one that has a level picked and differs from what is stored, so
-    nothing picked or typed elsewhere on the page is thrown away.
-    (how many were saved, the names of standards with a comment typed but
-    no level picked: a comment cannot be kept without one)."""
+def _rate_others(review_id: int, model: dict, tapped: str) -> tuple[int, list[dict], int]:
+    """The review page is one form: whichever button was tapped, every
+    standard on it arrives too (level-<key>, comment-<key>). Save each one
+    that has a level picked and differs from what is stored, so nothing
+    picked or typed elsewhere on the page is thrown away.
+    (how many were saved, the standards with a comment typed but no level
+    picked: a comment cannot be kept without one, how many arrived with a
+    level picked at all)."""
     stored = rdb.ratings(review_id)
-    saved, comment_only = 0, []
+    saved, comment_only, picked = 0, [], 0
     for dim in model["dimensions"]:
         key = dim["key"]
         if key == tapped or f"level-{key}" not in request.form and f"comment-{key}" not in request.form:
@@ -537,8 +558,9 @@ def _rate_others(review_id: int, model: dict, tapped: str) -> tuple[int, list[st
         comment = request.form.get(f"comment-{key}", "")
         if not choice:
             if comment.strip() and not (stored.get(key) or {}).get("comment"):
-                comment_only.append(dim["name"])
+                comment_only.append(dim)
             continue
+        picked += 1
         not_enough = choice == "not_enough"
         row = stored.get(key) or {}
         same = (bool(row.get("not_enough")) == not_enough
@@ -548,7 +570,36 @@ def _rate_others(review_id: int, model: dict, tapped: str) -> tuple[int, list[st
         if not same and rdb.save_rating(review_id, key, None if not_enough else choice, not_enough,
                                         comment, people.actor()):
             saved += 1
-    return saved, comment_only
+    return saved, comment_only, picked
+
+
+def _typed_ratings(model: dict, tapped: str) -> dict:
+    """What the form sent for each standard, to put back in its boxes."""
+    typed = {}
+    for dim in model["dimensions"]:
+        key = dim["key"]
+        alone = key == tapped and ("level" in request.form or "comment" in request.form)
+        if alone or f"level-{key}" in request.form or f"comment-{key}" in request.form:
+            typed[key] = {
+                "level": request.form.get(f"level-{key}", "") or (request.form.get("level", "") if alone else ""),
+                "comment": request.form.get(f"comment-{key}", "") or (request.form.get("comment", "") if alone else "")}
+    return typed
+
+
+def _summary_too(found: dict) -> bool:
+    """The strengths and growth boxes belong to the same form as the
+    ratings, so any Save on the page brings them along. Save them when
+    they arrived and differ from what is stored. True when saved."""
+    if "strengths" not in request.form or "growth" not in request.form:
+        return False
+    cap = rdb.CAPS["summary"]
+    sent = tuple(hub_text.clean(request.form.get(key, "")).strip()[:cap] for key in ("strengths", "growth"))
+    if sent == (found["strengths"] or "", found["growth"] or ""):
+        return False
+    return rdb.save_summary(found["id"], sent[0], sent[1], people.actor())
+
+
+NEEDS_LEVEL = "A comment needs a level to be saved with. Choose a level for: "
 
 
 def rate(review_id: int):
@@ -563,23 +614,35 @@ def rate(review_id: int):
     not_enough = choice == "not_enough"
     done = bool(key) and rdb.save_rating(review_id, key, None if not_enough else choice, not_enough,
                                          comment, people.actor())
-    others, comment_only = _rate_others(review_id, model, key)
+    others, comment_only, picked = _rate_others(review_id, model, key)
+    wrote = _summary_too(found)
     if done and not others:
         flash("Saved.")
     elif done or others:
         count = others + (1 if done else 0)
         flash(f"Saved {count} standard{'' if count == 1 else 's'}.")
+    elif wrote:
+        flash("Saved your strengths and growth focus.")
+    needs = [dim["key"] for dim in comment_only]
     if key and not done:
         flash("Choose a level, or “Not enough to rate yet”, then save.")
-    elif not key and not others:
+        needs.append(key)
+    elif not key and not others and picked and not comment_only:
+        if not wrote:
+            flash("Nothing to save: every rating is already saved.")
+    elif not key and not others and not comment_only and not wrote:
         flash("Choose a level for at least one standard, then save.")
     if comment_only:
-        flash("A comment needs a level to be saved with. Choose a level for: " + ", ".join(comment_only) + ".")
+        flash(NEEDS_LEVEL + ", ".join(dim["name"] for dim in comment_only) + ".")
+    if needs:
+        # Refused in part: the page comes back as it was sent, so a comment
+        # typed without a level is still in its box, with the reason beside it.
+        return _review_page(review_id, typed=_typed_ratings(model, key), needs_level=needs, status=400)
     return _back(review_id, f"d-{key}" if re.fullmatch(r"[a-z0-9-]{2,40}", key) else "")
 
 
 def summary(review_id: int):
-    found, _, stop = _draft_to_write(review_id)
+    found, model, stop = _draft_to_write(review_id)
     if stop:
         return stop
     if rdb.save_summary(review_id, request.form.get("strengths", ""), request.form.get("growth", ""),
@@ -587,6 +650,15 @@ def summary(review_id: int):
         flash("Saved.")
     else:
         flash("That couldn't be saved. Open the review and try again.")
+    # The button sits in the same form as the ratings: whatever was picked
+    # or typed for a standard and not saved yet is saved now, not lost.
+    others, comment_only, _ = _rate_others(review_id, model, "")
+    if others:
+        flash(f"Also saved {others} rating{'' if others == 1 else 's'} you had picked.")
+    if comment_only:
+        flash(NEEDS_LEVEL + ", ".join(dim["name"] for dim in comment_only) + ".")
+        return _review_page(review_id, typed=_typed_ratings(model, ""),
+                            needs_level=[dim["key"] for dim in comment_only], status=400)
     return _back(review_id, "summary")
 
 
@@ -722,10 +794,12 @@ def concern_followed(review_id: int):
     if not found:
         return people.deny()
     reflection = request.form.get("what") == "reflection"
+    only_read = reflection and _reflection_waiting(found) == "to-read"    # no listed word in it
     if request.form.get("confirm") != "1":
         flash("Tick the box to say it was followed up outside this tool.")
     elif (rdb.mark_reflection_followed if reflection else rdb.mark_concern_followed)(review_id, people.actor()):
-        flash("Recorded as followed up. Nothing about what was found is kept here.")
+        flash(("Recorded as read. " if only_read else "Recorded as followed up. ")
+              + "Nothing about what was found is kept here.")
     else:
         flash("That was already recorded, or there is nothing to follow up on this review.")
     return _back(review_id, "reflection" if reflection else "leader-comments")
@@ -1231,15 +1305,20 @@ def nav_counts(kind, leader_id, name) -> dict:
 def extra_counts(kind, leader_id, name) -> dict:
     """More for the Operator's badge and People home page: concerns (a
     leader's comments or sent reflection, in any cycle, in which the word
-    list finds harassment, safety or complaint words) and comments (every
-    other comment a leader added when confirming a review). Both stay
-    until the Operator records that they were read and followed up."""
+    list finds harassment, safety or complaint words), comments (every
+    other comment a leader added when confirming a review) and, only when
+    there are any, reflections (every other reflection a leader has sent).
+    All stay until the Operator records that they were read and followed
+    up."""
     if kind != "operator":
         return {}
     people_db.ensure()
     waiting = _concerns()
-    flagged = sum(1 for r in waiting if r["flagged"])
-    return {"concerns": flagged, "comments": len(waiting) - flagged}
+    plain = [r["what"] for r in waiting if not r["flagged"]]
+    counts = {"concerns": len(waiting) - len(plain), "comments": plain.count("comments")}
+    if plain.count("reflection"):
+        counts["reflections"] = plain.count("reflection")
+    return counts
 
 
 def own_count(kind, leader_id, name) -> int:

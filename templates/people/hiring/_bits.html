@@ -33,6 +33,9 @@
 .seg { margin-bottom: 4px; }
 .hr-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
 .hr-levels { border: 0; margin: 10px 0 0; min-width: 0; }
+/* a form's boxes, grouped so they can all be paused at once (while the AI is reading, the
+   candidate page reloads itself and would wipe what was being typed) */
+.hr-set { border: 0; padding: 0; margin: 0; min-width: 0; }
 .hr-level { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--rule); min-height: 44px;
   font-size: 0.9375rem; line-height: 1.4; cursor: pointer; }
 .hr-level input { margin-top: 1px; flex: 0 0 auto; width: 20px; height: 20px; }

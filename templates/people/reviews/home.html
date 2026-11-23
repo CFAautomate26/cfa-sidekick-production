@@ -36,11 +36,13 @@
 {% if concerns %}
 <section class="sec" id="follow-up">
   <div class="sec-head"><h2>Comments to follow up</h2></div>
-  <p class="sec-note">Every comment a leader adds when confirming a review waits here for you, and so does a reflection whose wording may raise a concern. No word list can tell whether someone is raising a concern: read each one.</p>
+  <p class="sec-note">Every comment a leader adds when confirming a review waits here for you, and so does every reflection a leader sends. No word list can tell whether someone is raising a concern: read each one. The ones marked in red use words about harassment, safety or how someone was treated.</p>
   <div class="card list">
     {% for r in concerns %}
-    {% if r.what == 'reflection' %}
+    {% if r.what == 'reflection' and r.flagged %}
     <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}#reflection"><span class="lead-ico red">{{ icon('alert') }}</span><span class="row-main"><span class="row-title">{{ r.display_name }}</span><span class="row-meta">{{ r.cycle_name }}. The leader's reflection may raise a concern that needs follow-up. Their reviewer can read it too. It stays here until you record the follow-up.</span></span>{{ icon('chev', 'chev') }}</a>
+    {% elif r.what == 'reflection' %}
+    <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}#reflection"><span class="lead-ico navy">{{ icon('chat') }}</span><span class="row-main"><span class="row-title">{{ r.display_name }}</span><span class="row-meta">{{ r.cycle_name }}. The leader sent a reflection. Read it. Their reviewer can read it too. It stays here until you record that you have.</span></span>{{ icon('chev', 'chev') }}</a>
     {% elif r.flagged %}
     <a class="row" href="{{ url_for('people.reviews_review', review_id=r.id) }}#leader-comments"><span class="lead-ico red">{{ icon('alert') }}</span><span class="row-main"><span class="row-title">{{ r.display_name }}</span><span class="row-meta">{{ r.cycle_name }}. The leader's comments may raise a concern that needs follow-up. It stays here until you record the follow-up.</span></span>{{ icon('chev', 'chev') }}</a>
     {% else %}

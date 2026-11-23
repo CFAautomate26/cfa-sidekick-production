@@ -174,8 +174,9 @@ Canada.
   Operator releases) → finalise → Operator calibration and process health →
   share → the leader confirms receipt (never agreement) → print view; no
   overall score, ranking or comparison; every comment a leader adds on
-  confirming, and a sent reflection the concern word list flags, waits in
-  front of the Operator until ticked as followed up outside the tool. **Hiring**: postings with a publish
+  confirming, and every reflection a leader sends, waits in front of the
+  Operator until ticked as read and followed up outside the tool (the
+  concern word list only marks some of them in red). **Hiring**: postings with a publish
   check (pay range, vacancy statement, accommodation notice with a named
   contact, dated minimum-wage settings, and no question that uses a listed
   word about a prohibited ground unless the Operator has confirmed that

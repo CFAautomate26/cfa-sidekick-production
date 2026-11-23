@@ -494,12 +494,14 @@ def test_c1_a_live_posting_cannot_gain_such_a_question_and_a_posting_cannot_scre
     assert hdb.get_posting(posting_id)["criteria"][0]["question"] == crit["question"]
     # a description that points at protected grounds is flagged, and needs the tick to go live
     wordy = draft(title="Kitchen team", description=(
-        "We are a Christian family business looking for a single man under 25 with no disability, born in "
-        "Canada. " + "Serve guests at the counter and keep your station clean and stocked through the rush. " * 3))
+        "We are a Christian family business looking for a single man under 25 with no family commitments "
+        "and no disability, born in Canada. "
+        + "Serve guests at the counter and keep your station clean and stocked through the rush. " * 3))
     criterion(wordy, "Reliable")
     criterion(wordy, "Guest care")
     flags = {f["term"]: f for f in hdb.wording_flags(hdb.get_posting(wordy))}
-    assert {"christian", "family", "man", "disability", "born"} <= set(flags)
+    assert {"christian", "family commitments", "man", "disability", "born"} <= set(flags)
+    assert "family" not in flags                 # a "family business" says nothing about an applicant's family
     assert "may not ask about this" in flags["born"]["advice"]
     assert "protected ground (religion)" in flags["christian"]["advice"]
     assert hdb.publish(wordy, "Operator") == [
@@ -990,8 +992,10 @@ def test_c12_an_interview_held_before_the_decision_was_recorded_can_still_be_log
     hdb.move_stage(app_id, "new", "not-selected", "Hari", reason="Position filled")
     hari = kit.open_as(world, "hari")
     assert "One that was held and never logged." in page(hari, f"/shift/hiring/candidates/{app_id}")
-    hari.post(f"/shift/hiring/candidates/{app_id}/interview", data={"on_date": "2026-10-02", "mode": "phone"})
-    assert any("only an interview that has already been held" in m for m in flashed(hari))
+    # (rewritten after the third check, finding A3-4: a refused interview comes back on the page
+    # itself, with the reason beside the form, instead of a redirect with a flashed message)
+    resp = hari.post(f"/shift/hiring/candidates/{app_id}/interview", data={"on_date": "2026-10-02", "mode": "phone"})
+    assert resp.status_code == 400 and "only an interview that has already been held" in resp.data.decode()
     hari.post(f"/shift/hiring/candidates/{app_id}/interview", data={"on_date": "2026-09-28", "mode": "phone"})
     interview = hdb.interviews(app_id)[0]
     hari.post(f"/shift/hiring/candidates/{app_id}/interviews/{interview['id']}/outcome", data={"outcome": "attended"})

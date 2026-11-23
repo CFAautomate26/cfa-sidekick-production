@@ -25,7 +25,14 @@
 {% endif %}
 
 <main class="wrap">
-  {{ flashes() }}
+  {# Messages stay on screen while the page scrolls (see .pp-flashes): a form that was
+     refused reopens far down a long page, and the reason has to be beside it. The tick
+     box before them is the "Hide" control; these pages run no scripts. #}
+  {% set said %}{{ flashes() }}{% endset %}
+  {% if said|trim %}
+  <input type="checkbox" id="pp-flash-hide" class="pp-flash-hide sr no-print" aria-label="Hide the message">
+  <div class="pp-flashes">{{ said }}<label class="pp-flash-x no-print" for="pp-flash-hide">Hide</label></div>
+  {% endif %}
   {% block content %}{% endblock %}
   {% block lockbar %}{% if people_unlocked %}
   <div class="pp-lockbar no-print">

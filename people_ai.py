@@ -475,29 +475,42 @@ LANGUAGE_TERMS = {
                "hearing aids", "hearing loss", "deaf", "unwell", "nauseous", "stitches", "sprain",
                "sprained", "infection", "contagious", "medical condition", "health condition",
                "health conditions", "light duties", "modified duties", "modified work",
-               "handicap", "handicapped", "sik",
+               "handicap", "handicapped", "sik", "clinic", "panic attack", "panic attacks",
+               "counselling", "counseling", "dyslexia", "dyslexic", "restricted duty",
+               "restricted duties", "bad back", "bad knee", "bad knees", "bad shoulder",
+               "drinking problem",
                "malade", "maladie", "médecin", "medecin", "hôpital", "hopital"),
     "family": ("pregnant", "pregnancy", "maternity", "paternity", "parental", "baby", "newborn",
                "childcare", "daycare", "babysitter", "kids", "children", "husband", "wife",
                "spouse", "boyfriend", "girlfriend", "married", "divorce", "divorced",
-               "single mom", "single mother", "single dad", "single parent", "family",
+               "single mom", "single mother", "single dad", "single parent",
+               # "family" by itself is a guest's family or "like family" far more often
+               # than a leader's own, so it is listed only in the company that makes it personal
+               "her family", "his family", "their family", "my family", "your family", "own family",
+               "young family", "has a family", "have a family", "family issue", "family issues",
+               "family reasons", "family emergency", "family commitments", "family life",
+               "family situation", "family member", "family matters", "family responsibilities",
+               "family status", "start a family", "starting a family",
                "eldercare", "home life",
                "kid", "child", "son", "sons", "daughter", "daughters", "mom", "moms", "mum", "dad", "dads",
                "grandmother", "grandfather", "grandma", "grandpa", "parent", "parents", "funeral",
                "passed away", "grieving", "grief", "miscarriage", "nursing", "breastfeeding",
-               "pregnent", "preggo", "preggers", "enceinte"),
+               "pregnent", "preggo", "preggers", "enceinte", "little one", "little ones", "sitter"),
     "religion": ("church", "mosque", "temple", "synagogue", "prayer", "prayers", "pray",
                  "praying", "religious", "religion", "faith", "bible", "devotional",
                  "devotionals", "sabbath", "ramadan", "hijab", "christian", "muslim", "jewish",
-                 "sikh", "hindu", "catholic"),
-    "age": ("young", "younger", "youngest", "old", "older", "oldest", "mature", "immature",
+                 "sikh", "hindu", "catholic", "fasting", "headscarf", "turban", "shabbat", "eid"),
+    "age": ("young", "younger", "youngest", "too old", "getting old", "years old", "so old",
+            "that old", "how old", "older", "oldest", "mature", "immature",
             "maturity", "age", "aged", "teenager", "teen", "teens", "elderly", "boomer",
             "millennial", "gen z", "retire", "retirement", "energy", "school"),
-    "origin": ("accent", "accents", "culture", "cultural", "immigrant", "immigrants",
+    "origin": ("accent", "accents", "her culture", "his culture", "their culture", "my culture",
+               "your culture", "culture fit", "cultural", "immigrant", "immigrants",
                "immigration", "foreign", "foreigner", "nationality", "citizenship", "ethnicity",
                "ethnic", "race", "racial", "where they are from", "where he is from",
                "where she is from", "back home", "broken english", "language barrier",
-               "native speaker"),
+               "native speaker", "first language", "second language", "new to canada", "newcomer",
+               "newcomers", "refugee", "refugees"),
     "gender": ("gender", "male", "female", "man", "woman", "boy", "girl", "boys", "girls",
                "ladies", "gay", "lesbian", "bisexual", "transgender", "trans", "queer",
                "sexuality", "sexual orientation", "pronouns", "feminine", "masculine", "girly",
@@ -512,7 +525,8 @@ LANGUAGE_TERMS = {
               "called off", "called out", "off work", "off sick", "booked off", "went home",
               "sent home", "return to work", "returned to work", "coming back from",
               "came back from", "since coming back", "workers' compensation",
-              "workers compensation"),
+              "workers compensation", "on comp", "comp claim", "injury claim", "put in a claim",
+              "filed a claim", "made a claim", "make a claim", "a claim against"),
     "labels": ("lazy", "attitude", "bad attitude", "culture fit", "not committed", "uncommitted",
                "emotional", "aggressive", "bossy", "dramatic", "drama", "moody", "sensitive",
                "difficult", "entitled", "immature", "unmotivated", "careless", "negative",
@@ -537,8 +551,18 @@ LANGUAGE_PATTERNS = {
         r"|\bhurt\s+(?:herself|himself|themself|themselves|myself)\b|\bhurt\s+at\s+work\b",
         r"\bcan(?:'t|not|\s+no\s+longer)\s+(?:lift|stand|walk|bend|carry|reach)\b"
         r"|\b(?:unable|not\s+able)\s+to\s+(?:lift|stand|walk|bend|carry|reach)\b",
+        # pills by another name; "on tablets" by itself is the drive-thru ordering tablets
+        r"\b(?:tak(?:e|es|ing)|took)\s+(?:(?:any|some|her|his|their|my|new)\s+)?tablets\b"
+        r"|\bon\s+(?:new|her|his|their|my)\s+tablets\b",
+    ),
+    "age": (
+        # "he's only 17 so...", "she is 16." (never "is 15 minutes late" or "only 15 cars")
+        r"\b(?:only|just|is|turned|turning|she's|he's|they're)\s+1[4-9]\b"
+        r"(?=\s*(?:[.,;!?]|$|so\b|and\b|but\b|now\b|years?\b|yrs?\b))",
     ),
     "family": (
+        r"\b(?:she(?:\s+is|'s)|they(?:\s+are|'re)|(?:the\s+|her\s+|their\s+)?baby\s+is)\s+due\s+"
+        r"(?:in|on|any\s+day|next|this|soon)\b",
         r"(?<![\w])(?:mother|father)(?![\w])(?!'s\s+day)",                      # not Mother's Day
         r"\bexpecting\s+(?:a\s+(?:baby|child)|(?:her|their)\s+(?:first|second|third|baby|child)|twins"
         r"|in\s+(?:january|february|march|april|may|june|july|august|september|october|november"
@@ -546,7 +570,8 @@ LANGUAGE_PATTERNS = {
         r"|\b(?:is|are|was|were|they're|she's)\s+expecting(?=\s*(?:[.,;!?]|$)|\s+(?:again|soon)\b)",
     ),
     "leave": (
-        r"\b(?:was|is|were|are|been|being|be)\s+away\b"
+        # "was away" from work, never "was away from the front counter"
+        r"\b(?:was|is|were|are|been|being|be)\s+away\b(?!\s+from\b)"
         r"|\baway\s+(?:for|from\s+work|sick|on\s+(?:leave|vacation|holiday|holidays)|since|until|again"
         rf"|(?:\w+\s+){{1,2}}{_DAY_OR_SPAN})\b",
         r"\b(?:miss(?:ed|es|ing)\s+(?:\w+\s+){0,3}"
@@ -556,6 +581,9 @@ LANGUAGE_PATTERNS = {
         r"\b(?:sundays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|weekends?"
         r"|days?|shifts?|weeks?)\s+off\b",
         r"\b(?:been|is|was)\s+off\b(?!\s+(?:the|task|track|pace|by|on|target|to))",
+        r"\b(?:she|he|they)'(?:s|re)\s+off\b(?!\s+(?:the|task|track|pace|by|target|to))",
+        # going over the reviewer's head is raising a concern
+        r"\bwent\s+to\s+(?:the\s+operator|the\s+owner|hr|head\s+office)\s+about\b",
         r"\basked\s+about\s+(?:(?:her|his|their|the|my)\s+)?(?:pay|wages?|overtime|hours|vacation\s+pay"
         r"|breaks?)\b|\b(?:pay|wage|overtime)\s+(?:complaint|concern|dispute)s?\b",
     ),
@@ -569,28 +597,56 @@ WIDER_TERMS = (
     "crying", "cried", "in tears", "pain", "sore", "dizzy", "headache", "headaches", "hurt",
     "accident", "emergency", "personal reasons", "personal issue", "personal issues",
     "personal matter", "at home", "home early", "left early", "leaving early", "leaves early",
-    "walked out", "not herself", "not himself", "not themselves", "away", "missed", "sister",
+    "walked out", "not herself", "not himself", "not themselves", "missed", "sister",
     "brother", "wages", "overtime")
-# Words in a leader's or applicant's own comments that may mean they are
-# raising a concern that needs follow-up outside the tool.
+# Words in a leader's own comments or reflection that mark it in red for
+# the Operator as one that may raise a concern. The list does not decide
+# what the Operator reads: every comment and every sent reflection is put
+# in front of them, flagged or not. So this list is kept to wording that
+# is about how someone was treated, and leaves out words that are ordinary
+# restaurant talk ("food safety", "a guest complaint", "uncomfortable
+# giving feedback", "yell across the kitchen").
 CONCERN_TERMS = ("harassment", "harassed", "harassing", "harass", "harasses", "bullied", "bullying",
                  "bully", "bullies", "discrimination", "discriminated", "discriminating", "unsafe",
-                 "safety", "feel safe", "felt safe", "not safe", "threatened", "threatens",
+                 "feel safe", "felt safe", "not safe", "my safety", "safety concern",
+                 "safety concerns", "safety issue", "safety issues", "threatened", "threatens",
                  "threatening", "threat", "threats", "retaliation", "retaliated", "retaliating",
                  "reprisal", "complaint", "complaints", "complained", "complain", "assault",
-                 "assaulted", "touched", "touches", "touching", "grabbed", "hostile", "racist",
-                 "racism", "sexist", "sexism", "sexual", "sexually", "abuse", "abused", "abusive",
-                 "intimidated", "intimidation", "intimidate", "intimidates", "intimidating",
-                 "violence", "violent", "scared", "afraid", "frightened", "yell", "yells", "yelled",
-                 "yelling", "scream", "screams", "screamed", "screaming", "swore at", "swears at",
+                 "assaulted", "touched me", "touches me", "touching me", "touched my", "grabbed me",
+                 "grabbed my", "hostile", "racist", "racism", "sexist", "sexism", "sexual",
+                 "sexually", "abuse", "abused", "abusive", "intimidated", "intimidation",
+                 "intimidate", "intimidates", "intimidating", "violence", "violent", "frightened of",
+                 "yell at", "yells at", "yelled at", "yelling at", "scream at", "screams at",
+                 "screamed at", "screaming at", "shouted at", "shouts at", "swore at", "swears at",
                  "humiliated", "humiliating", "belittled", "singled out", "picked on", "targeted",
-                 "uncomfortable", "inappropriate", "unfair", "unfairly", "lawyer", "labour board",
-                 "ministry", "human rights", "tribunal", "my body")
+                 "me uncomfortable", "uncomfortable around", "inappropriate", "unfair", "unfairly",
+                 "lawyer", "labour board", "ministry", "human rights", "tribunal", "my body")
+# Being afraid or uncomfortable is a concern when it is about a person
+# ("scared of him", "afraid to close with her"), not about a task ("less
+# afraid of giving feedback", "uncomfortable leading huddle at first").
+_ABOUT_SOMEONE = r"(?:him|her|them|my|our|the\s+(?:manager|leader|director|operator|owner|supervisor))"
+CONCERN_PATTERNS = (
+    rf"\b(?:afraid|scared|frightened|terrified|nervous)\s+(?:of|around)\s+{_ABOUT_SOMEONE}\b",
+    rf"\b(?:afraid|scared|frightened|terrified)\s+to\s+(?:\w+\s+){{1,3}}(?:with|around|near)\s+{_ABOUT_SOMEONE}\b",
+    r"\b(?:afraid|scared|frightened)\s+to\s+(?:come\s+(?:to\s+work|in)|speak\s+up|say\s+anything|report|tell)\b",
+    rf"\buncomfortable\s+(?:with|near|working\s+with|closing\s+with|alone\s+with)\s+{_ABOUT_SOMEONE}\b",
+)
+
+# A listed word is not counted straight after these: a guest's complaint
+# is the work, not a complaint the leader made. (Each entry ends in the
+# space that sits between the two words.)
+_NOT_AFTER = {term: ("guest ", "guests ", "guest's ", "customer ", "customers ", "customer's ")
+              for term in ("complaint", "complaints", "complained", "complain")}
+# ...and not straight before these: "kids' meal" is the menu, and "called
+# out the orders" is the job.
+_NOT_BEFORE = {"kids": r"(?!'?\s+(?:meal|meals|menu|menus)\b)",
+               "called out": r"(?!\s+(?:the|an?|orders?|numbers?|names?|every|each)\b)"}
 
 
 def _term_pattern(term: str):
-    return re.compile(r"(?<![\w])" + r"\s+".join(re.escape(w) for w in term.split()) + r"(?![\w])",
-                      re.I)
+    before = "".join(f"(?<!{re.escape(word)})" for word in _NOT_AFTER.get(term, ()))
+    return re.compile(r"(?<![\w])" + before + r"\s+".join(re.escape(w) for w in term.split())
+                      + r"(?![\w])" + _NOT_BEFORE.get(term, ""), re.I)
 
 
 _TERM_PATTERNS = {key: [(term, _term_pattern(term)) for term in terms]
@@ -599,6 +655,7 @@ _CONTEXT_PATTERNS = {key: [re.compile(pattern, re.I) for pattern in patterns]
                      for key, patterns in LANGUAGE_PATTERNS.items()}
 _WIDER_PATTERNS = [(term, _term_pattern(term)) for term in WIDER_TERMS]
 _CONCERN_PATTERNS = [(term, _term_pattern(term)) for term in CONCERN_TERMS]
+_CONCERN_CONTEXT = [re.compile(pattern, re.I) for pattern in CONCERN_PATTERNS]
 
 
 def language_check(text: str) -> list[dict]:
@@ -646,10 +703,16 @@ def wider_terms(text: str) -> list[str]:
 
 
 def concern_terms(text: str) -> list[str]:
-    """Harassment, safety and complaint words found in someone's own
-    comments (whole words, any case), in list order. Used to raise a quiet
-    flag for the Operator; it never blocks the person writing. A word list
-    cannot tell whether a comment raises a concern: callers that must not
-    miss one show the Operator every comment, flagged or not."""
+    """Harassment, safety and complaint wording found in someone's own
+    comments or reflection (whole words, any case): the listed words in
+    list order, then what the patterns matched. Used to mark it in red
+    for the Operator; it never blocks the person writing. A word list
+    cannot tell whether someone is raising a concern: the callers show the
+    Operator every comment and every sent reflection, flagged or not."""
     text = str(text or "").replace("’", "'")
-    return [term for term, pattern in _CONCERN_PATTERNS if pattern.search(text)]
+    found = [term for term, pattern in _CONCERN_PATTERNS if pattern.search(text)]
+    for pattern in _CONCERN_CONTEXT:
+        match = pattern.search(text)
+        if match:
+            found.append(" ".join(match.group(0).split()).lower())
+    return list(dict.fromkeys(found))

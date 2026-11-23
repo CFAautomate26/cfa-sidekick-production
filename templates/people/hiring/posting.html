@@ -116,28 +116,34 @@
   <div class="sec-head"><h2>What applications are scored on</h2></div>
   <p class="sec-note">{{ limits.MIN_QUESTIONS }} to {{ limits.MAX_QUESTIONS }} criteria need a question for the applicant. Every applicant gets the same questions, and every interviewer the same scorecard.</p>
   {% for c in posting.criteria %}
-  <details class="card tool" id="c{{ c.id }}">
+  {# After a refused save the fold comes back open with what was typed (t) and the reasons
+     beside it, not what is stored. The address the form posts to ends in this fold's own
+     "#...", so the page that comes straight back opens here and not at the top. #}
+  {% set t = typed.raw if typed and typed.id == c.id and posting.status != 'closed' else none %}
+  <details class="card tool" id="c{{ c.id }}"{{ ' open' if t }}>
     <summary class="row"><span class="row-main"><span class="row-title">{{ c.name }}</span><span class="row-meta">{{ c.question or 'Interview only: no question for the applicant' }}</span></span>{{ icon('chev', 'chev') }}</summary>
     <div class="tool-body">
       {% if posting.status == 'closed' %}
       <p class="hr-def">{{ c.definition }}</p>
       {% if c.anchors %}<ol class="pp-anchors">{% for a in c.anchors %}<li><b>Level {{ loop.index }}</b>{{ a }}</li>{% endfor %}</ol>{% endif %}
       {% else %}
-      <form method="post" action="{{ url_for('people.hiring_criterion_save', posting_id=posting.id, criterion_id=c.id) }}">
+      {% if t %}{{ problem_list(typed.problems, 'Not saved yet. What you typed is still in the boxes below.') }}{% endif %}
+      <form method="post" action="{{ url_for('people.hiring_criterion_save', posting_id=posting.id, criterion_id=c.id) }}#c{{ c.id }}">
         <label class="field" for="c{{ c.id }}-name" style="margin-top:0;">Name</label>
-        <input id="c{{ c.id }}-name" name="name" type="text" maxlength="{{ limits.CRITERION_NAME_MAX }}" value="{{ c.name }}">
+        <input id="c{{ c.id }}-name" name="name" type="text" maxlength="{{ limits.CRITERION_NAME_MAX }}" value="{{ t.name if t else c.name }}">
         <label class="field" for="c{{ c.id }}-def">What it means</label>
-        <textarea id="c{{ c.id }}-def" name="definition" rows="3" maxlength="{{ limits.DEFINITION_MAX }}">{{ c.definition }}</textarea>
+        <textarea id="c{{ c.id }}-def" name="definition" rows="3" maxlength="{{ limits.DEFINITION_MAX }}">{{ t.definition if t else c.definition }}</textarea>
         <label class="field" for="c{{ c.id }}-q">Question for the applicant <small>(leave empty for interview only)</small></label>
-        <textarea id="c{{ c.id }}-q" name="question" rows="2" maxlength="{{ limits.QUESTION_MAX }}">{{ c.question }}</textarea>
+        <textarea id="c{{ c.id }}-q" name="question" rows="2" maxlength="{{ limits.QUESTION_MAX }}">{{ t.question if t else c.question }}</textarea>
         <label class="field" for="c{{ c.id }}-iq">Interview question <small>(optional)</small></label>
-        <textarea id="c{{ c.id }}-iq" name="interview_question" rows="2" maxlength="{{ limits.QUESTION_MAX }}">{{ c.interview_question }}</textarea>
+        <textarea id="c{{ c.id }}-iq" name="interview_question" rows="2" maxlength="{{ limits.QUESTION_MAX }}">{{ t.interview_question if t else c.interview_question }}</textarea>
+        {% set anchors = t.anchors if t else c.anchors %}
         {% for n in limits.LEVELS %}
         <label class="field" for="c{{ c.id }}-a{{ n }}">Level {{ n }}{{ ' (lowest)' if n == 1 else ' (highest)' if n == 4 else '' }}: what an answer at this level sounds like</label>
-        <textarea id="c{{ c.id }}-a{{ n }}" name="anchor{{ n }}" rows="2" maxlength="{{ limits.ANCHOR_MAX }}">{{ c.anchors[n - 1] if c.anchors|length >= n else '' }}</textarea>
+        <textarea id="c{{ c.id }}-a{{ n }}" name="anchor{{ n }}" rows="2" maxlength="{{ limits.ANCHOR_MAX }}">{{ anchors[n - 1] if anchors|length >= n else '' }}</textarea>
         {% endfor %}
-        {% if posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read the advice on flagged words, and the wording is about the job.</span></label>{% endif %}
-        {% if viewer.is_operator and posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="questions_ok" value="1"><span>If a question here uses a word the publish check holds back: {{ question_ok_label }}</span></label>{% endif %}
+        {% if posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"{{ ' checked' if t and t.wording_reviewed }}><span>I have read the advice on flagged words, and the wording is about the job.</span></label>{% endif %}
+        {% if viewer.is_operator and posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="questions_ok" value="1"{{ ' checked' if t and t.questions_ok }}><span>If a question here uses a word the publish check holds back: {{ question_ok_label }}</span></label>{% endif %}
         <div class="btnrow"><button class="btn btn-primary sm" type="submit">Save criterion</button></div>
       </form>
       <form method="post" action="{{ url_for('people.hiring_criterion_remove', posting_id=posting.id, criterion_id=c.id) }}" class="btnrow"><button class="btn btn-secondary sm" type="submit">Remove this criterion</button></form>
@@ -162,24 +168,26 @@
   {% elif not has_model %}
   <p class="fine-line">No standards are loaded yet, so criteria are written by hand. The Operator loads them under Our standards.</p>
   {% endif %}
-  <details class="card tool" id="add-own" style="margin-top:12px;">
+  {% set t = typed.raw if typed and typed.id == 'new' else none %}
+  <details class="card tool" id="add-own" style="margin-top:12px;"{{ ' open' if t }}>
     <summary class="row"><span class="row-main"><span class="row-title">Write a criterion by hand</span><span class="row-meta">Something this job needs that Our standards doesn't cover.</span></span>{{ icon('chev', 'chev') }}</summary>
     <div class="tool-body">
-      <form method="post" action="{{ url_for('people.hiring_criterion_add', posting_id=posting.id) }}">
+      {% if t %}{{ problem_list(typed.problems, 'Not added yet. What you typed is still in the boxes below.') }}{% endif %}
+      <form method="post" action="{{ url_for('people.hiring_criterion_add', posting_id=posting.id) }}#add-own">
         <label class="field" for="n-name" style="margin-top:0;">Name</label>
-        <input id="n-name" name="name" type="text" maxlength="{{ limits.CRITERION_NAME_MAX }}">
+        <input id="n-name" name="name" type="text" maxlength="{{ limits.CRITERION_NAME_MAX }}" value="{{ t.name if t else '' }}">
         <label class="field" for="n-def">What it means, in a sentence about the job</label>
-        <textarea id="n-def" name="definition" rows="3" maxlength="{{ limits.DEFINITION_MAX }}"></textarea>
+        <textarea id="n-def" name="definition" rows="3" maxlength="{{ limits.DEFINITION_MAX }}">{{ t.definition if t else '' }}</textarea>
         <label class="field" for="n-q">Question for the applicant <small>(leave empty for interview only)</small></label>
-        <textarea id="n-q" name="question" rows="2" maxlength="{{ limits.QUESTION_MAX }}"></textarea>
+        <textarea id="n-q" name="question" rows="2" maxlength="{{ limits.QUESTION_MAX }}">{{ t.question if t else '' }}</textarea>
         <label class="field" for="n-iq">Interview question <small>(optional)</small></label>
-        <textarea id="n-iq" name="interview_question" rows="2" maxlength="{{ limits.QUESTION_MAX }}"></textarea>
+        <textarea id="n-iq" name="interview_question" rows="2" maxlength="{{ limits.QUESTION_MAX }}">{{ t.interview_question if t else '' }}</textarea>
         {% for n in limits.LEVELS %}
         <label class="field" for="n-a{{ n }}">Level {{ n }}{{ ' (lowest)' if n == 1 else ' (highest)' if n == 4 else '' }}: what an answer at this level sounds like <small>(optional)</small></label>
-        <textarea id="n-a{{ n }}" name="anchor{{ n }}" rows="2" maxlength="{{ limits.ANCHOR_MAX }}"></textarea>
+        <textarea id="n-a{{ n }}" name="anchor{{ n }}" rows="2" maxlength="{{ limits.ANCHOR_MAX }}">{{ t.anchors[n - 1] if t and t.anchors|length >= n else '' }}</textarea>
         {% endfor %}
-        {% if posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"><span>I have read the advice on flagged words, and the wording is about the job.</span></label>{% endif %}
-        {% if viewer.is_operator and posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="questions_ok" value="1"><span>If a question here uses a word the publish check holds back: {{ question_ok_label }}</span></label>{% endif %}
+        {% if posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="wording_reviewed" value="1"{{ ' checked' if t and t.wording_reviewed }}><span>I have read the advice on flagged words, and the wording is about the job.</span></label>{% endif %}
+        {% if viewer.is_operator and posting.status == 'open' %}<label class="checkline"><input type="checkbox" name="questions_ok" value="1"{{ ' checked' if t and t.questions_ok }}><span>If a question here uses a word the publish check holds back: {{ question_ok_label }}</span></label>{% endif %}
         <div class="btnrow"><button class="btn btn-primary sm" type="submit">Add criterion</button></div>
       </form>
     </div>

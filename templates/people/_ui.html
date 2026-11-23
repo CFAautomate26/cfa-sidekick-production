@@ -29,6 +29,31 @@
 .crumbs a { display: inline-flex; align-items: center; min-height: 44px; }
 .seg a { min-height: 44px; }
 .checkline { min-height: 44px; align-items: center; }
+/* Links that stand alone and are tapped like buttons get the same height (a link inside a
+   sentence stays as tall as its line). */
+.sec-head .more, .chip, .btnrow a.textlink, table.plain td a, a.pp-go { display: inline-flex; align-items: center;
+  min-height: 44px; }
+/* The time box gets the look of every other box (the shared form rule lists no time type). */
+input[type=time] { width: 100%; min-height: 48px; font: inherit; font-size: 1rem; color: var(--text-strong);
+  background: #fff; border: 1px solid var(--gray-400); border-radius: var(--r-lg); padding: 11px 14px;
+  letter-spacing: 0; }
+/* A message stays on screen while the page scrolls, so the reason a save was refused is
+   beside the form the page reopened at. "Hide" is a tick box styled as a link: no scripts. */
+.pp-flashes { position: sticky; top: 8px; z-index: 20; max-height: 50vh; overflow-y: auto; margin-top: 14px;
+  border-radius: var(--r-xl); box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14); background: var(--tan-100); }
+.pp-flashes .flash { margin: 0; border-radius: 0; }
+.pp-flashes .flash + .flash { margin-top: 0; padding-top: 0; }
+.pp-flash-x { display: flex; align-items: center; justify-content: flex-end; min-height: 44px; padding: 0 14px;
+  color: var(--tan-ink); font-size: 0.8125rem; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.pp-flash-hide:checked + .pp-flashes { display: none; }
+.pp-flash-hide:focus-visible + .pp-flashes .pp-flash-x { outline: 2px solid var(--info); outline-offset: -2px; }
+/* ...and a page that opens at a "#..." place stops a little short of it, so the message does
+   not sit on top of the heading or form it is about. */
+.pp-flashes ~ [id], .pp-flashes ~ * [id] { scroll-margin-top: 10rem; }
+@media print { .pp-flashes { position: static; box-shadow: none; max-height: none; } }
+/* Words in a table stay whole: a table too wide for a phone scrolls inside its .pp-scroll
+   card (the body rule would break "Who" into "Wh o" to make a column fit). */
+.pp-scroll table.plain th, .pp-scroll table.plain td { overflow-wrap: normal; }
 .pp-levels { display: flex; flex-wrap: wrap; gap: 6px; }
 .pp-level { display: inline-flex; align-items: center; gap: 4px; padding: 6px 11px; border-radius: var(--r-full);
   font-size: 0.8125rem; font-weight: 700; line-height: 1.2; color: var(--text-muted); background: #fff;

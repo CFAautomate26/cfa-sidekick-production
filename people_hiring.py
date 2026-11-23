@@ -82,7 +82,9 @@ Rules for this task, on top of the rules above:
 - One criterion at a time. No total, no average and no overall view. Never say whether the applicant should be interviewed, hired, moved on or turned down."""
 
 # Words in an applicant's own answer that may mean health or accommodation:
-# such an answer is never sent to the AI service.
+# such an answer is never sent to the AI service. Health is matched by
+# what the word-list check labels it (ai_payload), so the health patterns
+# ("legally blind", "can't lift", "hurt my back") hold an answer back too.
 _NEVER_SEND = set(people_ai.LANGUAGE_TERMS["health"]) | {
     "accommodation", "accommodations", "accommodate", "wsib", "workers comp", "sick day",
     "sick days", "called in sick", "bereavement", "human rights"}
@@ -242,7 +244,10 @@ def ai_payload(record: dict) -> dict:
         body = record["answers"].get(c["id"])
         if not body:
             continue
-        if any(f["term"] in _NEVER_SEND for f in people_ai.language_check(body)):
+        # Held back by what the check found it to be about (health, under any
+        # listed word or pattern), or by a listed accommodation or leave word.
+        if any(f["key"] == "health" or f["term"] in _NEVER_SEND
+               for f in people_ai.language_check(body)):
             withheld.append(c["id"])
             continue
         criteria.append({"criterion_id": c["id"], "name": c["name"], "definition": c["definition"],
@@ -487,9 +492,11 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
         flash("Draft saved. Add what you will score applications on next.")
         return to_posting(posting_id, "#criteria")
 
-    @bp.route("/hiring/postings/<int:posting_id>")
-    @hiring
-    def hiring_posting(posting_id):
+    def posting_page(posting_id, typed: dict | None = None, status: int = 200):
+        """The posting page. `typed` is for a criterion form that was
+        refused: {"id": the criterion's id, or "new", "raw": what the form
+        sent, "problems": why}. That criterion's fold comes back open with
+        what was typed still in its boxes and the reasons beside it."""
         posting = hdb.get_posting(posting_id)
         if not posting:
             return missing("people.hiring_postings")
@@ -508,7 +515,25 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             has_model=bool(model), ai_setting=people_db.setting_on("ai_hiring"), limits=hdb,
             wages_to_check=people_db.wages_to_check() if posting["status"] != "closed" else [],
             public_url=url_for("careers.posting", slug=posting["slug"], _external=True)
-            if "careers" in current_app.blueprints else "")
+            if "careers" in current_app.blueprints else "", typed=typed or {}), status
+
+    @bp.route("/hiring/postings/<int:posting_id>")
+    @hiring
+    def hiring_posting(posting_id):
+        return posting_page(posting_id)
+
+    def criterion_refused(posting_id, criterion_id, raw: dict, problems: list[str]):
+        """A hand-written criterion that could not be saved: the page comes
+        straight back (no redirect), so nothing typed is lost."""
+        posting = hdb.get_posting(posting_id)
+        if not posting or posting["status"] == "closed" or not (
+                criterion_id == "new" or any(c["id"] == criterion_id for c in posting["criteria"])):
+            _say(problems)                       # there is no form on the page to put it back in
+            return to_posting(posting_id, "#criteria")
+        kept = {**raw, "anchors": list(raw.get("anchors") or []),
+                "wording_reviewed": _ticked("wording_reviewed"), "questions_ok": _ticked("questions_ok")}
+        return posting_page(posting_id, typed={"id": criterion_id, "raw": kept, "problems": problems[:8]},
+                            status=400)
 
     @bp.route("/hiring/postings/<int:posting_id>/edit", methods=["GET", "POST"])
     @hiring
@@ -549,6 +574,8 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             raw = _criterion_form(request.form)
         problems = hdb.add_criterion(posting_id, raw, people.actor(), reviewed=_ticked("wording_reviewed"),
                                      questions_ok=_questions_ok())
+        if problems and not key:
+            return criterion_refused(posting_id, "new", raw, problems)
         if problems:
             _say(problems)
         else:
@@ -564,11 +591,10 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
         problems = hdb.save_criterion(criterion_id, posting_id, raw, people.actor(),
                                       reviewed=_ticked("wording_reviewed"), questions_ok=_questions_ok())
         if problems:
-            _say(problems)
-        else:
-            _log("criterion changed", "posting", posting_id)
-            flash("Criterion saved.")
-            _questions_ok_logged(posting_id, raw, criterion_id)
+            return criterion_refused(posting_id, criterion_id, raw, problems)
+        _log("criterion changed", "posting", posting_id)
+        flash("Criterion saved.")
+        _questions_ok_logged(posting_id, raw, criterion_id)
         return to_posting(posting_id, f"#c{criterion_id}")
 
     @bp.route("/hiring/postings/<int:posting_id>/criteria/<int:criterion_id>/question-ok", methods=["POST"])
@@ -710,9 +736,11 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             shown.append(event)
         return shown
 
-    @bp.route("/hiring/candidates/<int:application_id>")
-    @hiring
-    def hiring_candidate(application_id):
+    def candidate_page(application_id, interview: dict | None = None, status: int = 200):
+        """The candidate page. `interview` is for an interview form that
+        was refused: what was entered, and why it could not be saved, go
+        back into the form on the page itself (never into the address,
+        which is written to the server's request log)."""
         record = hdb.candidate(application_id)
         if not record:
             return missing()
@@ -728,7 +756,13 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
             reasons=hdb.NOT_SELECTED_REASONS, stage_labels=hdb.STAGE_LABELS,
             outcome_labels=hdb.OUTCOME_LABELS, modes=hdb.INTERVIEW_MODES, days=hdb.DAYS,
             dayparts=hdb.DAYPARTS, levels=hdb.LEVELS, clocks=hdb.clocks_for(application_id),
-            ai=ai_view(record, scores), today=shift_db.now_local().date().isoformat(), limits=hdb)
+            ai=ai_view(record, scores), today=shift_db.now_local().date().isoformat(), limits=hdb,
+            iv=interview or {}), status
+
+    @bp.route("/hiring/candidates/<int:application_id>")
+    @hiring
+    def hiring_candidate(application_id):
+        return candidate_page(application_id)
 
     def acting_on(application_id):
         """The application a form post is about, or None (already answered
@@ -798,11 +832,12 @@ def register(bp) -> None:  # noqa: C901 (one flat list of small views)
                                     request.form.get("at_time", ""), request.form.get("mode", ""),
                                     request.form.get("interviewer", ""), people.actor())
         if problem:
-            flash(problem)
-            # What was entered comes back with the form, open, to be put right.
-            kept = {f"iv_{key}": request.form.get(key, "")[:20] for key in ("on_date", "at_time", "mode")}
-            return redirect(url_for("people.hiring_candidate", application_id=application_id, **kept)
-                            + "#add-interview")
+            # What was entered comes back in the form, open, with the reason
+            # beside it: the page is drawn from this request, so nothing
+            # typed is put in an address (and so in the request log).
+            kept = {key: request.form.get(key, "")[:80]
+                    for key in ("on_date", "at_time", "mode", "interviewer")}
+            return candidate_page(application_id, interview={**kept, "problem": problem}, status=400)
         _log("interview added", "application", application_id)
         flash("Interview added. Record what happened once it has been held.")
         return to_candidate(application_id, "#interviews")

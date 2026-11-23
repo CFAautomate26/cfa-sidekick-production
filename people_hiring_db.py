@@ -25,6 +25,7 @@ Nothing in this file moves, rejects or ranks an applicant on its own.
 
 import json
 import re
+import unicodedata
 from contextlib import closing
 from datetime import date, datetime, timedelta
 from statistics import median
@@ -209,6 +210,11 @@ HEARD_LABELS = dict(HEARD_FROM)
 
 INTERVIEW_MODES = ("in person", "phone", "video")
 INTERVIEW_OUTCOMES = ("scheduled", "attended", "no-show", "cancelled", "rescheduled")
+# An interview that counts as held when deciding what to keep: marked
+# Attended, or logged and never marked (a leader who forgot to record the
+# outcome must not cost the store a record the law asks for). One marked
+# did not show, cancelled or rescheduled was not held.
+INTERVIEW_ON_RECORD = ("attended", "scheduled")
 OUTCOME_LABELS = {"scheduled": "Scheduled", "attended": "Attended", "no-show": "Did not show",
                   "cancelled": "Cancelled", "rescheduled": "Rescheduled"}
 NOTICE_KINDS = {"offer": "Offer", "not-moving-forward": "Not moving forward",
@@ -554,14 +560,18 @@ def document_text(view: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def _slug_base(title: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:50].strip("-")
+    # Accented letters are folded to plain ones ("Équipier" gives "equipier"), not dropped.
+    plain = unicodedata.normalize("NFKD", str(title)).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")[:50].strip("-")
     return slug if len(slug) >= 2 else "job"
 
 
-def _free_slug(conn, title: str) -> str:
+def _free_slug(conn, title: str, but: int | None = None) -> str:
+    """The address for this title: its plain form, or that with -2, -3...
+    when another posting (any but the one with id `but`) already has it."""
     base = _slug_base(title)
     slug, n = base, 1
-    while conn.execute("SELECT 1 FROM hr_postings WHERE slug=?", (slug,)).fetchone():
+    while conn.execute("SELECT 1 FROM hr_postings WHERE slug=? AND id IS NOT ?", (slug, but)).fetchone():
         n += 1
         slug = f"{base}-{n}"
     return slug
@@ -578,10 +588,12 @@ def _slug_follows_title(conn, posting_id: int) -> None:
     if not row or row["status"] != "draft" or conn.execute(
             "SELECT 1 FROM hr_snapshots WHERE posting_id=? LIMIT 1", (posting_id,)).fetchone():
         return
-    base = _slug_base(row["title"])
-    if row["slug"] == base or re.fullmatch(re.escape(base) + r"-[0-9]+", row["slug"]):
-        return
-    conn.execute("UPDATE hr_postings SET slug=? WHERE id=?", (_free_slug(conn, row["title"]), posting_id))
+    # Exactly the address the title gives now, counting the other postings.
+    # (Not "the title's address plus any number": a first title that ended
+    # in a number, "Team Member 16+", would keep its "-16" for good.)
+    wanted = _free_slug(conn, row["title"], but=posting_id)
+    if row["slug"] != wanted:
+        conn.execute("UPDATE hr_postings SET slug=? WHERE id=?", (wanted, posting_id))
 
 
 def _read_money(raw, label: str, problems: list[str]) -> float | None:
@@ -786,15 +798,29 @@ NEVER_ASK = (
 # Words that are fine in a description but hold a question back.
 QUESTION_ONLY = (
     ("age", ("grade", "years old", "student", "students")),
-    ("pregnancy or family", ("single", "parents")),
+    ("pregnancy or family", ("single", "parents", "at home", "little one", "little ones",
+                             "a partner", "your partner")),
     ("religion", ("christmas", "easter")),
-    ("citizenship or where someone is from", ("country", "canadian", "language")),
-    ("health or disability", ("limitation", "physically able", "drugs", "do you drink")),
+    ("citizenship or where someone is from", ("country", "canadian", "canada", "language",
+                                              "grow up", "grew up")),
+    ("health or disability", ("limitation", "physically able", "drugs", "do you drink", "your back",
+                              "take any tablets", "taking any tablets", "take tablets",
+                              "taking tablets")),
     ("a record of offences", ("police", "offence", "offense", "crime")),
     ("a SIN, a photo or a licence", ("tall", "weigh", "weight", "height", "postal code")),
+    ("a licence or a car", ("have a car", "own a car", "your car", "your own car", "do you drive")),
+    ("a claim or a complaint someone has made", ("made a claim", "make a claim", "filed a claim",
+                                                 "a claim against")),
 )
+# Asking whether someone can do the duties "with or without accommodation"
+# is the question the law allows, so these words are held under their own
+# sentence, not as "leave and complaints" (the review-note heading).
+_ACCOMMODATION_WORDS = ("accommodation", "accommodations", "accommodate")
 _AGE_NUMBER = re.compile(r"\b(?:over|under|at\s+least|older\s+than|younger\s+than)\s+\d{1,2}\b", re.I)
 QUESTION_OK_LABEL = "This question is about a guest or the work, not about the applicant."
+CONFIRM_HERE = "the Operator can confirm that here, under the publish check."
+CONFIRM_ON_FORM = ("ask the Operator to make this change: on a live posting they tick the box on "
+                   "the criterion form as they save it.")
 QUESTION_WHICH = {"question": ("question for applicants", "question_ok"),
                   "interview": ("interview question", "interview_ok")}
 NEVER_ASK_ADVICE = ("An application may not ask about this, and a posting may not screen on it. "
@@ -850,8 +876,9 @@ def question_hits(text) -> list[tuple[str, str, bool]]:
     number = _AGE_NUMBER.search(text)
     if number:
         hits.append((" ".join(number.group(0).split()).lower(), "age", False))
-    hits += [(f["term"], f["category"].lower(), False) for f in people_ai.language_check(text)
-             if f["key"] in _GROUNDS]
+    hits += [(f["term"], "health or disability" if f["term"] in _ACCOMMODATION_WORDS
+              else f["category"].lower(), False)
+             for f in people_ai.language_check(text) if f["key"] in _GROUNDS]
     out, seen = [], set()
     for term, about, phrase in sorted(hits, key=lambda hit: not hit[2]):     # the phrases first
         if term.casefold() not in seen:
@@ -879,13 +906,19 @@ def question_blocks(posting: dict) -> list[dict]:
             name = c.get("name") or "a criterion"
             said = (f"asks about {about} (“{term}”)" if phrase
                     else f"uses “{term}”, which can ask about {about}")
+            if term in _ACCOMMODATION_WORDS:
+                problem = (f"The {label} under “{name}” {said}. A question may ask whether "
+                           "someone can do the duties of the job with or without accommodation. "
+                           "It may not ask what they need, or why. If this one only asks about "
+                           "the duties, " + CONFIRM_HERE)
+            else:
+                problem = (f"The {label} under “{name}” {said}. An application or an interview "
+                           "may not ask that. Ask about the work instead. If the question is "
+                           "about a guest or the work and not about the applicant, "
+                           + CONFIRM_HERE)
             blocks.append({
                 "criterion_id": c.get("id"), "which": which, "name": name, "term": term,
-                "about": about, "text": text,
-                "problem": (f"The {label} under “{name}” {said}. An application or an interview "
-                            "may not ask that. Ask about the work instead. If the question is "
-                            "about a guest or the work and not about the applicant, the "
-                            "Operator can confirm that here, under the publish check.")})
+                "about": about, "text": text, "problem": problem})
     return blocks
 
 
@@ -1004,8 +1037,11 @@ def _changed_while_open(conn, posting_id: int, by: str, reviewed: bool, before: 
     conf = _settings(conn)
     problems = _problems(posting, posting["criteria"], conf)
     if problems:
+        # The change was not saved, so there is nothing on the page to confirm:
+        # a held question on a live posting goes in with the Operator's tick on
+        # the criterion form itself.
         raise _Refused(["This posting is live, so it has to keep passing the publish check."]
-                       + problems)
+                       + [p.replace(CONFIRM_HERE, CONFIRM_ON_FORM) for p in problems])
     fresh = sorted({flag["term"] for flag in wording_flags(posting)} - before)
     if fresh and not reviewed:
         raise _Refused(["This posting is live, and the change adds words to check ("
@@ -1935,6 +1971,11 @@ def clock_time(text) -> str | None:
         if not 1 <= hour <= 12:
             return None
         hour = hour % 12 + (12 if half.startswith("p") else 0)
+    elif 1 <= hour <= 6 and len(match.group(1)) == 1:
+        # "2:30" typed by hand with no am or pm is almost never half past two
+        # at night, and the invitation would say 02:30: ask. (A time picker
+        # sends two digits, "02:30", and that is taken as it stands.)
+        return None
     return f"{hour:02d}:{minute:02d}" if hour <= 23 else None
 
 
@@ -2218,9 +2259,9 @@ def clocks_for(application_id: int) -> list[dict]:
 def log_notice(application_id: int, kind: str, method: str, said: str, given_on: str,
                by: str) -> str | None:
     """Record what an applicant was told about the hiring decision, how and
-    when. For an applicant who was interviewed the record keeps their name
-    with it for three years; for one who never was, it goes when their
-    details are removed (see purge_all). Returns None, or why it could not
+    when. For an applicant with an interview on record (see purge_all) the
+    record keeps their name with it for three years; for one with none, it
+    goes when their details are removed. Returns None, or why it could not
     be saved."""
     if kind not in NOTICE_KINDS:
         return "Choose what the applicant was told."
@@ -2485,9 +2526,13 @@ def purge_all(by: str) -> tuple[int, int]:
     was interviewed stays, with their name, until three full years after
     the day it was given (after that the wording and the name go, in this
     same run, unless the application is on hold): that is the record the
-    law asks for. A notice logged for someone who was never interviewed is
-    not that record, and applicants are told their name goes with the rest:
-    its wording and the name are removed with the application. Hired
+    law asks for. "Interviewed" means an interview is on record for them
+    that was not called off: marked Attended, or logged and never marked
+    (INTERVIEW_ON_RECORD). A notice logged for someone who was never
+    interviewed (no interview logged, or only ones marked did not show,
+    cancelled or rescheduled) is not that record, and applicants are told
+    their name goes with the rest: its wording and the name are removed
+    with the application. Hired
     applicants, applications on hold, postings and the kept copies of
     postings are never touched. Returns (applications purged, notices more
     than three years old whose wording was removed)."""
@@ -2519,11 +2564,14 @@ def purge_all(by: str) -> tuple[int, int]:
         # notice given before this day three years ago goes. A record on
         # hold is never removed, and that covers its notices.
         # A notice to someone who never had an interview is not the
-        # three-year record: it goes with the rest of their details.
+        # three-year record: it goes with the rest of their details. "Had
+        # an interview" is read widely on purpose (INTERVIEW_ON_RECORD):
+        # one that was logged and never marked keeps the notice too.
         conn.execute(
             "UPDATE hr_notices SET said='', given_to='' WHERE (said != '' OR given_to != '') "
             "AND application_id IN (SELECT id FROM hr_applications WHERE purged_at IS NOT NULL AND hold=0) "
-            "AND application_id NOT IN (SELECT application_id FROM hr_interviews WHERE outcome='attended')")
+            "AND application_id NOT IN (SELECT application_id FROM hr_interviews WHERE outcome IN (%s))"
+            % ",".join("?" * len(INTERVIEW_ON_RECORD)), INTERVIEW_ON_RECORD)
         cutoff = _add_months(today, -NOTICE_KEEP_MONTHS).isoformat()
         notices = conn.execute(
             "UPDATE hr_notices SET said='', given_to='' WHERE given_on < ? AND (said != '' OR given_to != '') "
